@@ -34,12 +34,12 @@ async function getTempsLive(): Promise<TempReading[]> {
     const data = series?.data ?? [];
     const category = t.category ?? [];
     const last = data[data.length - 1];
-    if (last) {
+    if (last && last.value != null && last.value !== "") {
       out.push({
         machine_name: machineName,
         reading_time: category[category.length - 1] ?? new Date().toISOString(),
         series_name: series?.seriesname ?? "temperature",
-        value: Number(last.value ?? 0),
+        value: Number(last.value),
       });
     }
   }
@@ -51,16 +51,20 @@ export async function getLatestTemperatures(): Promise<{ temps: TempReading[]; s
     try {
       const supabase = await createServiceClient();
       const { data, error } = await supabase.from("v_latest_temps").select("*");
-      if (!error && data && data.length) return { temps: data as TempReading[], source: "supabase" };
+      // Filter out rows with no reading (left join yields null value for machines without temps).
+      const rows = ((data as TempReading[]) ?? []).filter((t) => t.value != null);
+      if (!error && rows.length) return { temps: rows, source: "supabase" };
     } catch {
       /* fall through */
     }
   }
-  try {
-    const live = await getTempsLive();
-    if (live.length) return { temps: live, source: "huaxin" };
-  } catch (e) {
-    console.error("[temps] Huaxin live failed:", e);
+  if (getConfigFromEnv()) {
+    try {
+      return { temps: await getTempsLive(), source: "huaxin" };
+    } catch (e) {
+      console.error("[temps] Huaxin live failed:", e);
+      return { temps: [], source: "huaxin" };
+    }
   }
   return { temps: SAMPLE, source: "sample" };
 }

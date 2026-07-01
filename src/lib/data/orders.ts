@@ -20,22 +20,23 @@ const SAMPLE: Order[] = [
   { id: "4", order_time: "2026-07-01T08:15:00Z", machine_name: "B84MAX-003", device_imei: "867395075018174", order_code: "8692580324200221781047652217", order_state: "FAILURE", price: 0, product_name: "Soft Serve · Oreo" },
 ];
 
-const STATE_MAP: Record<string, string> = {
-  "0": "PENDING",
-  "1": "PAID",
-  "2": "MAKING",
-  "3": "COMPLETE",
-};
+const STATE_MAP: Record<string, string> = { "0": "PENDING", "1": "PAID", "2": "MAKING", "3": "COMPLETE" };
+
+function ymd(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
 
 async function getOrdersLive(): Promise<Order[]> {
   const cfg = getConfigFromEnv();
   if (!cfg) return [];
   const devices = await listDevices(cfg);
+  const began = ymd(new Date(Date.now() - 30 * 86_400_000));
+  const end = ymd(new Date());
   const out: Order[] = [];
   for (const d of devices) {
     if (!d.deviceImei) continue;
     const machineName = (d.deviceLabel as string) || d.deviceName || d.deviceImei;
-    const ords = await listOrders(cfg, d.deviceImei);
+    const ords = await listOrders(cfg, d.deviceImei, began, end);
     for (const o of ords) {
       out.push({
         id: o.orderCode ?? `${d.deviceImei}-${Math.random()}`,
@@ -49,9 +50,7 @@ async function getOrdersLive(): Promise<Order[]> {
       });
     }
   }
-  return out
-    .sort((a, b) => +new Date(b.order_time) - +new Date(a.order_time))
-    .slice(0, 50);
+  return out.sort((a, b) => +new Date(b.order_time) - +new Date(a.order_time)).slice(0, 50);
 }
 
 export async function getOrders(): Promise<{ orders: Order[]; source: Source }> {
@@ -68,11 +67,13 @@ export async function getOrders(): Promise<{ orders: Order[]; source: Source }> 
       /* fall through */
     }
   }
-  try {
-    const live = await getOrdersLive();
-    if (live.length) return { orders: live, source: "huaxin" };
-  } catch (e) {
-    console.error("[orders] Huaxin live failed:", e);
+  if (getConfigFromEnv()) {
+    try {
+      return { orders: await getOrdersLive(), source: "huaxin" };
+    } catch (e) {
+      console.error("[orders] Huaxin live failed:", e);
+      return { orders: [], source: "huaxin" };
+    }
   }
   return { orders: SAMPLE, source: "sample" };
 }

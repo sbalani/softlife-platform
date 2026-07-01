@@ -51,6 +51,13 @@ export default async function OrdersPage() {
                 </td>
               </tr>
             ))}
+            {orders.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-5 py-10 text-center text-taupe">
+                  No orders in the last 30 days.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

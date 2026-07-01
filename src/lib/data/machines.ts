@@ -61,11 +61,13 @@ export async function getMachines(): Promise<{ machines: Machine[]; source: Sour
       /* fall through */
     }
   }
-  try {
-    const live = await getMachinesLive();
-    if (live.length) return { machines: live, source: "huaxin" };
-  } catch (e) {
-    console.error("[machines] Huaxin live failed:", e);
+  if (getConfigFromEnv()) {
+    try {
+      return { machines: await getMachinesLive(), source: "huaxin" };
+    } catch (e) {
+      console.error("[machines] Huaxin live failed:", e);
+      return { machines: [], source: "huaxin" };
+    }
   }
   return { machines: SAMPLE, source: "sample" };
 }

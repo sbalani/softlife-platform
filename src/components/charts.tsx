@@ -30,6 +30,9 @@ export function AreaChart({
   data: { label: string; value: number }[];
   color?: string;
 }) {
+  if (!data.length) {
+    return <div className="flex h-32 items-center justify-center text-sm text-taupe">No data</div>;
+  }
   const w = 360;
   const h = 130;
   const pad = 10;

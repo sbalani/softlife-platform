@@ -24,6 +24,20 @@ export type HuaxinDevice = {
   [k: string]: unknown;
 };
 
+export type HuaxinOrder = {
+  orderCode?: string;
+  outTradeNo?: string;
+  price?: string | number;
+  amount?: string | number;
+  nums?: string | number;
+  status?: string | number;
+  payType?: string;
+  payTime?: string;
+  createTime?: string;
+  productName?: string;
+  [k: string]: unknown;
+};
+
 type Envelope = {
   code?: number;
   msg?: string;
@@ -33,7 +47,9 @@ type Envelope = {
 };
 
 const AUTH_TTL_MS = 15 * 60 * 1000;
+const DEVICES_TTL_MS = 60 * 1000; // cache the device list for 60s across pages
 let session: { auth: string; jsid: string; at: number } | null = null;
+let devicesCache: { at: number; rows: HuaxinDevice[] } | null = null;
 
 export function getConfigFromEnv(): HuaxinConfig | null {
   const baseUrl = process.env.HUAXIN_BASE_URL;
@@ -123,14 +139,22 @@ export async function call(
   return data;
 }
 
-export async function listDevices(cfg: HuaxinConfig): Promise<HuaxinDevice[]> {
+function rowsFrom(payload: unknown): HuaxinDevice[] {
+  if (Array.isArray(payload)) return payload;
+  const obj = payload as { list?: HuaxinDevice[]; devices?: HuaxinDevice[] } | null;
+  return obj?.list ?? obj?.devices ?? [];
+}
+
+export async function listDevices(
+  cfg: HuaxinConfig,
+  opts: { force?: boolean } = {},
+): Promise<HuaxinDevice[]> {
+  if (!opts.force && devicesCache && Date.now() - devicesCache.at < DEVICES_TTL_MS) {
+    return devicesCache.rows;
+  }
   const data = await call("/machine/cloud/api/devices", cfg);
-  const payload = data.data;
-  const rows: HuaxinDevice[] = Array.isArray(payload)
-    ? payload
-    : (payload as { list?: HuaxinDevice[]; devices?: HuaxinDevice[] })?.list ??
-      (payload as { devices?: HuaxinDevice[] })?.devices ??
-      [];
+  const rows = rowsFrom(data.data);
+  devicesCache = { at: Date.now(), rows };
   return rows;
 }
 
@@ -149,6 +173,25 @@ export async function pullTemperatures(
     category?: string[];
     dataset?: { seriesname?: string; data?: { value?: string }[] }[];
   };
+}
+
+export async function listOrders(
+  cfg: HuaxinConfig,
+  deviceImei: string,
+  began?: string,
+  end?: string,
+  page = 1,
+): Promise<HuaxinOrder[]> {
+  const data = await call("/machine/cloud/api/device/orders", cfg, {
+    device_imei: deviceImei,
+    beganTime: began ?? "",
+    endTime: end ?? "",
+    page: String(page),
+  });
+  const payload = data.data;
+  if (Array.isArray(payload)) return payload as HuaxinOrder[];
+  const obj = payload as { list?: HuaxinOrder[]; orders?: HuaxinOrder[] } | null;
+  return obj?.list ?? obj?.orders ?? [];
 }
 
 export function isOrderWebhook(body: unknown): boolean {

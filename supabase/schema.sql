@@ -179,6 +179,8 @@ create table if not exists public.huaxin_faults (
 create or replace view public.v_machines as
 select
   m.id, m.name, m.ref, m.device_imei, m.state, m.last_full_clean_date,
+  m.created_at,
+  (m.huaxin_last_sync is not null and m.huaxin_last_sync > now() - interval '2 hours') as net_online,
   cust.name   as customer,
   wh.name     as warehouse,
   prod.name   as base_product,

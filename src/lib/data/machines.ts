@@ -12,6 +12,8 @@ export type Machine = {
   last_full_clean_date: string | null;
   ingredient_count: number;
   latest_temp: number | null;
+  created_at: string | null;
+  net_online: boolean;
 };
 
 const SAMPLE: Machine[] = [
@@ -27,6 +29,8 @@ const SAMPLE: Machine[] = [
     last_full_clean_date: "2026-06-18T08:00:00Z",
     ingredient_count: 3,
     latest_temp: -4.2,
+    created_at: "2026-01-15T09:00:00Z",
+    net_online: true,
   },
   {
     id: "102",
@@ -40,6 +44,8 @@ const SAMPLE: Machine[] = [
     last_full_clean_date: "2026-06-21T07:30:00Z",
     ingredient_count: 2,
     latest_temp: -3.8,
+    created_at: "2026-02-02T09:00:00Z",
+    net_online: true,
   },
   {
     id: "103",
@@ -53,6 +59,8 @@ const SAMPLE: Machine[] = [
     last_full_clean_date: "2026-06-10T09:15:00Z",
     ingredient_count: 3,
     latest_temp: null,
+    created_at: "2026-03-21T09:00:00Z",
+    net_online: false,
   },
 ];
 

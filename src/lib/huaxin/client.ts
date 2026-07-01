@@ -88,17 +88,23 @@ async function request(
   headers?: Record<string, string>,
 ): Promise<Envelope> {
   const url = cfg.baseUrl.replace(/\/$/, "") + path;
-  const init: RequestInit & { dispatcher?: unknown } = {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...(headers ?? {}) },
-    body: JSON.stringify({ ...commonParams(cfg), ...(extra ?? {}) }),
-  };
+  const body = JSON.stringify({ ...commonParams(cfg), ...(extra ?? {}) });
+  const reqHeaders = { "Content-Type": "application/json", ...(headers ?? {}) };
+
   if (cfg.verifySsl === false) {
-    // UAT certificate is currently expired — bypass only when explicitly disabled.
-    const { Agent } = await import("undici");
-    init.dispatcher = new Agent({ connect: { rejectUnauthorized: false } });
+    // Use undici's own fetch (not the Next.js-patched global) so the dispatcher
+    // — which disables TLS verification for the expired UAT cert — is honoured.
+    const undici = await import("undici");
+    const res = await undici.fetch(url, {
+      method: "POST",
+      headers: reqHeaders,
+      body,
+      dispatcher: new undici.Agent({ connect: { rejectUnauthorized: false } }),
+    });
+    return (await res.json()) as Envelope;
   }
-  const res = await fetch(url, init);
+
+  const res = await fetch(url, { method: "POST", headers: reqHeaders, body });
   return (await res.json()) as Envelope;
 }
 

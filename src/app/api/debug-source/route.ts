@@ -12,12 +12,15 @@ export async function GET() {
 
   let huaxinDeviceCount: number | null = null;
   let huaxinError: string | null = null;
+  let huaxinCause: string | null = null;
   if (cfg) {
     try {
       const devices = await listDevices(cfg);
       huaxinDeviceCount = devices.length;
     } catch (e) {
-      huaxinError = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+      const err = e as { name?: string; message?: string; cause?: { code?: string; message?: string } };
+      huaxinError = err.name ? `${err.name}: ${err.message}` : String(e);
+      if (err.cause) huaxinCause = `${err.cause.code ?? ""} ${err.cause.message ?? ""}`.trim();
     }
   }
 
@@ -30,6 +33,7 @@ export async function GET() {
       huaxinVerifySsl: cfg?.verifySsl ?? null,
       huaxinDeviceCount,
       huaxinError,
+      huaxinCause,
       wouldUse: supabaseConfigured ? "supabase" : cfg ? "huaxin" : "sample",
     },
     { status: 200 },

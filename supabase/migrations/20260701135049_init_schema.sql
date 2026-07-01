@@ -1,37 +1,24 @@
 -- ============================================================================
--- SoftLife Platform — Supabase schema (multi-tenant)
--- Run in the Supabase SQL editor (or `supabase db push`). Safe to re-run.
+-- SoftLife Platform — initial schema (multi-tenant)
+-- Order matters: tables → views → functions → RLS → trigger
 -- ============================================================================
-
--- ---------- helpers ----------------------------------------------------------
-create or replace function public.current_tenant_id()
-returns uuid
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select tenant_id from public.profiles where id = auth.uid();
-$$;
 
 -- ---------- tenants (franchisees + internal) --------------------------------
 create table if not exists public.tenants (
   id          uuid primary key default gen_random_uuid(),
   name        text not null,
-  kind        text not null default 'franchisee',  -- franchisee | internal
+  kind        text not null default 'franchisee',
   created_at  timestamptz not null default now()
 );
 
--- ---------- user profiles (1:1 with auth.users) -----------------------------
 create table if not exists public.profiles (
   id          uuid primary key references auth.users(id) on delete cascade,
   tenant_id   uuid references public.tenants(id) on delete set null,
-  role        text not null default 'operator',  -- admin | operator | franchisee
+  role        text not null default 'operator',
   full_name   text,
   created_at  timestamptz not null default now()
 );
 
--- ---------- warehouses & products -------------------------------------------
 create table if not exists public.warehouses (
   id          uuid primary key default gen_random_uuid(),
   tenant_id   uuid not null references public.tenants(id) on delete cascade,
@@ -43,10 +30,9 @@ create table if not exists public.products (
   id          uuid primary key default gen_random_uuid(),
   tenant_id   uuid not null references public.tenants(id) on delete cascade,
   name        text not null,
-  type        text not null default 'topping'  -- base | topping | sauce
+  type        text not null default 'topping'
 );
 
--- ---------- machines --------------------------------------------------------
 create table if not exists public.machines (
   id                   uuid primary key default gen_random_uuid(),
   tenant_id            uuid references public.tenants(id) on delete set null,
@@ -58,7 +44,7 @@ create table if not exists public.machines (
   warehouse_id         uuid references public.warehouses(id) on delete set null,
   base_product_id      uuid references public.products(id) on delete set null,
   location             text,
-  state                text not null default 'active',  -- active | in_transit | stored | retired
+  state                text not null default 'active',
   last_full_clean_date timestamptz,
   huaxin_last_sync     timestamptz,
   created_at           timestamptz not null default now()
@@ -90,7 +76,6 @@ create table if not exists public.machine_transfers (
   note            text
 );
 
--- ---------- HACCP / inventory -----------------------------------------------
 create table if not exists public.lots (
   id                 uuid primary key default gen_random_uuid(),
   tenant_id          uuid not null references public.tenants(id) on delete cascade,
@@ -99,17 +84,17 @@ create table if not exists public.lots (
   product_name       text,
   qty_available      double precision default 0,
   device_event_time  timestamptz,
-  disposition        text default 'released'  -- released | hold | dispose
+  disposition        text default 'released'
 );
 
 create table if not exists public.reposiciones (
   id                uuid primary key default gen_random_uuid(),
   tenant_id         uuid not null references public.tenants(id) on delete cascade,
-  client_uuid       uuid not null unique,           -- idempotency (offline queue)
+  client_uuid       uuid not null unique,
   machine_id        uuid references public.machines(id) on delete set null,
   operator_id       uuid,
   device_event_time timestamptz not null,
-  status            text not null default 'pending', -- pending | synced | failed
+  status            text not null default 'pending',
   payload_json      jsonb,
   created_at        timestamptz not null default now(),
   synced_at         timestamptz,
@@ -122,22 +107,21 @@ create table if not exists public.clean_logs (
   client_uuid       uuid not null unique,
   machine_id        uuid not null references public.machines(id) on delete cascade,
   operator_id       uuid,
-  kind              text not null default 'full',  -- full | partial
+  kind              text not null default 'full',
   device_event_time timestamptz not null
 );
 
 create table if not exists public.alerts (
   id            uuid primary key default gen_random_uuid(),
   tenant_id     uuid not null references public.tenants(id) on delete cascade,
-  type          text not null,        -- machine_refill | warehouse_restock | recall | calibration
-  severity      text default 'info',  -- info | warning | critical
+  type          text not null,
+  severity      text default 'info',
   machine_id    uuid references public.machines(id) on delete cascade,
   message       text not null,
   remaining_pct double precision,
   created_at    timestamptz not null default now()
 );
 
--- ---------- Huaxin telemetry (ingested server-side) ------------------------
 create table if not exists public.huaxin_temperatures (
   id           uuid primary key default gen_random_uuid(),
   machine_id   uuid references public.machines(id) on delete cascade,
@@ -171,11 +155,11 @@ create table if not exists public.huaxin_faults (
   subject          text,
   html_body        text,
   received_at      timestamptz not null default now(),
-  state            text default 'new',  -- new | acknowledged | resolved
+  state            text default 'new',
   raw              text
 );
 
--- ---------- dashboard view --------------------------------------------------
+-- ---------- views ----------------------------------------------------------
 create or replace view public.v_machines as
 select
   m.id, m.name, m.ref, m.device_imei, m.state, m.last_full_clean_date,
@@ -212,10 +196,18 @@ from public.machines m
   left join public.huaxin_temperatures t on t.machine_id = m.id
 order by m.id, t.reading_time desc nulls last;
 
--- ============================================================================
--- Row Level Security: each tenant sees only their rows; admins see all.
--- (Service-role key used by the Huaxin sync/webhook bypasses RLS.)
--- ============================================================================
+-- ---------- helper functions (after tables) --------------------------------
+create or replace function public.current_tenant_id()
+returns uuid language sql stable security definer set search_path = public as $$
+  select tenant_id from public.profiles where id = auth.uid();
+$$;
+
+create or replace function public.is_current_admin()
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin');
+$$;
+
+-- ---------- Row Level Security ---------------------------------------------
 alter table public.machines            enable row level security;
 alter table public.warehouses          enable row level security;
 alter table public.products            enable row level security;
@@ -229,17 +221,11 @@ alter table public.huaxin_orders       enable row level security;
 alter table public.huaxin_temperatures enable row level security;
 alter table public.huaxin_faults       enable row level security;
 
-create or replace function public.is_current_admin()
-returns boolean language sql stable security definer set search_path = public as $$
-  select exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin');
-$$;
-
--- Helper to apply the standard tenant policy to a table.
 do $$
 declare t text;
 begin
   foreach t in array array[
-    'machines','warehouses','products','machine_transfers',
+    'machines','warehouses','products',
     'lots','reposiciones','clean_logs','alerts','huaxin_orders'
   ]
   loop
@@ -252,7 +238,6 @@ begin
   end loop;
 end $$;
 
--- Machine-child tables: visible if the parent machine belongs to the tenant.
 drop policy if exists mi_isolation on public.machine_ingredients;
 create policy mi_isolation on public.machine_ingredients
   using (exists (
@@ -261,7 +246,14 @@ create policy mi_isolation on public.machine_ingredients
       and (m.tenant_id = public.current_tenant_id() or public.is_current_admin())
   ));
 
--- Telemetry tied to a machine: same rule.
+drop policy if exists mt_isolation on public.machine_transfers;
+create policy mt_isolation on public.machine_transfers
+  using (exists (
+    select 1 from public.machines m
+    where m.id = machine_transfers.machine_id
+      and (m.tenant_id = public.current_tenant_id() or public.is_current_admin())
+  ));
+
 drop policy if exists ht_isolation on public.huaxin_temperatures;
 create policy ht_isolation on public.huaxin_temperatures
   using (machine_id is null or exists (
@@ -287,6 +279,7 @@ begin
   return new;
 end;
 $$;
+
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users

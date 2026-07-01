@@ -17,9 +17,13 @@ Open http://localhost:3000 — it redirects to `/machines`. With no Supabase
 keys it shows **branded sample data** so you can see the dashboard immediately.
 
 ## Set up Supabase
-1. Create a project at supabase.com.
-2. Open the SQL editor and run [`supabase/schema.sql`](./supabase/schema.sql).
-3. Put the project URL + anon key + service role key into `.env.local`.
+The schema is managed as migrations under `supabase/migrations/`. Apply with the CLI:
+```bash
+supabase link --project-ref <your-project-ref>
+supabase db push
+```
+Put the project URL + anon key + service_role key into `.env.local`
+(Dashboard → Project Settings → API).
 
 The schema is multi-tenant: every tenant-scoped table has `tenant_id` and is
 gated by **Row-Level Security** (`tenant_id = current_tenant_id()`, admins see

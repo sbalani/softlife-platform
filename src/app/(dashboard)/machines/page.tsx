@@ -152,7 +152,19 @@ export default async function MachinesPage({
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1 text-taupe">
-                      <button title="View" className="rounded p-1.5 hover:bg-cream">👁</button>
+                      {m.device_imei ? (
+                        <Link
+                          title="View"
+                          href={`/machines/${m.device_imei}`}
+                          className="rounded p-1.5 hover:bg-cream"
+                        >
+                          👁
+                        </Link>
+                      ) : (
+                        <button title="View" disabled className="rounded p-1.5 opacity-40">
+                          👁
+                        </button>
+                      )}
                       <button title="Edit" className="rounded p-1.5 hover:bg-cream">✎</button>
                       <button title="Delete" className="rounded p-1.5 hover:bg-cream">🗑</button>
                       <button title="Settings" className="rounded p-1.5 hover:bg-cream">⚙</button>

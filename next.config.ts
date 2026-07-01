@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // undici is the engine behind Node's fetch; we use it only to bypass the
+  // expired UAT certificate. Keep it out of the bundle — resolve at runtime.
+  serverExternalPackages: ["undici"],
 };
 
 export default nextConfig;

@@ -1,4 +1,4 @@
-import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getConfigFromEnv, listDevices, type HuaxinDevice } from "@/lib/huaxin/client";
 
 export type Machine = {
@@ -54,7 +54,7 @@ async function getMachinesLive(): Promise<Machine[]> {
 export async function getMachines(): Promise<{ machines: Machine[]; source: Source }> {
   if (isSupabaseConfigured()) {
     try {
-      const supabase = await createClient();
+      const supabase = await createServiceClient();
       const { data, error } = await supabase.from("v_machines").select("*").order("name");
       if (!error && data && data.length) return { machines: data as Machine[], source: "supabase" };
     } catch {

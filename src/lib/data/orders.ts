@@ -1,4 +1,4 @@
-import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getConfigFromEnv, listDevices, listOrders } from "@/lib/huaxin/client";
 import type { Source } from "./machines";
 
@@ -57,7 +57,7 @@ async function getOrdersLive(): Promise<Order[]> {
 export async function getOrders(): Promise<{ orders: Order[]; source: Source }> {
   if (isSupabaseConfigured()) {
     try {
-      const supabase = await createClient();
+      const supabase = await createServiceClient();
       const { data, error } = await supabase
         .from("v_orders")
         .select("*")

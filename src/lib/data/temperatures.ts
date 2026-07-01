@@ -1,4 +1,4 @@
-import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getConfigFromEnv, listDevices, pullTemperatures } from "@/lib/huaxin/client";
 import type { Source } from "./machines";
 
@@ -49,7 +49,7 @@ async function getTempsLive(): Promise<TempReading[]> {
 export async function getLatestTemperatures(): Promise<{ temps: TempReading[]; source: Source }> {
   if (isSupabaseConfigured()) {
     try {
-      const supabase = await createClient();
+      const supabase = await createServiceClient();
       const { data, error } = await supabase.from("v_latest_temps").select("*");
       if (!error && data && data.length) return { temps: data as TempReading[], source: "supabase" };
     } catch {

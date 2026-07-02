@@ -17,8 +17,6 @@ async function uploadImage(s: any, file: File): Promise<string | null> {
 }
 
 const str = (v: FormDataEntryValue | null) => String(v ?? "").trim() || null;
-const splitCsv = (v: FormDataEntryValue | null) =>
-  String(v ?? "").split(",").map((x) => x.trim()).filter(Boolean);
 const num = (v: FormDataEntryValue | null) => {
   const n = Number(String(v ?? ""));
   return Number.isFinite(n) && String(v ?? "").trim() !== "" ? n : null;
@@ -29,22 +27,23 @@ export async function createProduct(_prev: ProductResult | null, fd: FormData): 
   if (!name) return { ok: false, error: "Name is required." };
   if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
 
+  const contains = fd.getAll("contains").map(String);
+  const mayContain = fd.getAll("may_contain").map(String);
   const image = fd.get("image");
   const allergen = fd.get("allergen");
+
   try {
     const s = await createServiceClient();
     const imageUrl = image instanceof File && image.size ? await uploadImage(s, image) : null;
     const allergenUrl = allergen instanceof File && allergen.size ? await uploadImage(s, allergen) : null;
 
-    const { error } = await s.from("products").insert({
+    const { data: inserted, error } = await s.from("products").insert({
       name,
       type: String(fd.get("type") ?? "topping"),
       sku: str(fd.get("sku")),
       description: str(fd.get("description")),
       brand: str(fd.get("brand")),
       ingredients_list: str(fd.get("ingredients_list")),
-      allergens_contains: splitCsv(fd.get("allergens_contains")),
-      allergens_may_contain: splitCsv(fd.get("allergens_may_contain")),
       country_of_origin: str(fd.get("country_of_origin")),
       nutritional_claim: str(fd.get("nutritional_claim")),
       nf_calories: num(fd.get("nf_calories")),
@@ -57,8 +56,18 @@ export async function createProduct(_prev: ProductResult | null, fd: FormData): 
       price: Number(fd.get("price") ?? 0) || 0,
       image_url: imageUrl,
       allergen_url: allergenUrl,
-    });
+    }).select("id").single();
     if (error) return { ok: false, error: error.message };
+
+    const productId = (inserted as { id: string }).id;
+    const iaRows = [
+      ...contains.map((aid) => ({ ingredient_id: productId, allergen_id: aid, presence: "contains" })),
+      ...mayContain.map((aid) => ({ ingredient_id: productId, allergen_id: aid, presence: "may_contain" })),
+    ];
+    if (iaRows.length) {
+      await s.from("ingredient_allergens").insert(iaRows);
+    }
+
     revalidatePath("/products");
     return { ok: true };
   } catch (e) {

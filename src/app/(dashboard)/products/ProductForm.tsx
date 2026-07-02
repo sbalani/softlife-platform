@@ -78,8 +78,8 @@ export function ProductForm({ allergens }: { allergens: Allergen[] }) {
       <form action={extractAction} encType="multipart/form-data" className="rounded-xl border border-terracotta/30 bg-terracotta/5 p-4">
         <div className="flex flex-wrap items-end gap-3">
           <label className="block">
-            <span className={label}>Extract from spec sheet (image)</span>
-            <input name="sheet" type="file" accept="image/*" className={`w-64 text-xs ${input}`} />
+            <span className={label}>Extract from spec sheet (image or PDF)</span>
+            <input name="sheet" type="file" accept="image/*,.pdf,application/pdf" className={`w-64 text-xs ${input}`} />
           </label>
           <button type="submit" disabled={extractPending} className="rounded-lg bg-cocoa px-4 py-2 text-sm font-bold text-white hover:opacity-90 disabled:opacity-60">
             {extractPending ? "Reading…" : "Extract with AI"}

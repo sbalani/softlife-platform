@@ -63,7 +63,11 @@ export async function extractFromSheet(_prev: ExtractResult | null, fd: FormData
 
   try {
     const bytes = await file.arrayBuffer();
-    const dataUrl = `data:${file.type || "image/jpeg"};base64,${Buffer.from(bytes).toString("base64")}`;
+    const base64 = Buffer.from(bytes).toString("base64");
+    const isImage = file.type.startsWith("image/");
+    const contentPart = isImage
+      ? { type: "image" as const, image: `data:${file.type || "image/jpeg"};base64,${base64}` }
+      : { type: "file" as const, data: base64, mediaType: file.type || "application/pdf" };
     const { object } = await generateObject({
       model: openai("gpt-4o-mini"),
       schema,
@@ -75,7 +79,7 @@ export async function extractFromSheet(_prev: ExtractResult | null, fd: FormData
               type: "text",
               text: "Extract product information from this spec sheet / packaging label. For allergens, use standard names: gluten, milk, eggs, soy, peanuts, tree nuts, fish, crustaceans, sesame, mustard, celery, sulphites, lupin, molluscs. Set fields you can't read to null. 'type' is base (ice cream/yoghurt base), topping (solid), or sauce (liquid). Nutrition is per 100g.",
             },
-            { type: "image", image: dataUrl },
+            contentPart,
           ],
         },
       ],

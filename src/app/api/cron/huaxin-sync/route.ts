@@ -31,7 +31,7 @@ export async function GET(req: Request) {
       {
         device_imei: d.deviceImei,
         device_id_huaxin: d.deviceId ?? null,
-        name: d.deviceName ?? d.deviceImei,
+        name: (d.deviceLabel as string) || d.deviceName || d.deviceImei,
         huaxin_last_sync: new Date().toISOString(),
       },
       { onConflict: "device_imei" },

@@ -133,10 +133,9 @@ export function ProductForm({ allergens }: { allergens: Allergen[] }) {
           <Field labelText="Default portion size (g)"><input name="default_portion_size" type="number" step="0.1" defaultValue={n(ex?.default_portion_size)} className={`w-full ${input}`} /></Field>
         </Section>
 
-        <Section title="Images">
-          <Field labelText="Product image"><input name="image" type="file" accept="image/*" className={`w-full text-xs ${input}`} /></Field>
-          <Field labelText="Allergen image (machine screen, optional)"><input name="allergen" type="file" accept="image/*" className={`w-full text-xs ${input}`} /></Field>
-        </Section>
+      <Section title="Product image">
+        <Field labelText="Product image"><input name="image" type="file" accept="image/*" className={`w-full text-xs ${input}`} /></Field>
+      </Section>
 
         <div className="flex items-center gap-4">
           <button type="submit" disabled={createPending} className="rounded-lg bg-terracotta px-4 py-2 text-sm font-bold text-white hover:bg-terracotta-dark disabled:opacity-60">

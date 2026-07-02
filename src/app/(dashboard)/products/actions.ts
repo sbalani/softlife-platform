@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { generateAllergenComposite } from "@/lib/allergens/composite";
 
 export type ProductResult = { ok: boolean; error?: string };
 
@@ -66,6 +67,32 @@ export async function createProduct(_prev: ProductResult | null, fd: FormData): 
     ];
     if (iaRows.length) {
       await s.from("ingredient_allergens").insert(iaRows);
+    }
+
+    // Auto-generate allergen composite image (for the machine screen / Huaxin allergyPath)
+    try {
+      const { data: regAllergens } = await s.from("allergens").select("id,logo_url");
+      const logoById = new Map(
+        ((regAllergens as { id: string; logo_url: string | null }[]) ?? []).map((a) => [a.id, a.logo_url]),
+      );
+      const compositeInput = [
+        ...contains.map((id) => ({ logo_url: logoById.get(id) ?? null, dim: false })),
+        ...mayContain.map((id) => ({ logo_url: logoById.get(id) ?? null, dim: true })),
+      ].filter((a) => a.logo_url);
+      if (compositeInput.length) {
+        const buf = await generateAllergenComposite(compositeInput);
+        if (buf) {
+          const cpath = `allergens/composite_${productId}.png`;
+          await s.storage.from("product-media").upload(cpath, buf, {
+            contentType: "image/png",
+            upsert: true,
+          });
+          const curl = s.storage.from("product-media").getPublicUrl(cpath).data.publicUrl;
+          await s.from("products").update({ allergen_url: curl }).eq("id", productId);
+        }
+      }
+    } catch (e) {
+      console.error("allergen composite failed:", e);
     }
 
     revalidatePath("/products");

@@ -1,5 +1,4 @@
 import { getProducts } from "@/lib/data/products";
-import { getTenants } from "@/lib/data/franchisees";
 import { ProductForm } from "./ProductForm";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +10,7 @@ const TYPE_TONE: Record<string, string> = {
 };
 
 export default async function IngredientsPage() {
-  const [products, tenants] = await Promise.all([getProducts(), getTenants()]);
+  const products = await getProducts();
 
   return (
     <div>
@@ -25,7 +24,7 @@ export default async function IngredientsPage() {
       <details className="mb-6 rounded-2xl border border-line bg-white p-5">
         <summary className="cursor-pointer font-display text-lg font-bold text-cocoa">Add ingredient</summary>
         <div className="mt-4">
-          <ProductForm tenants={tenants} />
+          <ProductForm />
         </div>
       </details>
 

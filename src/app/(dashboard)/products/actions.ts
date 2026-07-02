@@ -26,9 +26,7 @@ const num = (v: FormDataEntryValue | null) => {
 
 export async function createProduct(_prev: ProductResult | null, fd: FormData): Promise<ProductResult> {
   const name = String(fd.get("name") ?? "").trim();
-  const tenantId = String(fd.get("tenant_id") ?? "");
   if (!name) return { ok: false, error: "Name is required." };
-  if (!tenantId) return { ok: false, error: "Select a franchisee/tenant." };
   if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
 
   const image = fd.get("image");
@@ -41,7 +39,6 @@ export async function createProduct(_prev: ProductResult | null, fd: FormData): 
     const { error } = await s.from("products").insert({
       name,
       type: String(fd.get("type") ?? "topping"),
-      tenant_id: tenantId,
       sku: str(fd.get("sku")),
       description: str(fd.get("description")),
       brand: str(fd.get("brand")),

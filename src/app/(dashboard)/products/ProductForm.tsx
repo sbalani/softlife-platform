@@ -24,16 +24,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export function ProductForm({ tenants }: { tenants: { id: string; name: string }[] }) {
+export function ProductForm() {
   const [res, action, pending] = useActionState<ProductResult | null, FormData>(createProduct, null);
-
-  if (tenants.length === 0) {
-    return (
-      <p className="text-sm text-taupe">
-        Create a franchisee/customer first (under <span className="font-semibold">Franchisees</span>) before adding ingredients.
-      </p>
-    );
-  }
 
   return (
     <form action={action} encType="multipart/form-data" className="space-y-4">
@@ -107,19 +99,12 @@ export function ProductForm({ tenants }: { tenants: { id: string; name: string }
         </Field>
       </Section>
 
-      <Section title="Images &amp; ownership">
+      <Section title="Images">
         <Field name="image" labelText="Product image">
           <input name="image" type="file" accept="image/*" className={`w-full text-xs ${input}`} />
         </Field>
         <Field name="allergen" labelText="Allergen image (machine screen)">
           <input name="allergen" type="file" accept="image/*" className={`w-full text-xs ${input}`} />
-        </Field>
-        <Field name="tenant_id" labelText="Belongs to *">
-          <select name="tenant_id" required className={`w-full ${input}`}>
-            {tenants.map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </select>
         </Field>
       </Section>
 

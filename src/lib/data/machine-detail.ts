@@ -1,6 +1,7 @@
 import {
   getConfigFromEnv,
   listDevices,
+  listDeviceProducts,
   listOrders,
   pullTemperatures,
 } from "@/lib/huaxin/client";
@@ -87,4 +88,14 @@ export async function getMachineDetail(imei: string): Promise<MachineDetail | nu
     temperatures,
     orders,
   };
+}
+
+export async function getMachineMenu(imei: string) {
+  const cfg = getConfigFromEnv();
+  if (!cfg) return [];
+  try {
+    return await listDeviceProducts(cfg, imei);
+  } catch {
+    return [];
+  }
 }

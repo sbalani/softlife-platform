@@ -200,6 +200,41 @@ export async function listOrders(
   return obj?.list ?? obj?.orders ?? [];
 }
 
+export type ProductDiyItem = {
+  position?: string;
+  goodsName?: string;
+  price?: string;
+  imagePath?: string;
+  enable?: number;
+};
+
+export async function listDeviceProducts(cfg: HuaxinConfig, deviceImei: string): Promise<ProductDiyItem[]> {
+  const data = await call("/machine/cloud/api/device/product", cfg, { device_imei: deviceImei });
+  const payload = data.data as { productDiy?: ProductDiyItem[] } | null;
+  return payload?.productDiy ?? [];
+}
+
+export async function pushProductDiy(
+  cfg: HuaxinConfig,
+  deviceImei: string,
+  items: { position: string; code: string; value: string }[],
+) {
+  return call("/machine/cloud/api/batch/motify/data", cfg, {
+    data: { serialNum: String(Date.now()), type: "productDiy", deviceImei, data: items },
+  });
+}
+
+export async function refreshProduct(cfg: HuaxinConfig, deviceImei: string) {
+  return call("/machine/cloud/api/remote/control/data", cfg, {
+    data: {
+      serialNum: String(Date.now()),
+      type: "operate",
+      deviceImei,
+      data: { command: "operate_refresh_product", value: "1" },
+    },
+  });
+}
+
 export function isOrderWebhook(body: unknown): boolean {
   return !!body && typeof body === "object" && (body as { responType?: string }).responType === "order";
 }

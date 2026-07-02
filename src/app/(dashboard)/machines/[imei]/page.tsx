@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMachineConfig } from "@/lib/data/machine-config";
-import { getMachineDetail } from "@/lib/data/machine-detail";
+import { getMachineDetail, getMachineMenu } from "@/lib/data/machine-detail";
 import { MachineConfigForm } from "./MachineConfigForm";
+import { MachinePushButton } from "./MachinePushButton";
 import { AreaChart } from "@/components/charts";
 
 export const dynamic = "force-dynamic";
@@ -13,9 +14,10 @@ export default async function MachineDetailPage({
   params: Promise<{ imei: string }>;
 }) {
   const { imei } = await params;
-  const [config, telemetry] = await Promise.all([
+  const [config, telemetry, menu] = await Promise.all([
     getMachineConfig(imei),
     getMachineDetail(imei),
+    getMachineMenu(imei),
   ]);
 
   if (!config && !telemetry) notFound();
@@ -47,11 +49,37 @@ export default async function MachineDetailPage({
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">
         <h2 className="mb-4 font-display text-lg font-bold text-cocoa">Configuration</h2>
         {config ? (
-          <MachineConfigForm config={config} imei={imei} />
+          <>
+            <MachineConfigForm config={config} imei={imei} />
+            <div className="mt-5 border-t border-line pt-4">
+              <MachinePushButton imei={imei} />
+            </div>
+          </>
         ) : (
           <p className="text-sm text-taupe">
             Sync this machine to Supabase first (Settings → Sync now) to configure base, profile and hoppers.
           </p>
+        )}
+      </section>
+
+      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+        <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Product menu on machine (live)</h2>
+        {menu.length ? (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {menu.map((item, i) => (
+              <div key={item.position ?? i} className="rounded-xl border border-line p-3 text-center">
+                {item.imagePath ? (
+                  <img src={item.imagePath} alt={item.goodsName} className="mx-auto h-14 w-14 rounded-lg object-cover" />
+                ) : (
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-lg bg-cream text-taupe">—</div>
+                )}
+                <div className="mt-2 text-sm font-semibold text-cocoa">{item.goodsName ?? `Lane ${item.position}`}</div>
+                <div className="text-xs text-taupe">Lane {item.position}{item.price ? ` · €${item.price}` : ""}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-taupe">No product menu reported by the machine.</p>
         )}
       </section>
 

@@ -5,7 +5,7 @@ import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server
 
 export type ProductResult = { ok: boolean; error?: string };
 
-async function uploadImage(s: ReturnType<typeof Object> & { storage: any }, file: File): Promise<string | null> {
+async function uploadImage(s: any, file: File): Promise<string | null> {
   if (!file || !file.size) return null;
   const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
   const path = `products/${crypto.randomUUID()}.${ext}`;
@@ -16,30 +16,48 @@ async function uploadImage(s: ReturnType<typeof Object> & { storage: any }, file
   return s.storage.from("product-media").getPublicUrl(path).data.publicUrl;
 }
 
-export async function createProduct(
-  _prev: ProductResult | null,
-  fd: FormData,
-): Promise<ProductResult> {
+const str = (v: FormDataEntryValue | null) => String(v ?? "").trim() || null;
+const splitCsv = (v: FormDataEntryValue | null) =>
+  String(v ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+const num = (v: FormDataEntryValue | null) => {
+  const n = Number(String(v ?? ""));
+  return Number.isFinite(n) && String(v ?? "").trim() !== "" ? n : null;
+};
+
+export async function createProduct(_prev: ProductResult | null, fd: FormData): Promise<ProductResult> {
   const name = String(fd.get("name") ?? "").trim();
-  const type = String(fd.get("type") ?? "topping");
   const tenantId = String(fd.get("tenant_id") ?? "");
-  const price = Number(fd.get("price") ?? 0) || 0;
-  const image = fd.get("image");
-  const allergen = fd.get("allergen");
   if (!name) return { ok: false, error: "Name is required." };
   if (!tenantId) return { ok: false, error: "Select a franchisee/tenant." };
   if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
 
+  const image = fd.get("image");
+  const allergen = fd.get("allergen");
   try {
     const s = await createServiceClient();
-    const imageUrl = image instanceof File && image.size ? await uploadImage(s as any, image) : null;
-    const allergenUrl = allergen instanceof File && allergen.size ? await uploadImage(s as any, allergen) : null;
+    const imageUrl = image instanceof File && image.size ? await uploadImage(s, image) : null;
+    const allergenUrl = allergen instanceof File && allergen.size ? await uploadImage(s, allergen) : null;
 
     const { error } = await s.from("products").insert({
       name,
-      type,
+      type: String(fd.get("type") ?? "topping"),
       tenant_id: tenantId,
-      price,
+      sku: str(fd.get("sku")),
+      description: str(fd.get("description")),
+      brand: str(fd.get("brand")),
+      ingredients_list: str(fd.get("ingredients_list")),
+      allergens_contains: splitCsv(fd.get("allergens_contains")),
+      allergens_may_contain: splitCsv(fd.get("allergens_may_contain")),
+      country_of_origin: str(fd.get("country_of_origin")),
+      nutritional_claim: str(fd.get("nutritional_claim")),
+      nf_calories: num(fd.get("nf_calories")),
+      nf_protein: num(fd.get("nf_protein")),
+      nf_carbs: num(fd.get("nf_carbs")),
+      nf_sugar: num(fd.get("nf_sugar")),
+      nf_fat: num(fd.get("nf_fat")),
+      default_portion_size: num(fd.get("default_portion_size")),
+      cost_per_kg: num(fd.get("cost_per_kg")),
+      price: Number(fd.get("price") ?? 0) || 0,
       image_url: imageUrl,
       allergen_url: allergenUrl,
     });

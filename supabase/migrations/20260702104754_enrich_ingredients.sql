@@ -1,0 +1,16 @@
+alter table public.products
+  add column if not exists sku text,
+  add column if not exists description text,
+  add column if not exists brand text,
+  add column if not exists ingredients_list text,
+  add column if not exists allergens_contains text[],
+  add column if not exists allergens_may_contain text[],
+  add column if not exists country_of_origin text,
+  add column if not exists nutritional_claim text,
+  add column if not exists nf_calories double precision,
+  add column if not exists nf_protein double precision,
+  add column if not exists nf_carbs double precision,
+  add column if not exists nf_sugar double precision,
+  add column if not exists nf_fat double precision,
+  add column if not exists default_portion_size double precision,
+  add column if not exists cost_per_kg double precision;

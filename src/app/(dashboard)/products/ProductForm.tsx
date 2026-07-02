@@ -14,34 +14,42 @@ export function ProductForm({ tenants }: { tenants: { id: string; name: string }
     );
   }
 
+  const input = "rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa focus:border-terracotta focus:outline-none";
+  const label = "mb-1 block text-[11px] uppercase tracking-wide text-taupe";
+
   return (
-    <form action={action} className="flex flex-wrap items-end gap-3">
+    <form action={action} encType="multipart/form-data" className="flex flex-wrap items-end gap-3">
       <label className="block">
-        <span className="mb-1 block text-[11px] uppercase tracking-wide text-taupe">Name</span>
-        <input
-          name="name"
-          required
-          placeholder="e.g. Base Vainilla"
-          className="w-56 rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa focus:border-terracotta focus:outline-none"
-        />
+        <span className={label}>Name</span>
+        <input name="name" required placeholder="e.g. Base Vainilla" className={`w-48 ${input}`} />
       </label>
       <label className="block">
-        <span className="mb-1 block text-[11px] uppercase tracking-wide text-taupe">Type</span>
-        <select name="type" className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa">
+        <span className={label}>Type</span>
+        <select name="type" className={input}>
           <option value="base">Base</option>
-          <option value="topping">Topping</option>
-          <option value="sauce">Sauce</option>
+          <option value="topping">Topping (solid)</option>
+          <option value="sauce">Sauce (liquid)</option>
         </select>
       </label>
       <label className="block">
-        <span className="mb-1 block text-[11px] uppercase tracking-wide text-taupe">Belongs to</span>
-        <select name="tenant_id" required className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa">
+        <span className={label}>Price (€)</span>
+        <input name="price" type="number" step="0.01" min="0" defaultValue="0" className={`w-24 ${input}`} />
+      </label>
+      <label className="block">
+        <span className={label}>Belongs to</span>
+        <select name="tenant_id" required className={input}>
           {tenants.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
+            <option key={t.id} value={t.id}>{t.name}</option>
           ))}
         </select>
+      </label>
+      <label className="block">
+        <span className={label}>Product image</span>
+        <input name="image" type="file" accept="image/*" className={`w-52 text-xs ${input}`} />
+      </label>
+      <label className="block">
+        <span className={label}>Allergen image</span>
+        <input name="allergen" type="file" accept="image/*" className={`w-52 text-xs ${input}`} />
       </label>
       <button
         type="submit"

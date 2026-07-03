@@ -1,6 +1,8 @@
 import {
   getConfigFromEnv,
+  getDeviceStatus,
   listDevices,
+  listDeviceMedia,
   listDeviceProducts,
   listOrders,
   pullTemperatures,
@@ -95,6 +97,26 @@ export async function getMachineMenu(imei: string) {
   if (!cfg) return [];
   try {
     return await listDeviceProducts(cfg, imei);
+  } catch {
+    return [];
+  }
+}
+
+export async function getMachineStatus(imei: string) {
+  const cfg = getConfigFromEnv();
+  if (!cfg) return [];
+  try {
+    return await getDeviceStatus(cfg, imei);
+  } catch {
+    return [];
+  }
+}
+
+export async function getMachineMedia(imei: string) {
+  const cfg = getConfigFromEnv();
+  if (!cfg) return [];
+  try {
+    return await listDeviceMedia(cfg, imei);
   } catch {
     return [];
   }

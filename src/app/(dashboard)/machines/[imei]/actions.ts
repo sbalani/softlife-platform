@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { getConfigFromEnv, pushProductDiy, refreshProduct } from "@/lib/huaxin/client";
+import { getConfigFromEnv, pushProductDiy, refreshProduct, sendCommand } from "@/lib/huaxin/client";
 
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
@@ -101,6 +101,21 @@ export async function pushMachineProducts(_prev: PushResult | null, fd: FormData
       /* refresh is best-effort; the update still landed in the cloud */
     }
     return { ok: true, pushed: productIds.length };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function sendMachineCommand(
+  imei: string,
+  command: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const cfg = getConfigFromEnv();
+  if (!cfg) return { ok: false, error: "Huaxin not configured." };
+  try {
+    const result = await sendCommand(cfg, imei, command);
+    if (String(result.code) === "200") return { ok: true };
+    return { ok: false, error: result.msg ?? "Command rejected" };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

@@ -225,14 +225,42 @@ export async function pushProductDiy(
 }
 
 export async function refreshProduct(cfg: HuaxinConfig, deviceImei: string) {
+  return sendCommand(cfg, deviceImei, "operate_refresh_product");
+}
+
+// ---- Remote control / status / media ----
+
+export async function sendCommand(cfg: HuaxinConfig, deviceImei: string, command: string): Promise<Envelope> {
   return call("/machine/cloud/api/remote/control/data", cfg, {
-    data: {
-      serialNum: String(Date.now()),
-      type: "operate",
-      deviceImei,
-      data: { command: "operate_refresh_product", value: "1" },
-    },
+    data: { serialNum: String(Date.now()), type: "operate", deviceImei, data: { command, value: "1" } },
   });
+}
+
+export async function refreshResource(cfg: HuaxinConfig, deviceImei: string) {
+  return sendCommand(cfg, deviceImei, "operate_refresh_resource");
+}
+
+export async function getDeviceStatus(cfg: HuaxinConfig, deviceImei: string) {
+  const data = await call("/machine/cloud/api/device/configure/status/detail", cfg, { device_imei: deviceImei });
+  return (data.data as { code?: string; value?: string; desc?: string }[]) ?? [];
+}
+
+export async function listDeviceMedia(cfg: HuaxinConfig, deviceImei: string) {
+  const data = await call("/machine/cloud/api/device/configure/videos", cfg, { device_imei: deviceImei });
+  const payload = data.data as { videos?: { code?: string; imagePath?: string; duration?: number; intro?: string }[] } | null;
+  return payload?.videos ?? [];
+}
+
+export async function editDeviceMedia(
+  cfg: HuaxinConfig,
+  deviceImei: string,
+  params: { res_type: string; res_path: string; res_intro?: string; res_code?: string; res_duration?: number },
+) {
+  return call("/machine/cloud/api/device/configure/videos/edit", cfg, { device_imei: deviceImei, ...params });
+}
+
+export async function removeDeviceMedia(cfg: HuaxinConfig, deviceImei: string, res_type: string, res_code: string) {
+  return call("/machine/cloud/api/device/configure/videos/remove", cfg, { device_imei: deviceImei, res_type, res_code });
 }
 
 export function isOrderWebhook(body: unknown): boolean {

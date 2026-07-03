@@ -263,6 +263,25 @@ export async function removeDeviceMedia(cfg: HuaxinConfig, deviceImei: string, r
   return call("/machine/cloud/api/device/configure/videos/remove", cfg, { device_imei: deviceImei, res_type, res_code });
 }
 
+// ---- Device info (branding) / settings ----
+
+export async function updateDeviceInfo(cfg: HuaxinConfig, deviceImei: string, fields: Record<string, string>[]) {
+  return call("/machine/cloud/api/batch/motify/data", cfg, {
+    data: { serialNum: String(Date.now()), type: "deviceInfo", deviceImei, data: fields },
+  });
+}
+
+export async function getDeviceSettings(cfg: HuaxinConfig, deviceImei: string) {
+  const data = await call("/machine/cloud/api/device/configure/set/detail", cfg, { device_imei: deviceImei });
+  return (data.data as { code?: string; value?: string; desc?: string }[]) ?? [];
+}
+
+export async function pushDeviceSetting(cfg: HuaxinConfig, deviceImei: string, code: string, value: string) {
+  return call("/machine/cloud/api/remote/control/data", cfg, {
+    data: { serialNum: String(Date.now()), type: "configure", deviceImei, data: { code, value } },
+  });
+}
+
 export function isOrderWebhook(body: unknown): boolean {
   return !!body && typeof body === "object" && (body as { responType?: string }).responType === "order";
 }

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { getConfigFromEnv, editDeviceMedia, pushProductDiy, refreshProduct, refreshResource, removeDeviceMedia, sendCommand } from "@/lib/huaxin/client";
+import { getConfigFromEnv, editDeviceMedia, pushDeviceSetting, pushProductDiy, refreshProduct, refreshResource, removeDeviceMedia, sendCommand, updateDeviceInfo } from "@/lib/huaxin/client";
 
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
@@ -165,6 +165,43 @@ export async function removeDeviceMediaAction(
     try { await refreshResource(cfg, imei); } catch { /* best-effort */ }
     revalidatePath(`/machines/${imei}`);
     return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export type BrandingResult = { ok: boolean; error?: string };
+
+export async function updateDeviceBranding(_prev: BrandingResult | null, fd: FormData): Promise<BrandingResult> {
+  const imei = String(fd.get("imei") ?? "");
+  const cfg = getConfigFromEnv();
+  if (!cfg) return { ok: false, error: "Huaxin not configured." };
+  const fields: Record<string, string>[] = [];
+  for (const key of ["deviceLabel", "deviceMerchant", "deviceTel", "language"]) {
+    const val = String(fd.get(key) ?? "").trim();
+    if (val) fields.push({ [key]: val });
+  }
+  if (!fields.length) return { ok: false, error: "Nothing to update." };
+  try {
+    const result = await updateDeviceInfo(cfg, imei, fields);
+    if (String(result.code) === "200") return { ok: true };
+    return { ok: false, error: result.msg ?? "Update rejected" };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function pushMachineSetting(
+  imei: string,
+  code: string,
+  value: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const cfg = getConfigFromEnv();
+  if (!cfg) return { ok: false, error: "Huaxin not configured." };
+  try {
+    const result = await pushDeviceSetting(cfg, imei, code, value);
+    if (String(result.code) === "200") return { ok: true };
+    return { ok: false, error: result.msg ?? "Setting rejected" };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

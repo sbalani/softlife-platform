@@ -1,5 +1,6 @@
 import {
   getConfigFromEnv,
+  getDeviceSettings,
   getDeviceStatus,
   listDevices,
   listDeviceMedia,
@@ -117,6 +118,16 @@ export async function getMachineMedia(imei: string) {
   if (!cfg) return [];
   try {
     return await listDeviceMedia(cfg, imei);
+  } catch {
+    return [];
+  }
+}
+
+export async function getMachineSettings(imei: string) {
+  const cfg = getConfigFromEnv();
+  if (!cfg) return [];
+  try {
+    return await getDeviceSettings(cfg, imei);
   } catch {
     return [];
   }

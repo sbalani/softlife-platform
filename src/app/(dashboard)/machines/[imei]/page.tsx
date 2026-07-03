@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMachineConfig } from "@/lib/data/machine-config";
-import { getMachineDetail, getMachineMenu, getMachineStatus, getMachineMedia } from "@/lib/data/machine-detail";
+import { getMachineDetail, getMachineMedia, getMachineMenu, getMachineSettings, getMachineStatus } from "@/lib/data/machine-detail";
 import { MachineConfigForm } from "./MachineConfigForm";
 import { MachinePushButton } from "./MachinePushButton";
 import { RemoteControls } from "./RemoteControls";
 import { MediaManager } from "./MediaManager";
+import { DeviceBrandingForm } from "./DeviceBrandingForm";
+import { DeviceSettingsPanel } from "./DeviceSettingsPanel";
 import { AreaChart } from "@/components/charts";
 
 export const dynamic = "force-dynamic";
@@ -16,12 +18,13 @@ export default async function MachineDetailPage({
   params: Promise<{ imei: string }>;
 }) {
   const { imei } = await params;
-  const [config, telemetry, menu, status, media] = await Promise.all([
+  const [config, telemetry, menu, status, media, settings] = await Promise.all([
     getMachineConfig(imei),
     getMachineDetail(imei),
     getMachineMenu(imei),
     getMachineStatus(imei),
     getMachineMedia(imei),
+    getMachineSettings(imei),
   ]);
 
   if (!config && !telemetry) notFound();
@@ -63,6 +66,13 @@ export default async function MachineDetailPage({
         )}
       </section>
 
+      {/* Branding */}
+      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+        <h2 className="mb-1 font-display text-lg font-bold text-cocoa">Branding (machine screen)</h2>
+        <p className="mb-3 text-xs text-taupe">Updates the display label, merchant, phone and language shown on the machine.</p>
+        <DeviceBrandingForm imei={imei} />
+      </section>
+
       {/* Live status */}
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">
         <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Live status</h2>
@@ -77,6 +87,16 @@ export default async function MachineDetailPage({
           </div>
         ) : (
           <p className="text-sm text-taupe">No status parameters available.</p>
+        )}
+      </section>
+
+      {/* Device settings */}
+      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+        <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Device settings</h2>
+        {settings.length ? (
+          <DeviceSettingsPanel imei={imei} settings={settings} />
+        ) : (
+          <p className="text-sm text-taupe">No settings available.</p>
         )}
       </section>
 

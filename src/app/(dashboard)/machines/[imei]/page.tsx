@@ -25,7 +25,6 @@ export default async function MachineDetailPage({
   const menu = await getMachineMenu(imei);
   const status = await getMachineStatus(imei);
   const media = await getMachineMedia(imei);
-  const settings = await getMachineSettings(imei);
   const lotHistory = await getMachineLotHistory(imei);
 
   if (!config && !telemetry) notFound();
@@ -138,16 +137,6 @@ export default async function MachineDetailPage({
           </div>
         ) : (
           <p className="text-sm text-taupe">No status parameters available.</p>
-        )}
-      </section>
-
-      {/* Device settings */}
-      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
-        <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Device settings</h2>
-        {settings.length ? (
-          <DeviceSettingsPanel imei={imei} settings={settings} />
-        ) : (
-          <p className="text-sm text-taupe">No settings available.</p>
         )}
       </section>
 

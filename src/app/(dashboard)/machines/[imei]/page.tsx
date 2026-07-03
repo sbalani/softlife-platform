@@ -5,6 +5,7 @@ import { getMachineDetail, getMachineMenu, getMachineStatus, getMachineMedia } f
 import { MachineConfigForm } from "./MachineConfigForm";
 import { MachinePushButton } from "./MachinePushButton";
 import { RemoteControls } from "./RemoteControls";
+import { MediaManager } from "./MediaManager";
 import { AreaChart } from "@/components/charts";
 
 export const dynamic = "force-dynamic";
@@ -82,22 +83,7 @@ export default async function MachineDetailPage({
       {/* Screen media */}
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">
         <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Screen media (advertising)</h2>
-        {media.length ? (
-          <div className="flex flex-wrap gap-3">
-            {media.map((m, i) => (
-              <div key={m.code ?? i} className="rounded-xl border border-line p-2 text-center">
-                {m.imagePath ? (
-                  <img src={m.imagePath} alt={m.intro ?? `Media ${m.code}`} className="h-20 w-32 rounded-lg object-cover" />
-                ) : (
-                  <div className="flex h-20 w-32 items-center justify-center rounded-lg bg-cream text-taupe">—</div>
-                )}
-                <div className="mt-1 text-[10px] text-taupe">{m.intro ?? m.code} {m.duration ? `· ${m.duration}s` : ""}</div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-taupe">No advertising media assigned to this machine.</p>
-        )}
+        <MediaManager imei={imei} media={media} />
       </section>
 
       {/* Product menu */}

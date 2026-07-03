@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { getConfigFromEnv, pushProductDiy, refreshProduct, sendCommand } from "@/lib/huaxin/client";
+import { getConfigFromEnv, editDeviceMedia, pushProductDiy, refreshProduct, refreshResource, removeDeviceMedia, sendCommand } from "@/lib/huaxin/client";
 
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
@@ -116,6 +116,55 @@ export async function sendMachineCommand(
     const result = await sendCommand(cfg, imei, command);
     if (String(result.code) === "200") return { ok: true };
     return { ok: false, error: result.msg ?? "Command rejected" };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export type MediaResult = { ok: boolean; error?: string };
+
+export async function addDeviceMedia(_prev: MediaResult | null, fd: FormData): Promise<MediaResult> {
+  const imei = String(fd.get("imei") ?? "");
+  const file = fd.get("media");
+  const resType = String(fd.get("res_type") ?? "image");
+  const duration = Number(fd.get("res_duration") ?? 60) || 60;
+  const intro = String(fd.get("res_intro") ?? "");
+  const cfg = getConfigFromEnv();
+  if (!cfg) return { ok: false, error: "Huaxin not configured." };
+  if (!(file instanceof File) || !file.size) return { ok: false, error: "Choose a file." };
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+
+  try {
+    const s = await createServiceClient();
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+    const path = `media/${crypto.randomUUID()}.${ext}`;
+    const { error: upErr } = await s.storage
+      .from("product-media")
+      .upload(path, await file.arrayBuffer(), { contentType: file.type || "image/*", upsert: true });
+    if (upErr) return { ok: false, error: upErr.message };
+    const resPath = s.storage.from("product-media").getPublicUrl(path).data.publicUrl;
+
+    await editDeviceMedia(cfg, imei, { res_type: resType, res_path: resPath, res_intro: intro, res_duration: duration });
+    try { await refreshResource(cfg, imei); } catch { /* best-effort sync */ }
+    revalidatePath(`/machines/${imei}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function removeDeviceMediaAction(
+  imei: string,
+  resType: string,
+  resCode: string,
+): Promise<MediaResult> {
+  const cfg = getConfigFromEnv();
+  if (!cfg) return { ok: false, error: "Huaxin not configured." };
+  try {
+    await removeDeviceMedia(cfg, imei, resType, resCode);
+    try { await refreshResource(cfg, imei); } catch { /* best-effort */ }
+    revalidatePath(`/machines/${imei}`);
+    return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

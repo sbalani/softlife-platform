@@ -282,6 +282,43 @@ export async function pushDeviceSetting(cfg: HuaxinConfig, deviceImei: string, c
   });
 }
 
+// ---- Coupons / promotions ----
+
+export type HuaxinCoupon = {
+  couponId?: string;
+  couponName?: string;
+  couponType?: string;
+  deviceImeis?: string;
+  validDay?: number;
+  startTime?: string;
+  endTime?: string;
+  content?: string;
+  localName?: string;
+};
+
+export async function listCoupons(cfg: HuaxinConfig, page = 1) {
+  const data = await call("/machine/cloud/api/coupon/devices", cfg, { page: String(page) });
+  const payload = data.data as { list?: HuaxinCoupon[] } | null;
+  return payload?.list ?? [];
+}
+
+export async function createCoupon(cfg: HuaxinConfig, params: Record<string, string>) {
+  return call("/machine/cloud/api/coupon/edit", cfg, params);
+}
+
+export async function generateCouponCodes(cfg: HuaxinConfig, couponId: string, num: number) {
+  return call("/machine/cloud/api/coupon/generate/records", cfg, { couponId, num: String(num) });
+}
+
+export async function getCouponRecords(cfg: HuaxinConfig, couponId: string, page = 1) {
+  const data = await call("/machine/cloud/api/coupon/records/list", cfg, { couponId, page: String(page) });
+  return data.data;
+}
+
+export async function deleteCouponApi(cfg: HuaxinConfig, couponIds: string) {
+  return call("/machine/cloud/api/coupon/del", cfg, { couponIds });
+}
+
 export function isOrderWebhook(body: unknown): boolean {
   return !!body && typeof body === "object" && (body as { responType?: string }).responType === "order";
 }

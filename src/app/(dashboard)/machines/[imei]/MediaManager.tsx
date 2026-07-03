@@ -72,7 +72,7 @@ export function MediaManager({ imei, media }: { imei: string; media: MediaItem[]
               </div>
               {m.code && (
                 <button
-                  onClick={() => remove("image", m.code)}
+                  onClick={() => remove("image", m.code!)}
                   disabled={rmPending}
                   className="mt-1 text-[10px] font-bold text-danger hover:underline disabled:opacity-50"
                 >

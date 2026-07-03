@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 
-type Ingredient = { position: string; product_id: string | null; product_name: string | null; product_type: string };
+type Ingredient = { position: string; product_id: string | null; product_name?: string | null; product_type: string };
 
 export function LogLotForm({
   machineId,

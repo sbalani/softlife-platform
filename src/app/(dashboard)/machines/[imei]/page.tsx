@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMachineConfig } from "@/lib/data/machine-config";
-import { getMachineDetail, getMachineMedia, getMachineMenu, getMachineSettings, getMachineStatus, getMachineLotHistory } from "@/lib/data/machine-detail";
+import { getMachineDetail, getMachineMedia, getMachineMenu, getMachineSettings, getMachineStatus } from "@/lib/data/machine-detail";
+import { getMachineLotHistory } from "@/lib/data/lot-audit";
 import { MachineConfigForm } from "./MachineConfigForm";
 import { MachinePushButton } from "./MachinePushButton";
 import { RemoteControls } from "./RemoteControls";

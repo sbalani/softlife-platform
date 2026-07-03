@@ -19,15 +19,13 @@ export default async function MachineDetailPage({
   params: Promise<{ imei: string }>;
 }) {
   const { imei } = await params;
-  const [config, telemetry, menu, status, media, settings, lotHistory] = await Promise.all([
-    getMachineConfig(imei),
-    getMachineDetail(imei),
-    getMachineMenu(imei),
-    getMachineStatus(imei),
-    getMachineMedia(imei),
-    getMachineSettings(imei),
-    getMachineLotHistory(imei),
-  ]);
+  const config = await getMachineConfig(imei);
+  const telemetry = await getMachineDetail(imei);
+  const menu = await getMachineMenu(imei);
+  const status = await getMachineStatus(imei);
+  const media = await getMachineMedia(imei);
+  const settings = await getMachineSettings(imei);
+  const lotHistory = await getMachineLotHistory(imei);
 
   if (!config && !telemetry) notFound();
 

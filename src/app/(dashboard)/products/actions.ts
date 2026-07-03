@@ -78,7 +78,7 @@ export async function createProduct(_prev: ProductResult | null, fd: FormData): 
       const compositeInput = [
         ...contains.map((id) => ({ logo_url: logoById.get(id) ?? null, dim: false })),
         ...mayContain.map((id) => ({ logo_url: logoById.get(id) ?? null, dim: true })),
-      ].filter((a) => a.logo_url);
+      ].filter((a) => a.logo_url) as { logo_url: string; dim: boolean }[];
       if (compositeInput.length) {
         const buf = await generateAllergenComposite(compositeInput);
         if (buf) {

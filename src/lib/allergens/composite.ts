@@ -1,10 +1,9 @@
-import sharp from "sharp";
-
 type AllergenLogo = { logo_url: string; dim?: boolean };
 
 /** Composites allergen logos into a single image for the machine screen (Huaxin allergyPath).
  *  "Contains" logos at full opacity, "may contain" dimmed. Returns null if none have logos. */
 export async function generateAllergenComposite(allergens: AllergenLogo[]): Promise<Buffer | null> {
+  const { default: sharp } = await import("sharp");
   const withLogos = allergens.filter((a) => a.logo_url);
   if (withLogos.length === 0) return null;
 

@@ -6,7 +6,7 @@ import { MediaLibraryCard } from "./MediaLibraryCard";
 export const dynamic = "force-dynamic";
 
 export default async function AdvertisingPage() {
-  const [items, machines] = await Promise.all([getMediaItems(), getMachines()]);
+  const [items, { machines }] = await Promise.all([getMediaItems(), getMachines()]);
 
   return (
     <div>

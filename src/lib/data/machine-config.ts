@@ -10,7 +10,7 @@ export type MachineConfig = {
   baseProductId: string | null;
   profile: string | null;
   lastFullClean: string | null;
-  ingredients: { position: string; product_id: string | null; product_type: string }[];
+  ingredients: { position: string; product_id: string | null; product_type: string; current_lot_name: string | null; last_loaded_date: string | null }[];
   bases: ProductOpt[];
   toppings: ProductOpt[];
   sauces: ProductOpt[];
@@ -40,7 +40,7 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
     if (machine?.id) {
       const { data: ings } = await s
         .from("machine_ingredients")
-        .select("position,product_id,product_type")
+        .select("position,product_id,product_type,current_lot_name,last_loaded_date")
         .eq("machine_id", machine.id as string);
       ingredients = (ings as MachineConfig["ingredients"]) ?? [];
     }

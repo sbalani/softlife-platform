@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMachineConfig } from "@/lib/data/machine-config";
-import { getMachineDetail, getMachineMedia, getMachineMenu, getMachineSettings, getMachineStatus } from "@/lib/data/machine-detail";
+import { getMachineDetail, getMachineMedia, getMachineMenu, getMachineSettings, getMachineStatus, getMachineLotHistory } from "@/lib/data/machine-detail";
 import { MachineConfigForm } from "./MachineConfigForm";
 import { MachinePushButton } from "./MachinePushButton";
 import { RemoteControls } from "./RemoteControls";
 import { MediaManager } from "./MediaManager";
 import { DeviceBrandingForm } from "./DeviceBrandingForm";
 import { DeviceSettingsPanel } from "./DeviceSettingsPanel";
+import { LogLotForm } from "./LogLotForm";
 import { AreaChart } from "@/components/charts";
 
 export const dynamic = "force-dynamic";
@@ -18,13 +19,14 @@ export default async function MachineDetailPage({
   params: Promise<{ imei: string }>;
 }) {
   const { imei } = await params;
-  const [config, telemetry, menu, status, media, settings] = await Promise.all([
+  const [config, telemetry, menu, status, media, settings, lotHistory] = await Promise.all([
     getMachineConfig(imei),
     getMachineDetail(imei),
     getMachineMenu(imei),
     getMachineStatus(imei),
     getMachineMedia(imei),
     getMachineSettings(imei),
+    getMachineLotHistory(imei),
   ]);
 
   if (!config && !telemetry) notFound();
@@ -63,6 +65,56 @@ export default async function MachineDetailPage({
           </>
         ) : (
           <p className="text-sm text-taupe">Sync this machine to Supabase first (Settings → Sync now) to configure and control it.</p>
+        )}
+      </section>
+
+      {/* Lots & traceability */}
+      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+        <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Lots &amp; traceability</h2>
+        {config && config.ingredients.length > 0 ? (
+          <>
+            <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {config.ingredients.map((ing) => (
+                <div key={ing.position} className="rounded-lg border border-line px-3 py-2">
+                  <div className="text-xs font-bold text-cocoa">{ing.position}</div>
+                  <div className="text-xs text-taupe">{ing.product_name ?? "—"}</div>
+                  <div className="mt-1 text-xs">
+                    {ing.current_lot_name ? (
+                      <span className="font-semibold text-sage">Lot: {ing.current_lot_name}</span>
+                    ) : (
+                      <span className="text-taupe">No lot recorded</span>
+                    )}
+                    {ing.last_loaded_date && <span className="ml-2 text-taupe">· {new Date(ing.last_loaded_date).toLocaleDateString()}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="border-t border-line pt-3">
+              <h3 className="mb-2 text-[11px] uppercase tracking-wide text-taupe">Log a lot</h3>
+              <LogLotForm machineId={config.machineId!} imei={imei} machineName={config.name} ingredients={config.ingredients} />
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-taupe">Configure hoppers first to track lots per ingredient.</p>
+        )}
+        {lotHistory.length > 0 && (
+          <div className="mt-4 border-t border-line pt-3">
+            <h3 className="mb-2 text-[11px] uppercase tracking-wide text-taupe">Recent lot history</h3>
+            <table className="w-full text-xs">
+              <thead className="text-left text-[10px] uppercase text-taupe"><tr><th className="py-1">Date</th><th className="py-1">Position</th><th className="py-1">Product</th><th className="py-1">Lot</th><th className="py-1 text-right">Qty</th></tr></thead>
+              <tbody className="divide-y divide-line">
+                {lotHistory.map((h) => (
+                  <tr key={h.id}>
+                    <td className="py-1 text-cocoa">{new Date(h.device_event_time).toLocaleDateString()}</td>
+                    <td className="py-1 text-taupe">{h.position ?? "—"}</td>
+                    <td className="py-1 text-cocoa">{h.product_name ?? "—"}</td>
+                    <td className="py-1 font-mono text-cocoa">{h.lot_name}</td>
+                    <td className="py-1 text-right text-cocoa">{h.quantity ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
 

@@ -34,6 +34,8 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
         base_product_id: base || null,
         profile: profile || null,
         last_full_clean_date: lastClean ? new Date(lastClean).toISOString() : null,
+        customer_id: String(fd.get("customer_id") ?? "") || null,
+        payment_model: String(fd.get("payment_model") ?? "automatic"),
       })
       .eq("id", machineId);
     if (mErr) return { ok: false, error: mErr.message };

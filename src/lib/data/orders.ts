@@ -1,9 +1,9 @@
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getConfigFromEnv, listDevices, listOrders, type HuaxinOrder } from "@/lib/huaxin/client";
+import { translatePayType, isServerModeOrder } from "@/lib/i18n/huaxin";
 import type { Source } from "./machines";
 
 export type OrderProduct = { goodsName: string; price: string; position: number };
-export type OrderCoupon = { result: boolean; couponName?: string; couponType?: string };
 
 export type Order = {
   id: string;
@@ -22,13 +22,16 @@ export type Order = {
   products: OrderProduct[];
   nums: number;
   amount: number;
+  pay_type_raw: string | null;
   pay_type: string | null;
+  is_server_mode: boolean;
+  machine_collected: number;
+  franchisee_owed: number;
   pay_time: string | null;
   create_time_utc: string | null;
   refund_status: string | null;
   refund_out_no: string | null;
   coupon_used: boolean;
-  coupon_detail: OrderCoupon | null;
   activity_name: string | null;
   device_label: string | null;
 };
@@ -44,6 +47,9 @@ function ymd(d: Date) {
 
 function mapHuaxinOrder(o: HuaxinOrder, machineName: string, deviceImei: string): Order {
   const products: OrderProduct[] = (o.products as unknown as OrderProduct[]) ?? [];
+  const payTypeRaw = (o.payType as string) ?? null;
+  const serverMode = isServerModeOrder(payTypeRaw);
+  const price = Number(o.price ?? 0);
   return {
     id: o.orderCode ?? `${deviceImei}-${Math.random()}`,
     order_time: o.createTime ?? o.localPayTime ?? new Date().toISOString(),
@@ -53,7 +59,7 @@ function mapHuaxinOrder(o: HuaxinOrder, machineName: string, deviceImei: string)
     out_trade_no: (o.outTradeNo as string) ?? null,
     order_state: STATE_MAP[String(o.status)] ?? String(o.status ?? ""),
     status_code: String(o.status ?? ""),
-    price: Number(o.price ?? 0),
+    price,
     market_price: o.marketPrice != null ? Number(o.marketPrice) : null,
     discount_price: o.discountPrice != null ? Number(o.discountPrice) : null,
     re_price: o.rePrice != null ? Number(o.rePrice) : null,
@@ -61,13 +67,16 @@ function mapHuaxinOrder(o: HuaxinOrder, machineName: string, deviceImei: string)
     products,
     nums: Number(o.nums ?? 1),
     amount: Number(o.amount ?? 1),
-    pay_type: (o.payType as string) ?? null,
+    pay_type_raw: payTypeRaw,
+    pay_type: translatePayType(payTypeRaw),
+    is_server_mode: serverMode,
+    machine_collected: serverMode ? 0 : price,
+    franchisee_owed: serverMode ? price : 0,
     pay_time: (o.localPayTime as string) ?? (o.payTime as string) ?? null,
     create_time_utc: (o.createTimeUtc as string) ?? null,
     refund_status: REFUND_MAP[String(o.refundStatus ?? "0")] ?? String(o.refundStatus ?? ""),
     refund_out_no: (o.refundOutNo as string) ?? null,
     coupon_used: ((o.coupon as { result?: boolean })?.result) === true,
-    coupon_detail: (o.coupon as OrderCoupon) ?? null,
     activity_name: (o.activityName as string) ?? null,
     device_label: (o.deviceLabel as string) ?? null,
   };
@@ -93,11 +102,11 @@ async function getOrdersLive(): Promise<Order[]> {
 
 export async function getOrders(filters?: {
   machine?: string;
-  productType?: string;
   minPrice?: number;
   maxPrice?: number;
   couponOnly?: boolean;
   refundedOnly?: boolean;
+  serverModeOnly?: boolean;
 }): Promise<{ orders: Order[]; source: Source }> {
   let orders: Order[] = [];
   let source: Source = "sample";
@@ -139,6 +148,7 @@ export async function getOrders(filters?: {
   if (filters?.maxPrice != null) filtered = filtered.filter((o) => o.price <= filters.maxPrice!);
   if (filters?.couponOnly) filtered = filtered.filter((o) => o.coupon_used);
   if (filters?.refundedOnly) filtered = filtered.filter((o) => o.refund_status === "Refunded");
+  if (filters?.serverModeOnly) filtered = filtered.filter((o) => o.is_server_mode);
 
   return { orders: filtered, source };
 }

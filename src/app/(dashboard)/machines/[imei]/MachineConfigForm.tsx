@@ -4,8 +4,9 @@ import { useState } from "react";
 import { useActionState } from "react";
 import { saveMachineConfig, type SaveResult } from "./actions";
 import type { MachineConfig } from "@/lib/data/machine-config";
+import type { Tenant } from "@/lib/data/franchisees";
 
-export function MachineConfigForm({ config, imei }: { config: MachineConfig; imei: string }) {
+export function MachineConfigForm({ config, imei, tenants }: { config: MachineConfig; imei: string; tenants: Tenant[] }) {
   const [profile, setProfile] = useState(config.profile ?? "");
   const [res, action, pending] = useActionState<SaveResult | null, FormData>(saveMachineConfig, null);
 
@@ -46,8 +47,25 @@ export function MachineConfigForm({ config, imei }: { config: MachineConfig; ime
           </select>
         </label>
         <label className="block">
-          <span className={labelClass}>Last full clean</span>
+          <span className={label}>Last full clean</span>
           <input type="date" name="last_full_clean" defaultValue={lastCleanDate} className={selectClass} />
+        </label>
+        <label className="block">
+          <span className={label}>Franchisee / customer</span>
+          <select name="customer_id" defaultValue={config.customerId ?? ""} className={selectClass}>
+            <option value="">— Unassigned —</option>
+            {tenants.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className={label}>Payment model</span>
+          <select name="payment_model" defaultValue={config.paymentModel ?? "automatic"} className={selectClass}>
+            <option value="automatic">Automatic (end users pay machine)</option>
+            <option value="server">Server (franchisee collects — we bill them)</option>
+            <option value="hybrid">Hybrid (both)</option>
+          </select>
         </label>
       </div>
 

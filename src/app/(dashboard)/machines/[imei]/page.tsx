@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getMachineConfig } from "@/lib/data/machine-config";
 import { getMachineDetail, getMachineMedia, getMachineMenu, getMachineSettings, getMachineStatus } from "@/lib/data/machine-detail";
 import { getMachineLotHistory } from "@/lib/data/lot-audit";
+import { getTenants } from "@/lib/data/franchisees";
 import { MachineConfigForm } from "./MachineConfigForm";
 import { MachinePushButton } from "./MachinePushButton";
 import { RemoteControls } from "./RemoteControls";
@@ -21,6 +22,7 @@ export default async function MachineDetailPage({
 }) {
   const { imei } = await params;
   const config = await getMachineConfig(imei);
+  const tenants = await getTenants();
   const telemetry = await getMachineDetail(imei);
   const menu = await getMachineMenu(imei);
   const status = await getMachineStatus(imei);
@@ -52,7 +54,7 @@ export default async function MachineDetailPage({
         <h2 className="mb-4 font-display text-lg font-bold text-cocoa">Configuration &amp; control</h2>
         {config ? (
           <>
-            <MachineConfigForm config={config} imei={imei} />
+            <MachineConfigForm config={config} imei={imei} tenants={tenants} />
             <div className="mt-5 space-y-4 border-t border-line pt-4">
               <MachinePushButton imei={imei} />
               <div>

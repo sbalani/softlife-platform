@@ -33,8 +33,14 @@ export type HuaxinOrder = {
   status?: string | number;
   payType?: string;
   payTime?: string;
+  localPayTime?: string;
   createTime?: string;
+  createTimeUtc?: string;
   productName?: string;
+  goodsName?: string;
+  products?: { goodsName?: string; price?: string; position?: number }[];
+  deviceImei?: string;
+  deviceLabel?: string;
   [k: string]: unknown;
 };
 
@@ -196,8 +202,8 @@ export async function listOrders(
   });
   const payload = data.data;
   if (Array.isArray(payload)) return payload as HuaxinOrder[];
-  const obj = payload as { list?: HuaxinOrder[]; orders?: HuaxinOrder[] } | null;
-  return obj?.list ?? obj?.orders ?? [];
+  const obj = payload as { records?: HuaxinOrder[]; list?: HuaxinOrder[]; orders?: HuaxinOrder[] } | null;
+  return obj?.records ?? obj?.list ?? obj?.orders ?? [];
 }
 
 export type ProductDiyItem = {

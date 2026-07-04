@@ -75,7 +75,7 @@ export async function getMachineDetail(imei: string): Promise<MachineDetail | nu
       order_code: o.orderCode ?? "",
       order_state: STATE[String(o.status)] ?? String(o.status ?? ""),
       price: Number(o.price ?? 0),
-      product_name: o.productName ?? "",
+      product_name: o.products?.[0]?.goodsName ?? o.goodsName ?? "",
     }));
   } catch {
     /* non-fatal */

@@ -46,7 +46,7 @@ async function getOrdersLive(): Promise<Order[]> {
         order_code: o.orderCode ?? "",
         order_state: STATE_MAP[String(o.status)] ?? String(o.status ?? ""),
         price: Number(o.price ?? 0),
-        product_name: o.productName ?? "",
+        product_name: o.products?.[0]?.goodsName ?? o.goodsName ?? "",
       });
     }
   }

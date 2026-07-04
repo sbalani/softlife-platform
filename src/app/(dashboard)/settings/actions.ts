@@ -94,7 +94,7 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
           order_time: toIso(o.createTime),
           price: Number(o.price ?? 0),
           amount: Number(o.amount ?? 0),
-          product_name: o.productName ?? null,
+          product_name: o.products?.[0]?.goodsName ?? o.goodsName ?? null,
         }));
         if (rows.length) {
           const { error } = await supabase

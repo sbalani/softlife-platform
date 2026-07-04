@@ -17,8 +17,17 @@ export function translatePayType(raw: string | null): string | null {
   return PAY_TYPE_MAP[raw] ?? raw;
 }
 
-/** Admin override / server-mode orders have no machine-collected payment.
- *  The franchisee collected payment manually — we need to bill them. */
-export function isServerModeOrder(payType: string | null): boolean {
+/** Admin override = company staff forced a free dispense (testing).
+ *  NOT billable. NOT server mode. */
+export function isAdminOverride(payType: string | null): boolean {
   return payType === "自动制作" || payType === "Admin override";
+}
+
+/** Server mode = franchisee card was used.
+ *  End user paid the franchisee; we bill the franchisee their revenue share.
+ *  The payType for this is TBD — will be defined when the card system goes live. */
+export function isServerModeOrder(payType: string | null): boolean {
+  // TODO: add the actual payType string once Huaxin defines the franchisee-card payment type.
+  // Example: return payType === "服务器" || payType === "Server mode";
+  return false; // placeholder — no known payType yet
 }

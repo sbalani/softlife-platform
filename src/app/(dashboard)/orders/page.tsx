@@ -121,7 +121,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                   )}
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap">
-                  <span className={`text-xs ${o.is_server_mode ? "font-bold text-warning" : "text-cocoa"}`}>
+                  <span className={`text-xs ${o.is_admin_override ? "font-bold text-taupe" : o.is_server_mode ? "font-bold text-warning" : "text-cocoa"}`}>
                     {o.pay_type ?? "—"}
                   </span>
                 </td>
@@ -136,7 +136,12 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 </td>
                 <td className="px-4 py-3 text-center text-cocoa">{o.nums}</td>
                 <td className="px-4 py-3">
-                  {o.is_server_mode ? (
+                  {o.is_admin_override ? (
+                    <div>
+                      <span className="rounded-full bg-taupe/15 px-2 py-0.5 text-[10px] font-bold text-taupe">Admin override</span>
+                      <div className="mt-0.5 text-[10px] text-taupe">Free (testing)</div>
+                    </div>
+                  ) : o.is_server_mode ? (
                     <div>
                       <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold text-warning">Server mode</span>
                       <div className="mt-0.5 text-[10px] text-taupe">Franchisee owes €{o.franchisee_owed.toFixed(2)}</div>

@@ -1,6 +1,6 @@
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getConfigFromEnv, listDevices, listOrders, type HuaxinOrder } from "@/lib/huaxin/client";
-import { translatePayType, isServerModeOrder } from "@/lib/i18n/huaxin";
+import { translatePayType, isServerModeOrder, isAdminOverride } from "@/lib/i18n/huaxin";
 import type { Source } from "./machines";
 
 export type OrderProduct = { goodsName: string; price: string; position: number };
@@ -25,6 +25,7 @@ export type Order = {
   pay_type_raw: string | null;
   pay_type: string | null;
   is_server_mode: boolean;
+  is_admin_override: boolean;
   machine_collected: number;
   franchisee_owed: number;
   pay_time: string | null;
@@ -49,6 +50,7 @@ function mapHuaxinOrder(o: HuaxinOrder, machineName: string, deviceImei: string)
   const products: OrderProduct[] = (o.products as unknown as OrderProduct[]) ?? [];
   const payTypeRaw = (o.payType as string) ?? null;
   const serverMode = isServerModeOrder(payTypeRaw);
+  const adminOverride = isAdminOverride(payTypeRaw);
   const price = Number(o.price ?? 0);
   return {
     id: o.orderCode ?? `${deviceImei}-${Math.random()}`,
@@ -70,7 +72,8 @@ function mapHuaxinOrder(o: HuaxinOrder, machineName: string, deviceImei: string)
     pay_type_raw: payTypeRaw,
     pay_type: translatePayType(payTypeRaw),
     is_server_mode: serverMode,
-    machine_collected: serverMode ? 0 : price,
+    is_admin_override: adminOverride,
+    machine_collected: adminOverride || serverMode ? 0 : price,
     franchisee_owed: serverMode ? price : 0,
     pay_time: (o.localPayTime as string) ?? (o.payTime as string) ?? null,
     create_time_utc: (o.createTimeUtc as string) ?? null,

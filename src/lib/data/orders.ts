@@ -30,8 +30,8 @@ async function getOrdersLive(): Promise<Order[]> {
   const cfg = getConfigFromEnv();
   if (!cfg) return [];
   const devices = await listDevices(cfg);
-  const began = ymd(new Date(Date.now() - 30 * 86_400_000));
-  const end = ymd(new Date());
+  const began = ymd(new Date(Date.now() - 30 * 86_400_000)) + " 00:00:00";
+  const end = ymd(new Date()) + " 23:59:59";
   const out: Order[] = [];
   for (const d of devices) {
     if (!d.deviceImei) continue;

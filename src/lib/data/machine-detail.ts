@@ -52,8 +52,8 @@ export async function getMachineDetail(imei: string): Promise<MachineDetail | nu
   const d = devices.find((x) => x.deviceImei === imei);
   if (!d) return null;
 
-  const began = ymd(new Date(Date.now() - 7 * 86_400_000));
-  const end = ymd(new Date());
+  const began = ymd(new Date(Date.now() - 7 * 86_400_000)) + " 00:00:00";
+  const end = ymd(new Date()) + " 23:59:59";
 
   let temperatures: DetailTemp[] = [];
   try {

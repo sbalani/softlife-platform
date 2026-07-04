@@ -28,8 +28,8 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
   try {
     const supabase = await createServiceClient();
     const devices = await listDevices(cfg, { force: true });
-    const began = ymd(new Date(Date.now() - 7 * 86_400_000));
-    const end = ymd(new Date());
+    const began = ymd(new Date(Date.now() - 7 * 86_400_000)) + " 00:00:00";
+    const end = ymd(new Date()) + " 23:59:59";
 
     let machines = 0;
     let temps = 0;

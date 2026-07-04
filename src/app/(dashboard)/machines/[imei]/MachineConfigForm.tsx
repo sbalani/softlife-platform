@@ -47,11 +47,11 @@ export function MachineConfigForm({ config, imei, tenants }: { config: MachineCo
           </select>
         </label>
         <label className="block">
-          <span className={label}>Last full clean</span>
+          <span className={labelClass}>Last full clean</span>
           <input type="date" name="last_full_clean" defaultValue={lastCleanDate} className={selectClass} />
         </label>
         <label className="block">
-          <span className={label}>Franchisee / customer</span>
+          <span className={labelClass}>Franchisee / customer</span>
           <select name="customer_id" defaultValue={config.customerId ?? ""} className={selectClass}>
             <option value="">— Unassigned —</option>
             {tenants.map((t) => (
@@ -60,7 +60,7 @@ export function MachineConfigForm({ config, imei, tenants }: { config: MachineCo
           </select>
         </label>
         <label className="block">
-          <span className={label}>Payment model</span>
+          <span className={labelClass}>Payment model</span>
           <select name="payment_model" defaultValue={config.paymentModel ?? "automatic"} className={selectClass}>
             <option value="automatic">Automatic (end users pay machine)</option>
             <option value="server">Server (franchisee collects — we bill them)</option>

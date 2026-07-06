@@ -56,8 +56,7 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
       const machineId = (m as { id?: string } | null)?.id ?? null;
 
       try {
-        const t = await pullTemperatures(cfg, d.deviceImei, began, end);
-        const category = t.category ?? [];
+        const t = await pullTemperatures(cfg, d.deviceImei, began, end);        const category = t.category ?? [];
         const rows: {
           machine_id: string | null;
           reading_time: string;
@@ -84,8 +83,7 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
       }
 
       try {
-        const ords = (await listOrders(cfg, d.deviceImei, began, end)).filter((o) => o.orderCode);
-        const rows = ords.map((o) => ({
+        const ords = (await listOrders(cfg, d.deviceImei, began, end)).filter((o) => o.orderCode);        const rows = ords.map((o) => ({
           machine_id: machineId,
           device_imei: d.deviceImei,
           order_code: o.orderCode!,

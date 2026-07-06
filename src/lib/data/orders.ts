@@ -95,9 +95,13 @@ async function getOrdersLive(): Promise<Order[]> {
   for (const d of devices) {
     if (!d.deviceImei) continue;
     const machineName = (d.deviceLabel as string) || d.deviceName || d.deviceImei;
-    const ords = await listOrders(cfg, d.deviceImei, began, end);
-    for (const o of ords) {
-      out.push(mapHuaxinOrder(o, machineName, d.deviceImei));
+    try {
+      const ords = await listOrders(cfg, d.deviceImei, began, end);
+      for (const o of ords) {
+        out.push(mapHuaxinOrder(o, machineName, d.deviceImei));
+      }
+    } catch (e) {
+      console.error(`[orders] Failed for device ${d.deviceImei}:`, e);
     }
   }
   return out.sort((a, b) => +new Date(b.order_time) - +new Date(a.order_time)).slice(0, 100);

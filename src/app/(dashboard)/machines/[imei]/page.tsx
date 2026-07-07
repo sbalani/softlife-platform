@@ -134,7 +134,7 @@ export default async function MachineDetailPage({
         {status.length ? (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
             {status.map((s, i) => {
-              const desc = (s.desc || s.code ?? "").toLowerCase();
+              const desc = ((s.desc ?? s.code) ?? "").toLowerCase();
               const val = s.value ?? "—";
               let tone = "";
               if (desc.includes("formation ratio") || desc.includes("form") && desc.includes("ratio")) {

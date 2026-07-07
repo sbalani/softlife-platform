@@ -175,6 +175,7 @@ export async function removeDeviceMediaAction(
 }
 
 export type ProductUpdateResult = { ok: boolean; error?: string };
+export type BrandingResult = { ok: boolean; error?: string };
 
 export async function updateMachineProduct(
   imei: string,

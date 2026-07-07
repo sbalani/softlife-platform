@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getMachineConfig } from "@/lib/data/machine-config";
 import { getMachineDetail, getMachineMedia, getMachineMenu, getMachineSettings, getMachineStatus } from "@/lib/data/machine-detail";
 import { getMachineLotHistory } from "@/lib/data/lot-audit";
+import { translateStatusDesc, translateStatusValue } from "@/lib/i18n/huaxin";
 import { getTenants } from "@/lib/data/franchisees";
 import { MachineConfigForm } from "./MachineConfigForm";
 import { MachinePushButton } from "./MachinePushButton";
@@ -134,8 +135,8 @@ export default async function MachineDetailPage({
         {status.length ? (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
             {status.map((s, i) => {
-              const desc = ((s.desc ?? s.code) ?? "").toLowerCase();
-              const val = s.value ?? "—";
+              const desc = translateStatusDesc(s.desc ?? s.code).toLowerCase();
+              const val = translateStatusValue(s.value);
               let tone = "";
               if (desc.includes("formation ratio") || desc.includes("form") && desc.includes("ratio")) {
                 const num = parseFloat(val);
@@ -145,7 +146,7 @@ export default async function MachineDetailPage({
               }
               return (
                 <div key={i} className="rounded-lg bg-cream/50 px-3 py-2">
-                  <div className="text-[10px] uppercase tracking-wide text-taupe">{s.desc || s.code}</div>
+                  <div className="text-[10px] uppercase tracking-wide text-taupe">{translateStatusDesc(s.desc ?? s.code)}</div>
                   <div className={`text-sm font-semibold ${tone || "text-cocoa"}`}>{val}</div>
                 </div>
               );

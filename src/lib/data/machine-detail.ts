@@ -60,9 +60,10 @@ export async function getMachineDetail(imei: string): Promise<MachineDetail | nu
     const t = await pullTemperatures(cfg, imei, began, end);
     const category = t.category ?? [];
     const series = (t.dataset ?? [])[0];
-    temperatures = (series?.data ?? [])
-      .map((p, i) => ({ time: category[i] ?? "", value: Number(p.value ?? 0) }))
-      .slice(-24);
+    temperatures = (series?.data ?? []).map((p, i) => ({
+      time: category[i]?.label ?? String(i),
+      value: Number(p.value ?? 0),
+    })).slice(-24);
   } catch {
     /* non-fatal */
   }

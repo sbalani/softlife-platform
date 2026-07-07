@@ -34,10 +34,10 @@ async function getTempsLive(): Promise<TempReading[]> {
     const data = series?.data ?? [];
     const category = t.category ?? [];
     const last = data[data.length - 1];
-    if (last && last.value != null && last.value !== "") {
+    if (last && last.value != null) {
       out.push({
         machine_name: machineName,
-        reading_time: category[category.length - 1] ?? new Date().toISOString(),
+        reading_time: category[category.length - 1]?.label ?? new Date().toISOString(),
         series_name: series?.seriesname ?? "temperature",
         value: Number(last.value),
       });

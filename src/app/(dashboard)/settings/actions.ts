@@ -54,9 +54,9 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
         .single();
       machines++;
       const machineId = (m as { id?: string } | null)?.id ?? null;
-
       try {
-        const t = await pullTemperatures(cfg, d.deviceImei, began, end);        const category = t.category ?? [];
+        const t = await pullTemperatures(cfg, d.deviceImei, began, end);
+        const category = t.category ?? [];
         const rows: {
           machine_id: string | null;
           reading_time: string;
@@ -65,12 +65,13 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
         }[] = [];
         for (const series of t.dataset ?? []) {
           const sname = series.seriesname ?? "temperature";
-          for (let i = 0; i < (series.data ?? []).length; i++) {
+          const sdata = series.data ?? [];
+          for (let i = 0; i < sdata.length; i++) {
             rows.push({
               machine_id: machineId,
-              reading_time: toIso(category[i]) ?? new Date().toISOString(),
+              reading_time: category[i]?.label ? `${ymd(new Date())} ${category[i].label}` : new Date().toISOString(),
               series_name: sname,
-              value: Number(series.data?.[i]?.value ?? 0),
+              value: Number(sdata[i]?.value ?? 0),
             });
           }
         }

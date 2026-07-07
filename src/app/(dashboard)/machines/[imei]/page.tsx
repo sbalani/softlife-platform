@@ -203,7 +203,7 @@ export default async function MachineDetailPage({
         </div>
         {telemetry && telemetry.temperatures.length ? (
           <div className="mt-3">
-            <AreaChart data={telemetry.temperatures.map((t) => ({ label: t.time ? new Date(t.time.replace(" ", "T")).toLocaleTimeString() : "", value: t.value }))} />
+            <AreaChart data={telemetry.temperatures.map((t) => ({ label: t.time ?? "", value: t.value }))} />
           </div>
         ) : (
           <p className="mt-3 text-sm text-taupe">No temperature readings in the last 7 days.</p>

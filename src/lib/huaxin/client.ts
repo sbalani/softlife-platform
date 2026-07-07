@@ -181,11 +181,14 @@ export async function pullTemperatures(
     cfg,
     { device_imei: deviceImei, began_time: began ?? "", end_time: end ?? "" },
   );
-  return data.data as {
-    category?: string[];
-    dataset?: { seriesname?: string; data?: { value?: string }[] }[];
-  };
+  const payload = data.data as { temperatures?: TempPayload } | null;
+  return (payload?.temperatures ?? { category: [], dataset: [] }) as TempPayload;
 }
+
+export type TempPayload = {
+  category?: { label?: string }[];
+  dataset?: { seriesname?: string; data?: { value?: string | number }[] }[];
+};
 
 export async function listOrders(
   cfg: HuaxinConfig,

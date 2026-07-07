@@ -133,12 +133,23 @@ export default async function MachineDetailPage({
         <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Live status</h2>
         {status.length ? (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-            {status.map((s, i) => (
-              <div key={i} className="rounded-lg bg-cream/50 px-3 py-2">
-                <div className="text-[10px] uppercase tracking-wide text-taupe">{s.desc || s.code}</div>
-                <div className="text-sm font-semibold text-cocoa">{s.value ?? "—"}</div>
-              </div>
-            ))}
+            {status.map((s, i) => {
+              const desc = (s.desc || s.code ?? "").toLowerCase();
+              const val = s.value ?? "—";
+              let tone = "";
+              if (desc.includes("formation ratio") || desc.includes("form") && desc.includes("ratio")) {
+                const num = parseFloat(val);
+                if (num === 0) tone = "text-danger font-bold";
+                else if (num === 100) tone = "text-sage font-bold";
+                else tone = "text-warning font-bold";
+              }
+              return (
+                <div key={i} className="rounded-lg bg-cream/50 px-3 py-2">
+                  <div className="text-[10px] uppercase tracking-wide text-taupe">{s.desc || s.code}</div>
+                  <div className={`text-sm font-semibold ${tone || "text-cocoa"}`}>{val}</div>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <p className="text-sm text-taupe">No status parameters available.</p>

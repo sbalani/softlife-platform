@@ -52,7 +52,7 @@ export function ProductEditor({
       {!editing ? (
         <div className="flex items-center gap-3">
           {item.imagePath ? (
-            <img src={item.imagePath} alt={item.goodsName} className="h-12 w-12 rounded-lg object-cover" />
+            <img src={item.imagePath} alt={item.goodsName} referrerPolicy="no-referrer" className="h-12 w-12 rounded-lg object-cover" />
           ) : (
             <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-cream text-taupe">—</div>
           )}

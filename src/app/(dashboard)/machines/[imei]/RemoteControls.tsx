@@ -10,16 +10,20 @@ const COMMANDS = [
   { command: "operate_sellout", label: "Sold out", icon: "⏸" },
   { command: "operate_openrefrigeration", label: "Fridge on", icon: "❄" },
   { command: "operate_closerefrigeration", label: "Fridge off", icon: "🔥" },
+  { command: "operate_status", label: "Status query", icon: "📡" },
 ];
+
+type CmdResult = { ok: boolean; error?: string; huaxinCode?: string; huaxinMsg?: string; cmd?: string };
 
 export function RemoteControls({ imei }: { imei: string }) {
   const [pending, startTransition] = useTransition();
-  const [result, setResult] = useState<{ ok: boolean; error?: string; cmd?: string } | null>(null);
+  const [results, setResults] = useState<CmdResult[]>([]);
 
   const send = (cmd: string, label: string) => {
     startTransition(async () => {
       const res = await sendMachineCommand(imei, cmd);
-      setResult({ ...res, cmd: label });
+      const entry: CmdResult = { ...res, cmd: label };
+      setResults((prev) => [entry, ...prev].slice(0, 5));
     });
   };
 
@@ -38,10 +42,20 @@ export function RemoteControls({ imei }: { imei: string }) {
           </button>
         ))}
       </div>
-      {result && (
-        <p className={`mt-2 text-xs font-semibold ${result.ok ? "text-sage" : "text-danger"}`}>
-          {result.ok ? `${result.cmd} — sent.` : `${result.cmd} — ${result.error}`}
-        </p>
+      {pending && <p className="mt-2 text-xs text-taupe">Sending command…</p>}
+      {results.length > 0 && (
+        <div className="mt-3 space-y-1 rounded-lg bg-cream/50 p-3">
+          <div className="mb-1 text-[10px] uppercase tracking-wide text-taupe">Command log</div>
+          {results.map((r, i) => (
+            <div key={i} className="flex items-center gap-2 text-xs">
+              <span className={r.ok ? "text-sage" : "text-danger"}>{r.ok ? "✓" : "✗"}</span>
+              <span className="font-semibold text-cocoa">{r.cmd}</span>
+              <span className="text-taupe">
+                Huaxin: {r.huaxinCode ?? "—"} / {r.huaxinMsg ?? r.error ?? "—"}
+              </span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

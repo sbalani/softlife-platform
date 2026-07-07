@@ -111,13 +111,15 @@ export async function pushMachineProducts(_prev: PushResult | null, fd: FormData
 export async function sendMachineCommand(
   imei: string,
   command: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; huaxinCode?: string; huaxinMsg?: string }> {
   const cfg = getConfigFromEnv();
   if (!cfg) return { ok: false, error: "Huaxin not configured." };
   try {
     const result = await sendCommand(cfg, imei, command);
-    if (String(result.code) === "200") return { ok: true };
-    return { ok: false, error: result.msg ?? "Command rejected" };
+    const code = String(result.code);
+    const msg = result.msg ?? "";
+    if (code === "200") return { ok: true, huaxinCode: code, huaxinMsg: msg || "success" };
+    return { ok: false, error: msg || "Command rejected", huaxinCode: code, huaxinMsg: msg };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

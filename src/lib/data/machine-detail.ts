@@ -95,11 +95,11 @@ export async function getMachineDetail(imei: string): Promise<MachineDetail | nu
 
 export async function getMachineMenu(imei: string) {
   const cfg = getConfigFromEnv();
-  if (!cfg) return [];
+  if (!cfg) return { diy: [], unify: [] };
   try {
     return await listDeviceProducts(cfg, imei);
   } catch {
-    return [];
+    return { diy: [], unify: [] };
   }
 }
 

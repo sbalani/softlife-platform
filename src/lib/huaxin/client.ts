@@ -207,17 +207,24 @@ export async function listOrders(
 }
 
 export type ProductDiyItem = {
-  position?: string;
+  position?: string | number;
   goodsName?: string;
   price?: string;
   imagePath?: string;
   enable?: number;
+  stock?: string;
+  marketPrice?: string;
+  languagePacks?: { code?: string; goodsName?: string; intro?: string }[];
+  intro?: string;
 };
 
-export async function listDeviceProducts(cfg: HuaxinConfig, deviceImei: string): Promise<ProductDiyItem[]> {
+export async function listDeviceProducts(cfg: HuaxinConfig, deviceImei: string): Promise<{ diy: ProductDiyItem[]; unify: ProductDiyItem[] }> {
   const data = await call("/machine/cloud/api/device/product", cfg, { device_imei: deviceImei });
-  const payload = data.data as { productDiy?: ProductDiyItem[] } | null;
-  return payload?.productDiy ?? [];
+  const payload = data.data as { diy?: ProductDiyItem[]; unify?: ProductDiyItem[] } | null;
+  return {
+    diy: payload?.diy ?? [],
+    unify: payload?.unify ?? [],
+  };
 }
 
 export async function pushProductDiy(

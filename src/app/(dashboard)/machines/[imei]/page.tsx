@@ -9,6 +9,7 @@ import { MachinePushButton } from "./MachinePushButton";
 import { RemoteControls } from "./RemoteControls";
 import { MediaManager } from "./MediaManager";
 import { DeviceBrandingForm } from "./DeviceBrandingForm";
+import { MachineSyncButton } from "./MachineSyncButton";
 import { DeviceSettingsPanel } from "./DeviceSettingsPanel";
 import { LogLotForm } from "./LogLotForm";
 import { AreaChart } from "@/components/charts";
@@ -47,6 +48,7 @@ export default async function MachineDetailPage({
         <span className={`rounded-full px-3 py-1 text-xs font-bold ${online ? "bg-sage/15 text-sage" : "bg-taupe/15 text-taupe"}`}>
           {online ? "Online" : "Offline"}
         </span>
+        <MachineSyncButton imei={imei} />
       </header>
 
       {/* Configuration + Push + Remote */}

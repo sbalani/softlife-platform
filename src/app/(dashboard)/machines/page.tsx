@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getMachines } from "@/lib/data/machines";
+import { SyncStatusesButton } from "./SyncStatusesButton";
 
 export const dynamic = "force-dynamic";
 
@@ -98,7 +99,8 @@ export default async function MachinesPage({
         <Chip value="all" label={`All (${counts.all})`} />
         <Chip value="active" label={`Active (${counts.active})`} />
         <Chip value="inactive" label={`Inactive (${counts.inactive})`} />
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-3">
+          <SyncStatusesButton />
           <button className="rounded-lg bg-terracotta px-4 py-2 text-sm font-bold text-white hover:bg-terracotta-dark">
             + Add machine
           </button>

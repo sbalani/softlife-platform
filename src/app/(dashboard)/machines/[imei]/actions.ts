@@ -174,7 +174,30 @@ export async function removeDeviceMediaAction(
   }
 }
 
-export type BrandingResult = { ok: boolean; error?: string };
+export type ProductUpdateResult = { ok: boolean; error?: string };
+
+export async function updateMachineProduct(
+  imei: string,
+  position: string,
+  fields: Record<string, string>,
+): Promise<ProductUpdateResult> {
+  const cfg = getConfigFromEnv();
+  if (!cfg) return { ok: false, error: "Huaxin not configured." };
+  const items = Object.entries(fields)
+    .filter(([, v]) => v.trim() !== "")
+    .map(([code, value]) => ({ position: String(position), code, value }));
+  if (!items.length) return { ok: false, error: "Nothing to update." };
+  try {
+    const result = await pushProductDiy(cfg, imei, items);
+    if (String(result.code) === "200") {
+      try { await refreshProduct(cfg, imei); } catch { /* best-effort */ }
+      return { ok: true };
+    }
+    return { ok: false, error: result.msg ?? "Update rejected" };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
 
 export async function updateDeviceBranding(_prev: BrandingResult | null, fd: FormData): Promise<BrandingResult> {
   const imei = String(fd.get("imei") ?? "");

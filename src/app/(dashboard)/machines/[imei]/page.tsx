@@ -10,6 +10,7 @@ import { RemoteControls } from "./RemoteControls";
 import { MediaManager } from "./MediaManager";
 import { DeviceBrandingForm } from "./DeviceBrandingForm";
 import { MachineSyncButton } from "./MachineSyncButton";
+import { ProductEditor } from "./ProductEditor";
 import { DeviceSettingsPanel } from "./DeviceSettingsPanel";
 import { LogLotForm } from "./LogLotForm";
 import { AreaChart } from "@/components/charts";
@@ -152,27 +153,15 @@ export default async function MachineDetailPage({
 
       {/* Product menu */}
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">
-        <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Product menu on machine (live)</h2>
+        <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Product menu on machine (live, editable)</h2>
         {menu.diy.length > 0 || menu.unify.length > 0 ? (
           <div className="space-y-4">
             {menu.unify.length > 0 && (
               <div>
                 <h3 className="mb-2 text-[11px] uppercase tracking-wide text-taupe">Menu items (recipes / combos)</h3>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {menu.unify.map((item, i) => (
-                    <div key={i} className="rounded-xl border border-line p-3 text-center">
-                      {item.imagePath ? (
-                        <img src={item.imagePath} alt={item.goodsName} className="mx-auto h-16 w-16 rounded-lg object-cover" />
-                      ) : (
-                        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-lg bg-cream text-taupe">—</div>
-                      )}
-                      <div className="mt-2 text-sm font-semibold text-cocoa">{item.goodsName ?? "—"}</div>
-                      <div className="text-xs text-taupe">
-                        Menu {item.position}
-                        {Number(item.price) > 0 && ` · €${(Number(item.price) / 100).toFixed(2)}`}
-                      </div>
-                      {item.intro && <div className="mt-1 text-[10px] text-taupe line-clamp-2">{item.intro}</div>}
-                    </div>
+                    <ProductEditor key={i} imei={imei} item={item} kind="menu" />
                   ))}
                 </div>
               </div>
@@ -180,21 +169,9 @@ export default async function MachineDetailPage({
             {menu.diy.length > 0 && (
               <div>
                 <h3 className="mb-2 text-[11px] uppercase tracking-wide text-taupe">Hoppers / ingredients</h3>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {menu.diy.map((item, i) => (
-                    <div key={i} className="rounded-xl border border-line p-3 text-center">
-                      {item.imagePath ? (
-                        <img src={item.imagePath} alt={item.goodsName} className="mx-auto h-14 w-14 rounded-lg object-cover" />
-                      ) : (
-                        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-lg bg-cream text-taupe">—</div>
-                      )}
-                      <div className="mt-2 text-sm font-semibold text-cocoa">{item.goodsName ?? "—"}</div>
-                      <div className="text-xs text-taupe">
-                        Pos {item.position}
-                        {Number(item.price) > 0 && ` · price ${item.price}`}
-                        {item.stock && ` · stock ${item.stock}`}
-                      </div>
-                    </div>
+                    <ProductEditor key={i} imei={imei} item={item} kind="hopper" />
                   ))}
                 </div>
               </div>

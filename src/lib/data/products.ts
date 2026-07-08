@@ -23,6 +23,9 @@ export type Product = {
   image_url: string | null;
   allergen_url: string | null;
   allergens: { contains: ProductAllergen[]; may_contain: ProductAllergen[] };
+  odoo_id: number | null;
+  odoo_sku: string | null;
+  odoo_qty_available: number | null;
 };
 
 export async function getProducts(): Promise<Product[]> {
@@ -31,15 +34,19 @@ export async function getProducts(): Promise<Product[]> {
     const s = await createServiceClient();
     const { data } = await s
       .from("products")
-      .select("*, ingredient_allergens(presence, allergens(id,name,slug,logo_url))")
+      .select("*, ingredient_allergens(presence, allergens(id,name,slug,logo_url)), odoo_products(sku,qty_available)")
       .order("name");
     return ((data as Record<string, unknown>[]) ?? []).map((p) => {
       const ia = (p.ingredient_allergens as { presence: string; allergens: ProductAllergen }[]) ?? [];
+      const odoo = p.odoo_products as { sku: string | null; qty_available: number } | null;
       return {
         id: p.id as string,
         name: p.name as string,
         type: p.type as string,
         sku: (p.sku as string) ?? null,
+        odoo_id: (p.odoo_id as number) ?? null,
+        odoo_sku: odoo?.sku ?? null,
+        odoo_qty_available: odoo?.qty_available ?? null,
         description: (p.description as string) ?? null,
         brand: (p.brand as string) ?? null,
         ingredients_list: (p.ingredients_list as string) ?? null,

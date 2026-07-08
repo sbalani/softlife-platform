@@ -101,3 +101,25 @@ export async function createProduct(_prev: ProductResult | null, fd: FormData): 
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
+
+export async function linkProductToOdoo(_prev: ProductResult | null, fd: FormData): Promise<ProductResult> {
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+  const productId = String(fd.get("product_id") ?? "");
+  const odooIdRaw = String(fd.get("odoo_id") ?? "");
+  if (!productId) return { ok: false, error: "Missing product." };
+  const odooId = odooIdRaw ? Number(odooIdRaw) : null;
+
+  try {
+    const s = await createServiceClient();
+    const { error } = await s.from("products").update({ odoo_id: odooId }).eq("id", productId);
+    if (error) {
+      const msg = error.code === "23505" ? "That Odoo SKU is already linked to a different ingredient." : error.message;
+      return { ok: false, error: msg };
+    }
+    revalidatePath("/products");
+    revalidatePath("/odoo");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}

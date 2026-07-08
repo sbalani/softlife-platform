@@ -1,5 +1,6 @@
 import { getOdooSkus, getOdooLots } from "@/lib/data/odoo";
 import { DataSourceNote } from "@/components/data-source-note";
+import { CreateIngredientButton } from "./CreateIngredientButton";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,7 @@ export default async function OdooPage() {
                 <th className="px-4 py-3">Barcode</th>
                 <th className="px-4 py-3">Category</th>
                 <th className="px-4 py-3 text-right">On hand</th>
+                <th className="px-4 py-3 text-right">Ingredient</th>
               </tr>
             </thead>
             <tbody>
@@ -42,11 +44,18 @@ export default async function OdooPage() {
                   <td className="px-4 py-3 text-right text-cocoa">
                     {s.qty_available} {s.uom ?? ""}
                   </td>
+                  <td className="px-4 py-3 text-right">
+                    {s.linked_product_id ? (
+                      <span className="text-xs font-semibold text-sage">⇄ {s.linked_product_name}</span>
+                    ) : (
+                      <CreateIngredientButton odooId={s.id} />
+                    )}
+                  </td>
                 </tr>
               ))}
               {skus.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-taupe">No SKUs found.</td>
+                  <td colSpan={6} className="px-4 py-6 text-center text-taupe">No SKUs found.</td>
                 </tr>
               )}
             </tbody>

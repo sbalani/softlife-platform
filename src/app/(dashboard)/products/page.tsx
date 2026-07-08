@@ -1,6 +1,8 @@
 import { getProducts } from "@/lib/data/products";
 import { getAllergens } from "@/lib/data/allergens";
+import { getOdooSkus } from "@/lib/data/odoo";
 import { ProductForm } from "./ProductForm";
+import { LinkOdooControl } from "./LinkOdooControl";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +27,8 @@ function AllergenBadges({ list, dim }: { list: { id: string; name: string; logo_
 }
 
 export default async function IngredientsPage() {
-  const [products, allergens] = await Promise.all([getProducts(), getAllergens()]);
+  const [products, allergens, { skus: odooSkus }] = await Promise.all([getProducts(), getAllergens(), getOdooSkus()]);
+  const unlinkedSkus = odooSkus.filter((s) => !s.linked_product_id).map((s) => ({ id: s.id, name: s.name, sku: s.sku }));
 
   return (
     <div>
@@ -80,6 +83,14 @@ export default async function IngredientsPage() {
                 /100g: {p.nf_calories != null ? `${p.nf_calories} kcal · ` : ""}{p.nf_protein != null ? `P ${p.nf_protein}g · ` : ""}{p.nf_carbs != null ? `C ${p.nf_carbs}g · ` : ""}{p.nf_sugar != null ? `S ${p.nf_sugar}g · ` : ""}{p.nf_fat != null ? `F ${p.nf_fat}g` : ""}{p.nutritional_claim ? ` · ${p.nutritional_claim}` : ""}
               </p>
             )}
+
+            <LinkOdooControl
+              productId={p.id}
+              linkedOdooId={p.odoo_id}
+              linkedSku={p.odoo_sku}
+              linkedQty={p.odoo_qty_available}
+              unlinkedSkus={unlinkedSkus}
+            />
           </article>
         ))}
       </div>

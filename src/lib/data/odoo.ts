@@ -9,6 +9,8 @@ export type OdooSku = {
   qty_available: number;
   uom: string | null;
   category: string | null;
+  linked_product_id: string | null;
+  linked_product_name: string | null;
 };
 
 export type OdooLotRow = {
@@ -22,9 +24,9 @@ export type OdooLotRow = {
 };
 
 const SAMPLE_SKUS: OdooSku[] = [
-  { id: 1, name: "Vanilla Soft-Serve Base 10L", sku: "BASE-VAN-10L", barcode: "8410000000012", qty_available: 42, uom: "Units", category: "Bases" },
-  { id: 2, name: "Chocolate Sauce 5L", sku: "SAUCE-CHOC-5L", barcode: "8410000000029", qty_available: 18, uom: "Units", category: "Sauces" },
-  { id: 3, name: "Oreo Crumble Topping 2kg", sku: "TOP-OREO-2KG", barcode: "8410000000036", qty_available: 7, uom: "Units", category: "Toppings" },
+  { id: 1, name: "Vanilla Soft-Serve Base 10L", sku: "BASE-VAN-10L", barcode: "8410000000012", qty_available: 42, uom: "Units", category: "Bases", linked_product_id: null, linked_product_name: null },
+  { id: 2, name: "Chocolate Sauce 5L", sku: "SAUCE-CHOC-5L", barcode: "8410000000029", qty_available: 18, uom: "Units", category: "Sauces", linked_product_id: null, linked_product_name: null },
+  { id: 3, name: "Oreo Crumble Topping 2kg", sku: "TOP-OREO-2KG", barcode: "8410000000036", qty_available: 7, uom: "Units", category: "Toppings", linked_product_id: null, linked_product_name: null },
 ];
 
 const SAMPLE_LOTS: OdooLotRow[] = [
@@ -36,22 +38,30 @@ export async function getOdooSkus(): Promise<{ skus: OdooSku[]; source: Source }
   if (!isSupabaseConfigured()) return { skus: SAMPLE_SKUS, source: "sample" };
   try {
     const s = await createServiceClient();
-    const { data } = await s
-      .from("odoo_products")
-      .select("odoo_id,name,sku,barcode,qty_available,uom,category")
-      .order("name");
+    const [{ data }, { data: linkedRows }] = await Promise.all([
+      s.from("odoo_products").select("odoo_id,name,sku,barcode,qty_available,uom,category").order("name"),
+      s.from("products").select("id,name,odoo_id").not("odoo_id", "is", null),
+    ]);
     const rows = (data as Record<string, unknown>[]) ?? [];
     if (!rows.length) return { skus: SAMPLE_SKUS, source: "sample" };
+    const linkedByOdooId = new Map(
+      ((linkedRows as { id: string; name: string; odoo_id: number }[]) ?? []).map((p) => [p.odoo_id, p]),
+    );
     return {
-      skus: rows.map((r) => ({
-        id: r.odoo_id as number,
-        name: r.name as string,
-        sku: (r.sku as string) ?? null,
-        barcode: (r.barcode as string) ?? null,
-        qty_available: Number(r.qty_available ?? 0),
-        uom: (r.uom as string) ?? null,
-        category: (r.category as string) ?? null,
-      })),
+      skus: rows.map((r) => {
+        const linked = linkedByOdooId.get(r.odoo_id as number);
+        return {
+          id: r.odoo_id as number,
+          name: r.name as string,
+          sku: (r.sku as string) ?? null,
+          barcode: (r.barcode as string) ?? null,
+          qty_available: Number(r.qty_available ?? 0),
+          uom: (r.uom as string) ?? null,
+          category: (r.category as string) ?? null,
+          linked_product_id: linked?.id ?? null,
+          linked_product_name: linked?.name ?? null,
+        };
+      }),
       source: "supabase",
     };
   } catch (e) {

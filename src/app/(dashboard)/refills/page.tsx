@@ -45,7 +45,7 @@ export default async function RefillsPage() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <span className="font-display text-base font-bold text-cocoa">{r.machine_name ?? "Unknown machine"}</span>
-                    <span className="ml-2 text-xs text-taupe">by {r.operator_id ?? "—"}</span>
+                    <span className="ml-2 text-xs text-taupe">by {r.operator_name ?? "—"}</span>
                   </div>
                   <span className="text-xs text-taupe">{new Date(r.device_event_time).toLocaleString()}</span>
                 </div>

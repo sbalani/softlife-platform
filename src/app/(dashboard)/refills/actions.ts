@@ -2,11 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { getSessionProfile } from "@/lib/auth/session";
 
 export type RefillResult = { ok: boolean; error?: string };
 
 export async function submitRefill(_prev: RefillResult | null, fd: FormData): Promise<RefillResult> {
   if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+  const session = await getSessionProfile();
+  if (!session) return { ok: false, error: "Sign in to log a refill." };
   const machineId = String(fd.get("machine_id") ?? "");
   if (!machineId) return { ok: false, error: "Select a machine." };
 
@@ -32,9 +35,7 @@ export async function submitRefill(_prev: RefillResult | null, fd: FormData): Pr
     const lotById = new Map(((lotsData as Record<string, unknown>[]) ?? []).map((l) => [l.id as string, l]));
 
     const ts = new Date().toISOString();
-    // TODO: replace with the real logged-in user's id once auth (Supabase Auth,
-    // admin/operator roles) lands — this is a placeholder until then.
-    const operatorId = String(fd.get("operator_id") ?? "dashboard");
+    const operatorId = session.id;
 
     const linePayload: { client_uuid: string; lot_id: string; lot_name: string; quantity_used: number; photo_url: string | null; device_event_time: string }[] = [];
     for (const line of lines) {

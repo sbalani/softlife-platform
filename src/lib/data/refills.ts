@@ -10,7 +10,7 @@ export type RefillLine = {
 export type Refill = {
   id: string;
   machine_name: string | null;
-  operator_id: string | null;
+  operator_name: string | null;
   device_event_time: string;
   status: string;
   lines: RefillLine[];
@@ -29,16 +29,17 @@ export async function getRefillHistory(): Promise<Refill[]> {
     const s = await createServiceClient();
     const { data } = await s
       .from("reposiciones")
-      .select("id, operator_id, device_event_time, status, payload_json, machines(name)")
+      .select("id, device_event_time, status, payload_json, machines(name), profiles(full_name,email)")
       .order("device_event_time", { ascending: false })
       .limit(100);
     return ((data as Record<string, unknown>[]) ?? []).map((r) => {
       const payload = (r.payload_json as { lines?: PayloadLine[] }) ?? {};
       const machine = r.machines as { name?: string } | null;
+      const operator = r.profiles as { full_name?: string; email?: string } | null;
       return {
         id: r.id as string,
         machine_name: machine?.name ?? null,
-        operator_id: (r.operator_id as string) ?? null,
+        operator_name: operator?.full_name ?? operator?.email ?? null,
         device_event_time: r.device_event_time as string,
         status: (r.status as string) ?? "pending",
         lines: (payload.lines ?? []).map((l) => ({

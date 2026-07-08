@@ -1,134 +1,17 @@
-"use client";
+import type { ReactNode } from "react";
+import { getSessionProfile } from "@/lib/auth/session";
+import { DashboardShell } from "./DashboardShell";
 
-import Link from "next/link";
-import { useState, type ReactNode } from "react";
+export default async function DashboardLayout({ children }: { children: ReactNode }) {
+  // Middleware guarantees a session exists for every route this layout wraps;
+  // the null fallback here is just so a race/edge case renders a safe default
+  // instead of crashing, not a substitute for the middleware check.
+  const session = await getSessionProfile();
+  const profile = {
+    role: session?.role ?? "operator",
+    email: session?.email ?? null,
+    fullName: session?.full_name ?? null,
+  } as const;
 
-const NAV: { label: string; href?: string; soon?: boolean; icon: ReactNode }[] = [
-  { label: "Dashboard", href: "/dashboard", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM14 8h6V4h-6zM4 20h6v-3H4z"/></svg> },
-  { label: "Machines", href: "/machines", icon: <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M9 16h6"/></svg> },
-  { label: "Refills", href: "/refills", icon: <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.8"><path d="M12 2v13M8 6l4-4 4 4"/><path d="M4 14a8 8 0 0016 0"/></svg> },
-  { label: "Orders", href: "/orders", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 6h15l-1.5 9h-12z"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/></svg> },
-  { label: "Alerts", href: "/alerts", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 3l9 16H3z"/><path d="M12 10v4"/></svg> },
-  { label: "Temperatures", href: "/temperatures", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M14 14V5a2 2 0 10-4 0v9a4 4 0 104 0z"/></svg> },
-  { label: "Ingredients", href: "/products", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/></svg> },
-  { label: "Allergens", href: "/allergens", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 2L2 22h20L12 2z"/><path d="M12 9v5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg> },
-  { label: "Inventory", href: "/inventory", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 7h16v13H4z"/><path d="M9 7V4h6v3"/></svg> },
-  { label: "Lot Audit", href: "/lot-audit", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg> },
-  { label: "Transfers", href: "/transfers", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 9h13M14 5l4 4-4 4M21 15H8M10 19l-4-4 4-4"/></svg> },
-  { label: "Franchisees", href: "/franchisees", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0114 0"/></svg> },
-  { label: "Promotions", href: "/coupons", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M20 12l-8 8-9-9V3h8z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg> },
-  { label: "Advertising", href: "/advertising", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/></svg> },
-  { label: "Odoo", href: "/odoo", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 17.5h7M17.5 14v7"/></svg> },
-  { label: "Settings", href: "/settings", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 00-1.7-1L14.5 2h-5l-.3 2.5a7 7 0 00-1.7 1l-2.4-1-2 3.4 2 1.6a7 7 0 000 2l-2 1.6 2 3.4 2.4-1a7 7 0 001.7 1l.3 2.5h5l.3-2.5a7 7 0 001.7-1l2.4 1 2-3.4-2-1.6a7 7 0 00.1-1z"/></svg> },
-];
-
-function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
-  return (
-    <header className="flex items-center justify-between gap-3 border-b border-line bg-white px-4 py-3 sm:justify-end sm:gap-5 sm:px-6">
-      <button
-        title="Open menu"
-        onClick={onMenuClick}
-        className="text-taupe hover:text-cocoa md:hidden"
-      >
-        <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-      </button>
-      <div className="flex items-center gap-3 sm:gap-5">
-        <button title="Notifications" className="relative text-taupe hover:text-cocoa">
-          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 8a6 6 0 1112 0c0 7 3 7 3 9H3c0-2 3-2 3-9z"/><path d="M10 21a2 2 0 004 0"/></svg>
-          <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-danger" />
-        </button>
-        <button title="Language" className="hidden text-taupe hover:text-cocoa sm:block">
-          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>
-        </button>
-        <div className="flex items-center gap-3 border-l border-line pl-3 sm:pl-5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-terracotta font-display text-sm font-bold text-white">
-            A
-          </div>
-          <div className="hidden leading-tight sm:block">
-            <div className="text-sm font-bold text-cocoa">SoftLife Admin</div>
-            <div className="text-[11px] text-taupe">Admin</div>
-          </div>
-        </div>
-      </div>
-    </header>
-  );
-}
-
-function SidebarContent({ onNavigate }: { onNavigate: () => void }) {
-  return (
-    <>
-      <div className="flex items-center gap-3 px-6 py-5">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-terracotta text-white font-display text-xl font-bold">
-          S
-        </div>
-        <div className="leading-tight">
-          <div className="font-display text-lg font-bold text-cocoa">SoftLife</div>
-          <div className="text-[11px] uppercase tracking-wider text-taupe">Platform</div>
-        </div>
-      </div>
-
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
-        {NAV.map((item) =>
-          item.href ? (
-            <Link
-              key={item.label}
-              href={item.href}
-              onClick={onNavigate}
-              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-semibold text-cocoa transition hover:bg-cream"
-            >
-              <span className="text-terracotta">{item.icon}</span>
-              {item.label}
-            </Link>
-          ) : (
-            <div
-              key={item.label}
-              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-semibold text-taupe/70"
-            >
-              <span>{item.icon}</span>
-              {item.label}
-              <span className="ml-auto rounded-full bg-cream px-2 py-0.5 text-[10px] font-bold uppercase text-taupe">
-                soon
-              </span>
-            </div>
-          ),
-        )}
-      </nav>
-
-      <div className="border-t border-line px-6 py-4 text-xs text-taupe">SoftLife Platform · v0.3</div>
-    </>
-  );
-}
-
-export default function DashboardLayout({ children }: { children: ReactNode }) {
-  const [navOpen, setNavOpen] = useState(false);
-
-  return (
-    <div className="flex min-h-screen">
-      {/* Desktop sidebar */}
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-line bg-sand/60 md:flex">
-        <SidebarContent onNavigate={() => {}} />
-      </aside>
-
-      {/* Mobile drawer */}
-      {navOpen && (
-        <div className="fixed inset-0 z-40 md:hidden">
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => setNavOpen(false)}
-            aria-hidden="true"
-          />
-          <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[80vw] flex-col bg-sand shadow-xl">
-            <SidebarContent onNavigate={() => setNavOpen(false)} />
-          </aside>
-        </div>
-      )}
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar onMenuClick={() => setNavOpen(true)} />
-        <main className="min-w-0 flex-1 overflow-x-hidden">
-          <div className="mx-auto max-w-7xl min-w-0 px-4 py-6 sm:px-6 sm:py-8">{children}</div>
-        </main>
-      </div>
-    </div>
-  );
+  return <DashboardShell profile={profile}>{children}</DashboardShell>;
 }

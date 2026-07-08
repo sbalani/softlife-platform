@@ -5,6 +5,7 @@ import { getMachineDetail, getMachineMedia, getMachineMenu, getMachineSettings, 
 import { getMachineLotHistory } from "@/lib/data/lot-audit";
 import { translateStatusDesc, translateStatusValue } from "@/lib/i18n/huaxin";
 import { getTenants } from "@/lib/data/franchisees";
+import { getProducts } from "@/lib/data/products";
 import { MachineConfigForm } from "./MachineConfigForm";
 import { MachinePushButton } from "./MachinePushButton";
 import { RemoteControls } from "./RemoteControls";
@@ -31,6 +32,7 @@ export default async function MachineDetailPage({
   const status = await getMachineStatus(imei);
   const media = await getMachineMedia(imei);
   const lotHistory = await getMachineLotHistory(imei);
+  const ingredients = await getProducts();
 
   if (!config && !telemetry) notFound();
 
@@ -183,7 +185,7 @@ export default async function MachineDetailPage({
                 <h3 className="mb-2 text-[11px] uppercase tracking-wide text-taupe">Hoppers / ingredients</h3>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {menu.diy.map((item, i) => (
-                    <ProductEditor key={i} imei={imei} item={item} kind="hopper" />
+                    <ProductEditor key={i} imei={imei} item={item} kind="hopper" ingredients={ingredients} />
                   ))}
                 </div>
               </div>

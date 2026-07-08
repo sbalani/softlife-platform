@@ -102,6 +102,62 @@ export async function createProduct(_prev: ProductResult | null, fd: FormData): 
   }
 }
 
+export async function updateProduct(_prev: ProductResult | null, fd: FormData): Promise<ProductResult> {
+  const id = String(fd.get("id") ?? "");
+  const name = String(fd.get("name") ?? "").trim();
+  if (!id) return { ok: false, error: "Missing ingredient." };
+  if (!name) return { ok: false, error: "Name is required." };
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+
+  const contains = fd.getAll("contains").map(String);
+  const mayContain = fd.getAll("may_contain").map(String);
+  const image = fd.get("image");
+  const allergen = fd.get("allergen");
+
+  try {
+    const s = await createServiceClient();
+    const vals: Record<string, unknown> = {
+      name,
+      type: String(fd.get("type") ?? "topping"),
+      sku: str(fd.get("sku")),
+      description: str(fd.get("description")),
+      brand: str(fd.get("brand")),
+      ingredients_list: str(fd.get("ingredients_list")),
+      country_of_origin: str(fd.get("country_of_origin")),
+      nutritional_claim: str(fd.get("nutritional_claim")),
+      nf_calories: num(fd.get("nf_calories")),
+      nf_protein: num(fd.get("nf_protein")),
+      nf_carbs: num(fd.get("nf_carbs")),
+      nf_sugar: num(fd.get("nf_sugar")),
+      nf_fat: num(fd.get("nf_fat")),
+      default_portion_size: num(fd.get("default_portion_size")),
+      cost_per_kg: num(fd.get("cost_per_kg")),
+      price: Number(fd.get("price") ?? 0) || 0,
+    };
+    // Only replace the image/allergen art if a new file was actually chosen —
+    // otherwise leave the existing upload alone.
+    if (image instanceof File && image.size) vals.image_url = await uploadImage(s, image);
+    if (allergen instanceof File && allergen.size) vals.allergen_url = await uploadImage(s, allergen);
+
+    const { error } = await s.from("products").update(vals).eq("id", id);
+    if (error) return { ok: false, error: error.message };
+
+    await s.from("ingredient_allergens").delete().eq("ingredient_id", id);
+    const iaRows = [
+      ...contains.map((aid) => ({ ingredient_id: id, allergen_id: aid, presence: "contains" })),
+      ...mayContain.map((aid) => ({ ingredient_id: id, allergen_id: aid, presence: "may_contain" })),
+    ];
+    if (iaRows.length) {
+      await s.from("ingredient_allergens").insert(iaRows);
+    }
+
+    revalidatePath("/products");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export async function linkProductToOdoo(_prev: ProductResult | null, fd: FormData): Promise<ProductResult> {
   if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
   const productId = String(fd.get("product_id") ?? "");

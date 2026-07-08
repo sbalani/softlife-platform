@@ -7,14 +7,18 @@ import type { ProductDiyItem } from "@/lib/huaxin/client";
 const input = "w-full rounded border border-line bg-white px-2 py-1.5 text-xs text-cocoa focus:border-terracotta focus:outline-none";
 const lbl = "mb-0.5 block text-[10px] uppercase tracking-wide text-taupe";
 
+type IngredientOption = { id: string; name: string; price: number };
+
 export function ProductEditor({
   imei,
   item,
   kind,
+  ingredients,
 }: {
   imei: string;
   item: ProductDiyItem;
   kind: "hopper" | "menu";
+  ingredients?: IngredientOption[];
 }) {
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -76,6 +80,26 @@ export function ProductEditor({
             <span className="text-[10px] font-bold uppercase text-taupe">{label}</span>
             <button onClick={() => setEditing(false)} className="text-[10px] text-taupe hover:underline">Cancel</button>
           </div>
+          {ingredients && ingredients.length > 0 && (
+            <label className="block">
+              <span className={lbl}>Fill from ingredient catalog</span>
+              <select
+                defaultValue=""
+                onChange={(e) => {
+                  const ing = ingredients.find((i) => i.id === e.target.value);
+                  if (!ing) return;
+                  setName(ing.name);
+                  setPrice(String(ing.price));
+                }}
+                className={input}
+              >
+                <option value="" disabled>Choose an ingredient…</option>
+                {ingredients.map((i) => (
+                  <option key={i.id} value={i.id}>{i.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <label className="block">
               <span className={lbl}>Name</span>

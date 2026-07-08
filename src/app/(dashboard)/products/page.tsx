@@ -91,6 +91,13 @@ export default async function IngredientsPage() {
               linkedQty={p.odoo_qty_available}
               unlinkedSkus={unlinkedSkus}
             />
+
+            <details className="mt-2 border-t border-line pt-2">
+              <summary className="cursor-pointer text-[11px] font-semibold text-taupe hover:text-terracotta">✎ Edit</summary>
+              <div className="mt-3">
+                <ProductForm allergens={allergens} product={p} />
+              </div>
+            </details>
           </article>
         ))}
       </div>

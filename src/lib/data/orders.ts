@@ -85,6 +85,46 @@ function mapHuaxinOrder(o: HuaxinOrder, machineName: string, deviceImei: string)
   };
 }
 
+/** v_orders only carries what the webhook receiver actually stores per order
+ *  (order_code, price, product_name, state, timestamps) — not the richer
+ *  product/coupon/refund breakdown the live Huaxin list API returns. Map
+ *  honestly instead of casting the row straight to Order, which crashed on
+ *  any field the view doesn't have (e.g. `products`). */
+function orderFromSupabaseRow(row: Record<string, unknown>): Order {
+  const price = Number(row.price ?? 0);
+  return {
+    id: row.id as string,
+    order_time: (row.order_time as string) ?? new Date().toISOString(),
+    machine_name: (row.machine_name as string) ?? null,
+    device_imei: (row.device_imei as string) ?? null,
+    order_code: (row.order_code as string) ?? "",
+    out_trade_no: null,
+    order_state: (row.order_state as string) ?? "",
+    status_code: "",
+    price,
+    market_price: null,
+    discount_price: null,
+    re_price: null,
+    product_name: (row.product_name as string) ?? "",
+    products: [],
+    nums: 1,
+    amount: Number(row.amount ?? 1),
+    pay_type_raw: null,
+    pay_type: null,
+    is_server_mode: false,
+    is_admin_override: false,
+    machine_collected: price,
+    franchisee_owed: 0,
+    pay_time: null,
+    create_time_utc: null,
+    refund_status: null,
+    refund_out_no: null,
+    coupon_used: false,
+    activity_name: null,
+    device_label: null,
+  };
+}
+
 async function getOrdersLive(): Promise<Order[]> {
   const cfg = getConfigFromEnv();
   if (!cfg) return [];
@@ -123,7 +163,7 @@ export async function getOrders(filters?: {
       const supabase = await createServiceClient();
       const { data, error } = await supabase.from("v_orders").select("*").order("order_time", { ascending: false }).limit(100);
       if (!error && data && data.length) {
-        orders = data as Order[];
+        orders = (data as Record<string, unknown>[]).map(orderFromSupabaseRow);
         source = "supabase";
       }
     } catch {

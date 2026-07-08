@@ -61,11 +61,13 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
 }
 
 // Convention mapping dashboard hopper slots -> Huaxin lane numbers.
-// Confirm/adjust against the actual machine layout when the 3+3 units arrive.
+// Confirmed layout for the 3+3 config: hopper 1 is always the base (ice cream),
+// hoppers 2-4 are solids 1-3, hoppers 5-7 are liquids 1-3.
 const LANE_MAP: Record<string, string> = {
-  solid_1: "1", solid_2: "2", solid_3: "3",
-  liquid_1: "4", liquid_2: "5", liquid_3: "6",
+  solid_1: "2", solid_2: "3", solid_3: "4",
+  liquid_1: "5", liquid_2: "6", liquid_3: "7",
 };
+const BASE_LANE = "1";
 
 export async function pushMachineProducts(_prev: PushResult | null, fd: FormData): Promise<PushResult> {
   const imei = String(fd.get("imei") ?? "");
@@ -75,25 +77,28 @@ export async function pushMachineProducts(_prev: PushResult | null, fd: FormData
 
   try {
     const s = await createServiceClient();
-    const { data: m } = await s.from("machines").select("id").eq("device_imei", imei).maybeSingle();
+    const { data: m } = await s.from("machines").select("id,base_product_id").eq("device_imei", imei).maybeSingle();
     if (!m?.id) return { ok: false, error: "Machine not in Supabase yet — sync first." };
     const { data: ings } = await s.from("machine_ingredients").select("position,product_id").eq("machine_id", m.id);
     const productIds = ((ings as { product_id?: string }[]) ?? []).map((i) => i.product_id).filter(Boolean) as string[];
+    if (m.base_product_id) productIds.push(m.base_product_id as string);
     if (!productIds.length) return { ok: false, error: "No hoppers configured. Assign products in the configuration above first." };
 
     const { data: prods } = await s.from("products").select("id,name,price,image_url,allergen_url").in("id", productIds);
     const byId = new Map(((prods as Record<string, unknown>[]) ?? []).map((p) => [p.id as string, p]));
 
     const items: { position: string; code: string; value: string }[] = [];
+    const pushLane = (lane: string | undefined, p: Record<string, unknown> | undefined) => {
+      if (!lane || !p) return;
+      items.push({ position: lane, code: "goodsName", value: String(p.name ?? "") });
+      items.push({ position: lane, code: "price", value: String(p.price ?? 0) });
+      if (p.image_url) items.push({ position: lane, code: "imagePath", value: String(p.image_url) });
+      if (p.allergen_url) items.push({ position: lane, code: "allergyPath", value: String(p.allergen_url) });
+    };
     for (const ing of (ings as { position?: string; product_id?: string }[]) ?? []) {
-      const lane = ing.position ? LANE_MAP[ing.position] : undefined;
-      const p = ing.product_id ? byId.get(ing.product_id) : undefined;
-      if (!lane || !p) continue;
-      items.push({ position: lane, code: "goodsName", value: String((p as Record<string, unknown>).name ?? "") });
-      items.push({ position: lane, code: "price", value: String((p as Record<string, unknown>).price ?? 0) });
-      if ((p as Record<string, unknown>).image_url) items.push({ position: lane, code: "imagePath", value: String((p as Record<string, unknown>).image_url) });
-      if ((p as Record<string, unknown>).allergen_url) items.push({ position: lane, code: "allergyPath", value: String((p as Record<string, unknown>).allergen_url) });
+      pushLane(ing.position ? LANE_MAP[ing.position] : undefined, ing.product_id ? byId.get(ing.product_id) : undefined);
     }
+    if (m.base_product_id) pushLane(BASE_LANE, byId.get(m.base_product_id as string));
     if (!items.length) return { ok: false, error: "Nothing mapped to a lane (check the lane mapping)." };
 
     await pushProductDiy(cfg, imei, items);

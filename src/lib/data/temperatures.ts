@@ -19,6 +19,20 @@ function ymd(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
+/** Huaxin's temperature chart-label is sometimes a bare time-of-day
+ *  ("23:56:46", no date at all) and sometimes space-separated
+ *  ("YYYY-MM-DD HH:mm:ss") — neither parses with `new Date()` directly
+ *  (renders "Invalid Date"). Normalize to a parseable ISO-ish string at the
+ *  source instead of at every call site. `anchorDate` (YYYY-MM-DD) is used
+ *  when the label has no date component — it's the date the reading batch
+ *  was queried for, the best available anchor for a bare time-of-day. */
+function normalizeHuaxinTimestamp(raw: string | undefined, anchorDate: string): string {
+  if (!raw) return new Date().toISOString();
+  if (raw.includes("T")) return raw;
+  if (/^\d{1,2}:\d{2}:\d{2}$/.test(raw)) return `${anchorDate}T${raw}`;
+  return raw.replace(" ", "T");
+}
+
 async function getTempsLive(): Promise<TempReading[]> {
   const cfg = getConfigFromEnv();
   if (!cfg) return [];
@@ -37,7 +51,7 @@ async function getTempsLive(): Promise<TempReading[]> {
     if (last && last.value != null) {
       out.push({
         machine_name: machineName,
-        reading_time: category[category.length - 1]?.label ?? new Date().toISOString(),
+        reading_time: normalizeHuaxinTimestamp(category[category.length - 1]?.label, end),
         series_name: series?.seriesname ?? "temperature",
         value: Number(last.value),
       });

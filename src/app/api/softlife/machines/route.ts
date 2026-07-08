@@ -8,7 +8,9 @@ export async function GET() {
     const s = await createServiceClient();
     const { data } = await s.from("v_machines").select("*").order("name");
     const machines = (data ?? []).map((m: Record<string, unknown>) => ({
-      id: parseInt(String(m.device_id_huaxin ?? "0")) || 0,
+      // The real Supabase uuid — device_id_huaxin isn't a stable/unique
+      // integer (every machine used to collapse to id 0 here).
+      id: m.id,
       name: m.name,
       partner_id: 0,
       partner_name: m.customer ?? null,

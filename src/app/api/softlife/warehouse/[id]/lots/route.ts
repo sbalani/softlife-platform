@@ -10,9 +10,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const { data } = await s
       .from("lots")
       .select("*")
+      .eq("disposition", "released")
       .order("device_event_time", { ascending: true, nullsFirst: false });
-    const lots = (data ?? []).map((l: Record<string, unknown>, i: number) => ({
-      id: i + 1,
+    const lots = (data ?? []).map((l: Record<string, unknown>) => ({
+      // The real Supabase uuid — a synthetic per-request index here meant a
+      // lot's id changed every call and never matched what got written back
+      // on refill sync.
+      id: l.id,
       name: l.name,
       product_id: 0,
       product_name: l.product_name ?? null,

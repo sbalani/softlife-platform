@@ -81,7 +81,13 @@ export async function submitRefill(_prev: RefillResult | null, fd: FormData): Pr
     }));
     if (lotUsageRows.length) await s.from("lot_usages").insert(lotUsageRows);
 
+    for (const line of lines) {
+      const { error: decErr } = await s.rpc("decrement_lot_qty", { p_lot_id: line.lotId, p_amount: line.qty });
+      if (decErr) console.error("[refills] failed to decrement lot qty for", line.lotId, decErr);
+    }
+
     revalidatePath("/refills");
+    revalidatePath("/inventory");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };

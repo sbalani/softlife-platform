@@ -54,18 +54,31 @@ export async function POST(req: Request) {
         continue;
       }
 
-      // Process lines → lot_usages (audit trail)
+      // Process lines → lot_usages (audit trail) + decrement the lot's on-hand qty.
+      // Lines only carry lot_name, not a real lots.id (the mobile app's numeric
+      // lot_id is a synthetic per-request index, not a stable identifier —
+      // matches how LogLotForm already keys off lot_name elsewhere).
       const lines = (r.lines as Record<string, unknown>[]) ?? [];
       for (const line of lines) {
+        const lotName = String(line.lot_name ?? "");
+        const quantity = Number(line.quantity_used ?? 0) || null;
+        const { data: lot } = await s.from("lots").select("id,product_name").eq("name", lotName).maybeSingle();
+        const lotRow = lot as { id?: string; product_name?: string } | null;
+
         await s.from("lot_usages").insert({
           machine_id: machineUuid,
           machine_name: machineName as string,
           device_imei: deviceImei as string,
-          lot_name: String(line.lot_name ?? ""),
-          product_name: String(line.lot_name ?? ""),
-          quantity: Number(line.quantity_used ?? 0) || null,
+          lot_name: lotName,
+          product_name: lotRow?.product_name ?? null,
+          quantity,
           device_event_time: (line.device_event_time as string) ?? (r.device_event_time as string) ?? new Date().toISOString(),
         });
+
+        if (lotRow?.id && quantity) {
+          const { error: decErr } = await s.rpc("decrement_lot_qty", { p_lot_id: lotRow.id, p_amount: quantity });
+          if (decErr) console.error("[reposicion/sync] failed to decrement lot qty for", lotRow.id, decErr);
+        }
       }
 
       accepted.push(clientUuid);

@@ -52,8 +52,8 @@ export default async function LotAuditPage({ searchParams }: { searchParams: Pro
       </form>
 
       {/* Table */}
-      <div className="overflow-hidden rounded-2xl border border-line bg-white">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-2xl border border-line bg-white">
+        <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-sand/60 text-left text-[11px] uppercase tracking-wide text-taupe">
             <tr>
               <th className="px-4 py-3 font-bold">Date</th>

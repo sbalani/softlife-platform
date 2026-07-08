@@ -14,8 +14,8 @@ export default async function TransfersPage() {
         </p>
       </header>
 
-      <section className="overflow-hidden rounded-2xl border border-line bg-white">
-        <table className="w-full text-sm">
+      <section className="overflow-x-auto rounded-2xl border border-line bg-white">
+        <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-sand/60 text-left text-[11px] uppercase tracking-wide text-taupe">
             <tr>
               <th className="px-5 py-3 font-bold">Ref</th>

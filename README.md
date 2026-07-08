@@ -61,4 +61,7 @@ supabase/schema.sql         Postgres schema + RLS + dashboard view
 - [ ] Auth + franchisee login (Supabase Auth + profile/role)
 - [ ] Orders, Alerts, Temperatures, Inventory, Transfers, Franchisee screens
 - [ ] Retarget the mobile app to `/api/*` (contract already defined)
-- [ ] Odoo downstream (VeriFactu / invoicing)
+- [x] Odoo downstream (VeriFactu / invoicing) — `softlife_sync` module, hourly cron
+- [x] Odoo SKU/lot/warehouse mirror — `softlife_sync` writes `odoo_products` /
+      `odoo_lots` / `odoo_warehouses`; see `/odoo` page. Odoo is the system of
+      record for this data.

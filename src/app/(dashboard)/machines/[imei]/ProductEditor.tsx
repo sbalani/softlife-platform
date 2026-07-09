@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { updateMachineProduct } from "./actions";
+import { updateMachineProduct, uploadMenuItemImage } from "./actions";
 import type { ProductDiyItem } from "@/lib/huaxin/client";
 
 const input = "w-full rounded border border-line bg-white px-2 py-1.5 text-xs text-cocoa focus:border-terracotta focus:outline-none";
 const lbl = "mb-0.5 block text-[10px] uppercase tracking-wide text-taupe";
 
-type IngredientOption = { id: string; name: string; price: number };
+type IngredientOption = { id: string; name: string; price: number; image_url: string | null; allergen_url: string | null };
 
 export function ProductEditor({
   imei,
@@ -22,6 +22,7 @@ export function ProductEditor({
 }) {
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
 
   const [name, setName] = useState(item.goodsName ?? "");
@@ -29,6 +30,22 @@ export function ProductEditor({
   const [marketPrice, setMarketPrice] = useState(item.marketPrice ?? "");
   const [imagePath, setImagePath] = useState(item.imagePath ?? "");
   const [allergyPath, setAllergyPath] = useState("");
+
+  const uploadImage = async (file: File) => {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.set("image", file);
+      const res = await uploadMenuItemImage(fd);
+      if (res.ok && res.url) {
+        setImagePath(res.url);
+      } else {
+        setResult(res.error ?? "Upload failed");
+      }
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const save = () => {
     startTransition(async () => {
@@ -90,6 +107,8 @@ export function ProductEditor({
                   if (!ing) return;
                   setName(ing.name);
                   setPrice(String(ing.price));
+                  if (ing.image_url) setImagePath(ing.image_url);
+                  if (ing.allergen_url) setAllergyPath(ing.allergen_url);
                 }}
                 className={input}
               >
@@ -119,8 +138,31 @@ export function ProductEditor({
             </label>
           </div>
           <label className="block">
-            <span className={lbl}>Image URL</span>
-            <input value={imagePath} onChange={(e) => setImagePath(e.target.value)} className={input} placeholder="https://…" />
+            <span className={lbl}>Image</span>
+            <div className="flex items-center gap-2">
+              {imagePath ? (
+                <img src={imagePath} alt="" referrerPolicy="no-referrer" className="h-9 w-9 shrink-0 rounded object-cover" />
+              ) : (
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-cream text-taupe">—</div>
+              )}
+              <input
+                type="file"
+                accept="image/*"
+                disabled={uploading}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) uploadImage(file);
+                }}
+                className={`${input} text-[10px]`}
+              />
+            </div>
+            <input
+              value={imagePath}
+              onChange={(e) => setImagePath(e.target.value)}
+              className={`${input} mt-1`}
+              placeholder="https://… (or upload above)"
+            />
+            {uploading && <span className="mt-0.5 block text-[10px] text-taupe">Uploading…</span>}
           </label>
           <label className="block">
             <span className={lbl}>Allergen image URL (new)</span>

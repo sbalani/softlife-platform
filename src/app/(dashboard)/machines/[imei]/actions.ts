@@ -239,3 +239,25 @@ export async function pushMachineSetting(
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
+
+export type UploadResult = { ok: boolean; url?: string; error?: string };
+
+export async function uploadMenuItemImage(fd: FormData): Promise<UploadResult> {
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+  const file = fd.get("image");
+  if (!(file instanceof File) || !file.size) return { ok: false, error: "No file provided." };
+
+  try {
+    const s = await createServiceClient();
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+    const path = `menu-items/${crypto.randomUUID()}.${ext}`;
+    const { error } = await s.storage
+      .from("product-media")
+      .upload(path, await file.arrayBuffer(), { contentType: file.type || "image/*", upsert: true });
+    if (error) return { ok: false, error: error.message };
+    const url = s.storage.from("product-media").getPublicUrl(path).data.publicUrl;
+    return { ok: true, url };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}

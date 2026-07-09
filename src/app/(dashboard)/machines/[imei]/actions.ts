@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { getConfigFromEnv, editDeviceMedia, pushDeviceSetting, pushProductDiy, refreshProduct, refreshResource, removeDeviceMedia, sendCommand, updateDeviceInfo } from "@/lib/huaxin/client";
+import { getConfigFromEnv, editDeviceMedia, listDeviceProducts, pushDeviceSetting, pushProductDiy, refreshProduct, refreshResource, removeDeviceMedia, sendCommand, updateDeviceInfo } from "@/lib/huaxin/client";
 import { generateAllergenComposite } from "@/lib/allergens/composite";
 
 export type SaveResult = { ok: boolean; error?: string };
@@ -74,6 +74,45 @@ const SOLID_POSITIONS = ["solid_1", "solid_2", "solid_3"];
 type DiyItem = { position: string; code: string; value: string };
 type ServiceClient = Awaited<ReturnType<typeof createServiceClient>>;
 
+/** Unions contains/may_contain allergens across a set of ingredients into one
+ * composite image ("contains" always wins over "may_contain" for the same
+ * allergen, regardless of which ingredient/row is seen first) and uploads it.
+ * Shared by solid-topping cross-contamination and multi-ingredient combos —
+ * anywhere multiple ingredients need to present as a single allergen picture.
+ * `cacheKey` gives the upload a stable path so repeat pushes overwrite rather
+ * than accumulate orphaned files. */
+async function computeAllergenCompositeUrl(s: ServiceClient, productIds: string[], cacheKey: string): Promise<string | null> {
+  if (!productIds.length) return null;
+  const { data: iaRows } = await s
+    .from("ingredient_allergens")
+    .select("ingredient_id,allergen_id,presence")
+    .in("ingredient_id", productIds);
+  const { data: allergens } = await s.from("allergens").select("id,logo_url");
+  const logoById = new Map(
+    ((allergens as { id: string; logo_url: string | null }[]) ?? []).map((a) => [a.id, a.logo_url]),
+  );
+
+  const presenceByAllergen = new Map<string, "contains" | "may_contain">();
+  for (const row of (iaRows as { allergen_id: string; presence: string }[]) ?? []) {
+    const existing = presenceByAllergen.get(row.allergen_id);
+    if (existing === "contains") continue;
+    if (row.presence === "contains" || existing === undefined) {
+      presenceByAllergen.set(row.allergen_id, row.presence as "contains" | "may_contain");
+    }
+  }
+  const logos = [...presenceByAllergen.entries()]
+    .map(([allergenId, presence]) => ({ logo_url: logoById.get(allergenId), dim: presence === "may_contain" }))
+    .filter((l): l is { logo_url: string; dim: boolean } => !!l.logo_url);
+  if (!logos.length) return null;
+
+  const buf = await generateAllergenComposite(logos);
+  if (!buf) return null;
+  const path = `allergens/${cacheKey}.png`;
+  const { error } = await s.storage.from("product-media").upload(path, buf, { contentType: "image/png", upsert: true });
+  if (error) return null;
+  return s.storage.from("product-media").getPublicUrl(path).data.publicUrl;
+}
+
 /** The 3 solid hoppers physically share dispensing hardware, so an allergen in
  * any one of them is a cross-contamination risk in all of them — unlike base/
  * liquids, solids don't get their own individual allergen image, they all get
@@ -91,38 +130,7 @@ async function buildSolidToppingItems(s: ServiceClient, machineId: string): Prom
   const { data: prods } = await s.from("products").select("id,name,price,image_url").in("id", productIds);
   const byId = new Map(((prods as Record<string, unknown>[]) ?? []).map((p) => [p.id as string, p]));
 
-  const { data: iaRows } = await s
-    .from("ingredient_allergens")
-    .select("ingredient_id,allergen_id,presence")
-    .in("ingredient_id", productIds);
-  const { data: allergens } = await s.from("allergens").select("id,logo_url");
-  const logoById = new Map(
-    ((allergens as { id: string; logo_url: string | null }[]) ?? []).map((a) => [a.id, a.logo_url]),
-  );
-
-  // Any "contains" across the group wins over "may_contain" for that allergen,
-  // regardless of which row is seen first.
-  const presenceByAllergen = new Map<string, "contains" | "may_contain">();
-  for (const row of (iaRows as { allergen_id: string; presence: string }[]) ?? []) {
-    const existing = presenceByAllergen.get(row.allergen_id);
-    if (existing === "contains") continue;
-    if (row.presence === "contains" || existing === undefined) {
-      presenceByAllergen.set(row.allergen_id, row.presence as "contains" | "may_contain");
-    }
-  }
-  const logos = [...presenceByAllergen.entries()]
-    .map(([allergenId, presence]) => ({ logo_url: logoById.get(allergenId), dim: presence === "may_contain" }))
-    .filter((l): l is { logo_url: string; dim: boolean } => !!l.logo_url);
-
-  let compositeUrl: string | null = null;
-  if (logos.length) {
-    const buf = await generateAllergenComposite(logos);
-    if (buf) {
-      const path = `allergens/solids_${machineId}.png`;
-      const { error } = await s.storage.from("product-media").upload(path, buf, { contentType: "image/png", upsert: true });
-      if (!error) compositeUrl = s.storage.from("product-media").getPublicUrl(path).data.publicUrl;
-    }
-  }
+  const compositeUrl = await computeAllergenCompositeUrl(s, productIds, `solids_${machineId}`);
 
   const items: DiyItem[] = [];
   for (const ing of solidIngs) {
@@ -333,6 +341,56 @@ export async function updateMachineProduct(
   }
 }
 
+/** Combos push as a single Huaxin item (goodsName/price/imagePath/allergyPath
+ * on one position) — the only item shape confirmed working against the real
+ * API. The combined name, summed price default, and cross-ingredient allergen
+ * composite are computed here from 2-6 selected ingredients, but this does
+ * NOT tell the machine to physically dispense from multiple hopper positions
+ * for one order — no confirmed field for that exists yet. If the hardware
+ * needs that (plausible given the 59-combination spec), this needs a real
+ * Huaxin field name before it can be built. */
+export async function pushComboToMachine(
+  imei: string,
+  position: string,
+  ingredientIds: string[],
+  price: string,
+  imagePath: string,
+): Promise<ProductUpdateResult> {
+  if (ingredientIds.length < 2 || ingredientIds.length > 6) {
+    return { ok: false, error: "Combos need between 2 and 6 ingredients." };
+  }
+  const cfg = getConfigFromEnv();
+  if (!cfg) return { ok: false, error: "Huaxin not configured." };
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+
+  try {
+    const s = await createServiceClient();
+    const { data: prods } = await s.from("products").select("id,name").in("id", ingredientIds);
+    const byId = new Map(((prods as { id: string; name: string }[]) ?? []).map((p) => [p.id, p.name]));
+    const names = ingredientIds.map((id) => byId.get(id)).filter(Boolean) as string[];
+    if (!names.length) return { ok: false, error: "Ingredients not found." };
+    const goodsName = names.join(" + ");
+
+    const compositeUrl = await computeAllergenCompositeUrl(s, ingredientIds, `combo_${imei}_${position}`);
+
+    const items: DiyItem[] = [
+      { position, code: "goodsName", value: goodsName },
+      { position, code: "price", value: price },
+    ];
+    if (imagePath) items.push({ position, code: "imagePath", value: imagePath });
+    if (compositeUrl) items.push({ position, code: "allergyPath", value: compositeUrl });
+
+    const result = await pushProductDiy(cfg, imei, items);
+    if (String(result.code) === "200") {
+      try { await refreshProduct(cfg, imei); } catch { /* best-effort */ }
+      return { ok: true };
+    }
+    return { ok: false, error: result.msg ?? "Update rejected" };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export async function updateDeviceBranding(_prev: BrandingResult | null, fd: FormData): Promise<BrandingResult> {
   const imei = String(fd.get("imei") ?? "");
   const cfg = getConfigFromEnv();
@@ -385,6 +443,99 @@ export async function uploadMenuItemImage(fd: FormData): Promise<UploadResult> {
     if (error) return { ok: false, error: error.message };
     const url = s.storage.from("product-media").getPublicUrl(path).data.publicUrl;
     return { ok: true, url };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export type CopyMenuResult = { ok: boolean; error?: string; copiedTo?: number };
+
+/** Snapshots the source machine's live menu (name/price/image — allergyPath
+ * isn't exposed by Huaxin's read API, see machine_menu_drafts migration) and
+ * queues it as a pending draft on each target machine. Nothing is pushed to
+ * any target until they explicitly confirm via pushMenuDraft. */
+export async function copyMenuToMachines(_prev: CopyMenuResult | null, fd: FormData): Promise<CopyMenuResult> {
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+  const sourceImei = String(fd.get("source_imei") ?? "");
+  const targetIds = fd.getAll("target_machine_id").map(String).filter(Boolean);
+  if (!sourceImei) return { ok: false, error: "Missing source machine." };
+  if (!targetIds.length) return { ok: false, error: "Select at least one target machine." };
+
+  const cfg = getConfigFromEnv();
+  if (!cfg) return { ok: false, error: "Huaxin not configured." };
+
+  try {
+    const s = await createServiceClient();
+    const { data: source } = await s.from("machines").select("id,name").eq("device_imei", sourceImei).maybeSingle();
+    if (!source) return { ok: false, error: "Source machine not found." };
+
+    const { diy, unify } = await listDeviceProducts(cfg, sourceImei);
+    const items = [...diy, ...unify]
+      .filter((i) => i.position != null)
+      .map((i) => ({
+        position: String(i.position),
+        goodsName: i.goodsName ?? "",
+        price: i.price ?? "",
+        imagePath: i.imagePath ?? "",
+        marketPrice: i.marketPrice ?? "",
+      }));
+    if (!items.length) return { ok: false, error: "Source machine has no menu to copy." };
+
+    const rows = targetIds.map((machineId) => ({
+      machine_id: machineId,
+      source_machine_id: source.id,
+      source_machine_name: source.name,
+      items,
+    }));
+    const { error } = await s.from("machine_menu_drafts").insert(rows);
+    if (error) return { ok: false, error: error.message };
+
+    return { ok: true, copiedTo: targetIds.length };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Pushes every item in a pending draft to the target machine in one batch,
+ * then marks the draft applied. This is the "confirm" step — copying never
+ * touches the target machine on its own. */
+export async function pushMenuDraft(imei: string, draftId: string): Promise<PushResult> {
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+  const cfg = getConfigFromEnv();
+  if (!cfg) return { ok: false, error: "Huaxin not configured." };
+
+  try {
+    const s = await createServiceClient();
+    const { data: draft } = await s.from("machine_menu_drafts").select("id,items").eq("id", draftId).maybeSingle();
+    if (!draft) return { ok: false, error: "Draft not found." };
+
+    const draftItems = (draft.items as { position: string; goodsName: string; price: string; imagePath: string }[]) ?? [];
+    const items: DiyItem[] = [];
+    for (const it of draftItems) {
+      if (it.goodsName) items.push({ position: it.position, code: "goodsName", value: it.goodsName });
+      if (it.price) items.push({ position: it.position, code: "price", value: it.price });
+      if (it.imagePath) items.push({ position: it.position, code: "imagePath", value: it.imagePath });
+    }
+    if (!items.length) return { ok: false, error: "Draft has nothing to push." };
+
+    await pushProductDiy(cfg, imei, items);
+    try { await refreshProduct(cfg, imei); } catch { /* best-effort */ }
+
+    await s.from("machine_menu_drafts").update({ applied_at: new Date().toISOString() }).eq("id", draftId);
+    revalidatePath(`/machines/${imei}`);
+    return { ok: true, pushed: draftItems.length };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function dismissMenuDraft(imei: string, draftId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+  try {
+    const s = await createServiceClient();
+    await s.from("machine_menu_drafts").delete().eq("id", draftId);
+    revalidatePath(`/machines/${imei}`);
+    return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

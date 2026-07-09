@@ -6,6 +6,8 @@ import { getMachineLotHistory } from "@/lib/data/lot-audit";
 import { translateStatusDesc, translateStatusValue } from "@/lib/i18n/huaxin";
 import { getTenants } from "@/lib/data/franchisees";
 import { getProducts } from "@/lib/data/products";
+import { getMachines } from "@/lib/data/machines";
+import { getPendingMenuDraft } from "@/lib/data/menu-drafts";
 import { MachineConfigForm } from "./MachineConfigForm";
 import { MachinePushButton } from "./MachinePushButton";
 import { RemoteControls } from "./RemoteControls";
@@ -15,6 +17,9 @@ import { MachineSyncButton } from "./MachineSyncButton";
 import { ProductEditor } from "./ProductEditor";
 import { BaseHopperCard } from "./BaseHopperCard";
 import { PushSolidToppingsButton } from "./PushSolidToppingsButton";
+import { ComboEditor, type HopperIngredientOption } from "./ComboEditor";
+import { CopyMenuButton } from "./CopyMenuButton";
+import { PendingDraftBanner } from "./PendingDraftBanner";
 import { DeviceSettingsPanel } from "./DeviceSettingsPanel";
 import { LogLotForm } from "./LogLotForm";
 import { AreaChart } from "@/components/charts";
@@ -36,6 +41,27 @@ export default async function MachineDetailPage({
   const lotHistory = await getMachineLotHistory(imei);
   const ingredients = await getProducts();
   const baseProduct = config?.baseProductId ? ingredients.find((p) => p.id === config.baseProductId) ?? null : null;
+  const { machines: allMachines } = await getMachines();
+  const otherMachines = allMachines.filter((m) => m.device_imei !== imei).map((m) => ({ id: m.id, name: m.name }));
+  const pendingDraft = config?.machineId ? await getPendingMenuDraft(config.machineId) : null;
+
+  // What a combo can actually be built from — only what's currently loaded in
+  // this machine's hoppers, since that's all it can physically dispense.
+  const CONFIG_POSITION_LABELS: Record<string, string> = {
+    solid_1: "Solid Topping 1", solid_2: "Solid Topping 2", solid_3: "Solid Topping 3",
+    liquid_1: "Liquid Topping 1", liquid_2: "Liquid Topping 2", liquid_3: "Liquid Topping 3",
+  };
+  const hopperIngredients: HopperIngredientOption[] = [
+    ...(baseProduct ? [{ id: baseProduct.id, label: `${baseProduct.name} (Base)`, name: baseProduct.name, price: baseProduct.price }] : []),
+    ...(config?.ingredients ?? [])
+      .map((ing) => {
+        const p = ing.product_id ? ingredients.find((x) => x.id === ing.product_id) : null;
+        if (!p) return null;
+        const posLabel = CONFIG_POSITION_LABELS[ing.position] ?? ing.position;
+        return { id: p.id, label: `${p.name} (${posLabel})`, name: p.name, price: p.price };
+      })
+      .filter((x): x is HopperIngredientOption => !!x),
+  ];
 
   if (!config && !telemetry) notFound();
 
@@ -170,7 +196,11 @@ export default async function MachineDetailPage({
 
       {/* Product menu */}
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">
-        <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Product menu on machine (live, editable)</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-display text-lg font-bold text-cocoa">Product menu on machine (live, editable)</h2>
+          <CopyMenuButton sourceImei={imei} machines={otherMachines} />
+        </div>
+        {pendingDraft && <PendingDraftBanner imei={imei} draft={pendingDraft} />}
         {menu.diy.length > 0 || menu.unify.length > 0 ? (
           <div className="space-y-4">
             {menu.unify.length > 0 && (
@@ -178,7 +208,7 @@ export default async function MachineDetailPage({
                 <h3 className="mb-2 text-[11px] uppercase tracking-wide text-taupe">Menu items (recipes / combos)</h3>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {menu.unify.map((item, i) => (
-                    <ProductEditor key={i} imei={imei} item={item} kind="menu" ingredients={ingredients} />
+                    <ComboEditor key={i} imei={imei} item={item} hopperIngredients={hopperIngredients} />
                   ))}
                 </div>
               </div>
@@ -194,7 +224,7 @@ export default async function MachineDetailPage({
                     String(item.position) === "1" ? (
                       <BaseHopperCard key={i} imei={imei} item={item} baseProduct={baseProduct ? { id: baseProduct.id, name: baseProduct.name, image_url: baseProduct.image_url } : null} />
                     ) : (
-                      <ProductEditor key={i} imei={imei} item={item} kind="hopper" ingredients={ingredients} />
+                      <ProductEditor key={i} imei={imei} item={item} ingredients={ingredients} />
                     ),
                   )}
                 </div>

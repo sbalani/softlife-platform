@@ -23,12 +23,10 @@ const HOPPER_LABELS: Record<string, string> = {
 export function ProductEditor({
   imei,
   item,
-  kind,
   ingredients,
 }: {
   imei: string;
   item: ProductDiyItem;
-  kind: "hopper" | "menu";
   ingredients?: IngredientOption[];
 }) {
   const [editing, setEditing] = useState(false);
@@ -77,8 +75,7 @@ export function ProductEditor({
     });
   };
 
-  const label =
-    kind === "hopper" ? HOPPER_LABELS[String(item.position)] ?? `Hopper ${item.position}` : `Menu ${item.position}`;
+  const label = HOPPER_LABELS[String(item.position)] ?? `Hopper ${item.position}`;
 
   return (
     <div className="rounded-xl border border-line p-3">

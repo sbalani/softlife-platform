@@ -73,7 +73,7 @@ export function MachineConfigForm({ config, imei, tenants }: { config: MachineCo
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           {Array.from({ length: slots }).map((_, i) => (
             <label key={`solid_${i + 1}`} className="block">
-              <span className={labelClass}>Solid {i + 1} (topping)</span>
+              <span className={labelClass}>Solid Topping {i + 1}</span>
               <select name={`solid_${i + 1}`} defaultValue={ing(`solid_${i + 1}`)} className={selectClass}>
                 <option value="">—</option>
                 {config.toppings.map((p) => (
@@ -84,7 +84,7 @@ export function MachineConfigForm({ config, imei, tenants }: { config: MachineCo
           ))}
           {Array.from({ length: slots }).map((_, i) => (
             <label key={`liquid_${i + 1}`} className="block">
-              <span className={labelClass}>Liquid {i + 1} (sauce)</span>
+              <span className={labelClass}>Liquid Topping {i + 1}</span>
               <select name={`liquid_${i + 1}`} defaultValue={ing(`liquid_${i + 1}`)} className={selectClass}>
                 <option value="">—</option>
                 {config.sauces.map((p) => (

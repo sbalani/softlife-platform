@@ -13,6 +13,8 @@ import { MediaManager } from "./MediaManager";
 import { DeviceBrandingForm } from "./DeviceBrandingForm";
 import { MachineSyncButton } from "./MachineSyncButton";
 import { ProductEditor } from "./ProductEditor";
+import { BaseHopperCard } from "./BaseHopperCard";
+import { PushSolidToppingsButton } from "./PushSolidToppingsButton";
 import { DeviceSettingsPanel } from "./DeviceSettingsPanel";
 import { LogLotForm } from "./LogLotForm";
 import { AreaChart } from "@/components/charts";
@@ -33,6 +35,7 @@ export default async function MachineDetailPage({
   const media = await getMachineMedia(imei);
   const lotHistory = await getMachineLotHistory(imei);
   const ingredients = await getProducts();
+  const baseProduct = config?.baseProductId ? ingredients.find((p) => p.id === config.baseProductId) ?? null : null;
 
   if (!config && !telemetry) notFound();
 
@@ -182,11 +185,18 @@ export default async function MachineDetailPage({
             )}
             {menu.diy.length > 0 && (
               <div>
-                <h3 className="mb-2 text-[11px] uppercase tracking-wide text-taupe">Hoppers / ingredients</h3>
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="text-[11px] uppercase tracking-wide text-taupe">Hoppers / ingredients</h3>
+                  {config?.machineId && <PushSolidToppingsButton imei={imei} />}
+                </div>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {menu.diy.map((item, i) => (
-                    <ProductEditor key={i} imei={imei} item={item} kind="hopper" ingredients={ingredients} />
-                  ))}
+                  {menu.diy.map((item, i) =>
+                    String(item.position) === "1" ? (
+                      <BaseHopperCard key={i} imei={imei} item={item} baseProduct={baseProduct ? { id: baseProduct.id, name: baseProduct.name, image_url: baseProduct.image_url } : null} />
+                    ) : (
+                      <ProductEditor key={i} imei={imei} item={item} kind="hopper" ingredients={ingredients} />
+                    ),
+                  )}
                 </div>
               </div>
             )}

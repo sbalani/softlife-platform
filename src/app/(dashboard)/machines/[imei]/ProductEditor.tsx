@@ -9,6 +9,17 @@ const lbl = "mb-0.5 block text-[10px] uppercase tracking-wide text-taupe";
 
 type IngredientOption = { id: string; name: string; price: number; image_url: string | null; allergen_url: string | null };
 
+// Matches the LANE_MAP in actions.ts — hopper 1 is the base, 2-4 solids, 5-7 liquids.
+const HOPPER_LABELS: Record<string, string> = {
+  "1": "Base",
+  "2": "Solid Topping 1",
+  "3": "Solid Topping 2",
+  "4": "Solid Topping 3",
+  "5": "Liquid Topping 1",
+  "6": "Liquid Topping 2",
+  "7": "Liquid Topping 3",
+};
+
 export function ProductEditor({
   imei,
   item,
@@ -66,7 +77,8 @@ export function ProductEditor({
     });
   };
 
-  const label = kind === "hopper" ? `Hopper ${item.position}` : `Menu ${item.position}`;
+  const label =
+    kind === "hopper" ? HOPPER_LABELS[String(item.position)] ?? `Hopper ${item.position}` : `Menu ${item.position}`;
 
   return (
     <div className="rounded-xl border border-line p-3">

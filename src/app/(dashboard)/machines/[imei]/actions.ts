@@ -209,6 +209,40 @@ export async function updateBaseHopper(
   }
 }
 
+/** Stages a base edit instead of pushing it live. Still links
+ * base_product_id immediately when a catalog ingredient was picked — that's
+ * Supabase-only bookkeeping, not a live push, so there's no reason to wait
+ * for the draft to actually be sent. */
+export async function saveBaseDraft(
+  imei: string,
+  machineId: string | null,
+  productId: string | null,
+  fields: Record<string, string>,
+): Promise<ProductUpdateResult> {
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+  if (!machineId) return { ok: false, error: "Machine not synced to Supabase yet — sync first." };
+  if (!fields.goodsName && !fields.price && !fields.imagePath && !fields.allergyPath) {
+    return { ok: false, error: "Nothing to save." };
+  }
+  try {
+    const s = await createServiceClient();
+    await upsertDraftItem(s, machineId, {
+      position: BASE_LANE,
+      goodsName: fields.goodsName ?? "",
+      price: fields.price ?? "",
+      imagePath: fields.imagePath ?? "",
+      allergyPath: fields.allergyPath || undefined,
+    });
+    if (productId) {
+      await s.from("machines").update({ base_product_id: productId }).eq("id", machineId);
+    }
+    revalidatePath(`/machines/${imei}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export async function pushMachineProducts(_prev: PushResult | null, fd: FormData): Promise<PushResult> {
   const imei = String(fd.get("imei") ?? "");
   const cfg = getConfigFromEnv();
@@ -353,6 +387,36 @@ export async function updateMachineProduct(
   }
 }
 
+/** Stages an edit instead of pushing it live — merges into the machine's
+ * current pending draft (see upsertDraftItem) so multiple hopper edits can
+ * be reviewed and sent together via "Push draft to machine". */
+export async function saveHopperDraft(
+  imei: string,
+  machineId: string | null,
+  position: string,
+  fields: Record<string, string>,
+): Promise<ProductUpdateResult> {
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+  if (!machineId) return { ok: false, error: "Machine not synced to Supabase yet — sync first." };
+  if (!fields.goodsName && !fields.price && !fields.imagePath && !fields.allergyPath) {
+    return { ok: false, error: "Nothing to save." };
+  }
+  try {
+    const s = await createServiceClient();
+    await upsertDraftItem(s, machineId, {
+      position,
+      goodsName: fields.goodsName ?? "",
+      price: fields.price ?? "",
+      imagePath: fields.imagePath ?? "",
+      allergyPath: fields.allergyPath || undefined,
+    });
+    revalidatePath(`/machines/${imei}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 /** Combos push as a single Huaxin item (goodsName/price/imagePath/allergyPath
  * on one position) — the only item shape confirmed working against the real
  * API. The combined name, summed price default, and cross-ingredient allergen
@@ -377,20 +441,15 @@ export async function pushComboToMachine(
 
   try {
     const s = await createServiceClient();
-    const { data: prods } = await s.from("products").select("id,name").in("id", ingredientIds);
-    const byId = new Map(((prods as { id: string; name: string }[]) ?? []).map((p) => [p.id, p.name]));
-    const names = ingredientIds.map((id) => byId.get(id)).filter(Boolean) as string[];
-    if (!names.length) return { ok: false, error: "Ingredients not found." };
-    const goodsName = names.join(" + ");
-
-    const compositeUrl = await computeAllergenCompositeUrl(s, ingredientIds, `combo_${imei}_${position}`);
+    const resolved = await resolveComboFields(s, imei, position, ingredientIds);
+    if ("error" in resolved) return { ok: false, error: resolved.error };
 
     const items: DiyItem[] = [
-      { position, code: "goodsName", value: goodsName },
+      { position, code: "goodsName", value: resolved.goodsName },
       { position, code: "price", value: price },
     ];
     if (imagePath) items.push({ position, code: "imagePath", value: imagePath });
-    if (compositeUrl) items.push({ position, code: "allergyPath", value: compositeUrl });
+    if (resolved.compositeUrl) items.push({ position, code: "allergyPath", value: resolved.compositeUrl });
 
     const result = await pushProductDiy(cfg, imei, items);
     if (String(result.code) === "200") {
@@ -398,6 +457,58 @@ export async function pushComboToMachine(
       return { ok: true };
     }
     return { ok: false, error: result.msg ?? "Update rejected" };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+async function resolveComboFields(
+  s: ServiceClient,
+  imei: string,
+  position: string,
+  ingredientIds: string[],
+): Promise<{ goodsName: string; compositeUrl: string | null } | { error: string }> {
+  const { data: prods } = await s.from("products").select("id,name").in("id", ingredientIds);
+  const byId = new Map(((prods as { id: string; name: string }[]) ?? []).map((p) => [p.id, p.name]));
+  const names = ingredientIds.map((id) => byId.get(id)).filter(Boolean) as string[];
+  if (!names.length) return { error: "Ingredients not found." };
+  const goodsName = names.join(" + ");
+  const compositeUrl = await computeAllergenCompositeUrl(s, ingredientIds, `combo_${imei}_${position}`);
+  return { goodsName, compositeUrl };
+}
+
+/** Stages a combo instead of pushing it live — same idea as saveHopperDraft,
+ * still computes the combined name and cross-ingredient allergen composite
+ * (that's Supabase-only bookkeeping, doesn't touch the machine) so the
+ * staged draft is fully formed and ready to push later. */
+export async function saveComboDraft(
+  imei: string,
+  machineId: string | null,
+  position: string,
+  ingredientIds: string[],
+  price: string,
+  imagePath: string,
+): Promise<ProductUpdateResult> {
+  if (ingredientIds.length < 2 || ingredientIds.length > 6) {
+    return { ok: false, error: "Combos need between 2 and 6 ingredients." };
+  }
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+  if (!machineId) return { ok: false, error: "Machine not synced to Supabase yet — sync first." };
+
+  try {
+    const s = await createServiceClient();
+    const resolved = await resolveComboFields(s, imei, position, ingredientIds);
+    if ("error" in resolved) return { ok: false, error: resolved.error };
+
+    await upsertDraftItem(s, machineId, {
+      position,
+      goodsName: resolved.goodsName,
+      price,
+      imagePath,
+      allergyPath: resolved.compositeUrl ?? undefined,
+    });
+    revalidatePath(`/machines/${imei}`);
+    return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
@@ -457,6 +568,43 @@ export async function uploadMenuItemImage(fd: FormData): Promise<UploadResult> {
     return { ok: true, url };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+type DraftItemInput = {
+  position: string;
+  goodsName: string;
+  price: string;
+  imagePath: string;
+  allergyPath?: string;
+};
+
+/** Merges one item into the machine's current pending draft (creating one if
+ * none exists), replacing any existing entry for the same position. This is
+ * what "Save draft" on an individual hopper/combo/base editor writes to —
+ * the same draft a menu copy creates, so edits and copies stack on the same
+ * pending set and push together with one "Push draft to machine". */
+async function upsertDraftItem(s: ServiceClient, machineId: string, item: DraftItemInput): Promise<void> {
+  const { data: existing } = await s
+    .from("machine_menu_drafts")
+    .select("id,items")
+    .eq("machine_id", machineId)
+    .is("applied_at", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existing) {
+    const items = ((existing.items as DraftItemInput[]) ?? []).filter((i) => i.position !== item.position);
+    items.push(item);
+    await s.from("machine_menu_drafts").update({ items }).eq("id", existing.id);
+  } else {
+    await s.from("machine_menu_drafts").insert({
+      machine_id: machineId,
+      source_machine_id: null,
+      source_machine_name: null,
+      items: [item],
+    });
   }
 }
 
@@ -521,12 +669,13 @@ export async function pushMenuDraft(imei: string, draftId: string): Promise<Push
     const { data: draft } = await s.from("machine_menu_drafts").select("id,items").eq("id", draftId).maybeSingle();
     if (!draft) return { ok: false, error: "Draft not found." };
 
-    const draftItems = (draft.items as { position: string; goodsName: string; price: string; imagePath: string }[]) ?? [];
+    const draftItems = (draft.items as DraftItemInput[]) ?? [];
     const items: DiyItem[] = [];
     for (const it of draftItems) {
       if (it.goodsName) items.push({ position: it.position, code: "goodsName", value: it.goodsName });
       if (it.price) items.push({ position: it.position, code: "price", value: it.price });
       if (it.imagePath) items.push({ position: it.position, code: "imagePath", value: it.imagePath });
+      if (it.allergyPath) items.push({ position: it.position, code: "allergyPath", value: it.allergyPath });
     }
     if (!items.length) return { ok: false, error: "Draft has nothing to push." };
 

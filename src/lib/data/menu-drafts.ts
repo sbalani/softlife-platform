@@ -6,6 +6,7 @@ export type MenuDraftItem = {
   price: string;
   imagePath: string;
   marketPrice: string;
+  allergyPath?: string;
 };
 
 export type MenuDraft = {

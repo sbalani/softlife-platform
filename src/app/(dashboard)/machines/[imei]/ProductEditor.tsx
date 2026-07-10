@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { updateMachineProduct, uploadMenuItemImage } from "./actions";
+import { updateMachineProduct, saveHopperDraft, uploadMenuItemImage } from "./actions";
 import type { ProductDiyItem } from "@/lib/huaxin/client";
 
 const input = "w-full rounded border border-line bg-white px-2 py-1.5 text-xs text-cocoa focus:border-terracotta focus:outline-none";
@@ -22,10 +22,12 @@ const HOPPER_LABELS: Record<string, string> = {
 
 export function ProductEditor({
   imei,
+  machineId,
   item,
   ingredients,
 }: {
   imei: string;
+  machineId: string | null;
   item: ProductDiyItem;
   ingredients?: IngredientOption[];
 }) {
@@ -56,22 +58,33 @@ export function ProductEditor({
     }
   };
 
-  const save = () => {
-    startTransition(async () => {
-      const fields: Record<string, string> = {};
-      if (name !== (item.goodsName ?? "")) fields.goodsName = name;
-      if (price !== (item.price ?? "")) fields.price = price;
-      if (marketPrice !== (item.marketPrice ?? "")) fields.marketPrice = marketPrice;
-      if (imagePath !== (item.imagePath ?? "")) fields.imagePath = imagePath;
-      if (allergyPath) fields.allergyPath = allergyPath;
+  const buildFields = () => {
+    const fields: Record<string, string> = {};
+    if (name !== (item.goodsName ?? "")) fields.goodsName = name;
+    if (price !== (item.price ?? "")) fields.price = price;
+    if (marketPrice !== (item.marketPrice ?? "")) fields.marketPrice = marketPrice;
+    if (imagePath !== (item.imagePath ?? "")) fields.imagePath = imagePath;
+    if (allergyPath) fields.allergyPath = allergyPath;
+    return fields;
+  };
 
-      const res = await updateMachineProduct(imei, String(item.position ?? "0"), fields);
+  const push = () => {
+    startTransition(async () => {
+      const res = await updateMachineProduct(imei, String(item.position ?? "0"), buildFields());
       if (res.ok) {
         setResult("Updated & synced.");
         setEditing(false);
       } else {
         setResult(res.error ?? "Failed");
       }
+    });
+  };
+
+  const saveDraft = () => {
+    startTransition(async () => {
+      const res = await saveHopperDraft(imei, machineId, String(item.position ?? "0"), buildFields());
+      setResult(res.ok ? "Saved to draft." : res.error ?? "Failed");
+      if (res.ok) setEditing(false);
     });
   };
 
@@ -94,7 +107,10 @@ export function ProductEditor({
             </div>
           </div>
           <button
-            onClick={() => setEditing(true)}
+            onClick={() => {
+              setEditing(true);
+              setResult(null);
+            }}
             className="shrink-0 rounded bg-cream px-2 py-1 text-[10px] font-bold text-terracotta hover:bg-sand"
           >
             ✎ Edit
@@ -179,15 +195,26 @@ export function ProductEditor({
           </label>
           <div className="flex items-center gap-2">
             <button
-              onClick={save}
+              onClick={push}
               disabled={pending}
               className="rounded bg-terracotta px-3 py-1.5 text-[10px] font-bold text-white hover:bg-terracotta-dark disabled:opacity-60"
             >
               {pending ? "Pushing…" : "Push to machine"}
             </button>
-            {result && <span className={`text-[10px] ${result.includes("Updated") ? "text-sage" : "text-danger"}`}>{result}</span>}
+            <button
+              onClick={saveDraft}
+              disabled={pending}
+              className="rounded border border-line bg-white px-3 py-1.5 text-[10px] font-bold text-cocoa hover:bg-cream disabled:opacity-60"
+            >
+              Save draft
+            </button>
           </div>
         </div>
+      )}
+      {result && (
+        <p className={`mt-2 text-[10px] ${result.includes("Updated") || result.includes("Saved") ? "text-sage" : "text-danger"}`}>
+          {result}
+        </p>
       )}
     </div>
   );

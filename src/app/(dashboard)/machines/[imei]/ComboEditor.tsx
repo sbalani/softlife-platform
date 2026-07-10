@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { pushComboToMachine, uploadMenuItemImage } from "./actions";
+import { pushComboToMachine, saveComboDraft, uploadMenuItemImage } from "./actions";
 import type { ProductDiyItem } from "@/lib/huaxin/client";
 
 const input = "w-full rounded border border-line bg-white px-2 py-1.5 text-xs text-cocoa focus:border-terracotta focus:outline-none";
@@ -14,10 +14,12 @@ const MAX_INGREDIENTS = 6;
 
 export function ComboEditor({
   imei,
+  machineId,
   item,
   hopperIngredients,
 }: {
   imei: string;
+  machineId: string | null;
   item: ProductDiyItem;
   hopperIngredients: HopperIngredientOption[];
 }) {
@@ -72,6 +74,14 @@ export function ComboEditor({
     });
   };
 
+  const saveDraft = () => {
+    startTransition(async () => {
+      const res = await saveComboDraft(imei, machineId, String(item.position ?? "0"), selectedIds, effectivePrice, imagePath);
+      setResult(res.ok ? "Saved to draft." : res.error ?? "Failed");
+      if (res.ok) setEditing(false);
+    });
+  };
+
   return (
     <div className="rounded-xl border border-line p-3">
       {!editing ? (
@@ -88,7 +98,10 @@ export function ComboEditor({
             </div>
           </div>
           <button
-            onClick={() => setEditing(true)}
+            onClick={() => {
+              setEditing(true);
+              setResult(null);
+            }}
             className="shrink-0 rounded bg-cream px-2 py-1 text-[10px] font-bold text-terracotta hover:bg-sand"
           >
             ✎ Edit
@@ -184,12 +197,23 @@ export function ComboEditor({
             >
               {pending ? "Pushing…" : "Push combo to machine"}
             </button>
+            <button
+              onClick={saveDraft}
+              disabled={pending || !canPush}
+              className="rounded border border-line bg-white px-3 py-1.5 text-[10px] font-bold text-cocoa hover:bg-cream disabled:opacity-60"
+            >
+              Save draft
+            </button>
             {!canPush && selectedIds.length > 0 && (
               <span className="text-[10px] text-warning">Need at least {MIN_INGREDIENTS} ingredients.</span>
             )}
-            {result && <span className={`text-[10px] ${result.includes("Updated") ? "text-sage" : "text-danger"}`}>{result}</span>}
           </div>
         </div>
+      )}
+      {result && (
+        <p className={`mt-2 text-[10px] ${result.includes("Updated") || result.includes("Saved") ? "text-sage" : "text-danger"}`}>
+          {result}
+        </p>
       )}
     </div>
   );

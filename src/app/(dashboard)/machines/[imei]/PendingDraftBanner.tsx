@@ -26,7 +26,8 @@ export function PendingDraftBanner({ imei, draft }: { imei: string; draft: MenuD
       <div className="mb-2 flex flex-wrap items-center justify-between gap-1">
         <span className="text-xs font-bold uppercase text-terracotta">Pending menu draft</span>
         <span className="text-[10px] text-taupe">
-          from {draft.sourceMachineName ?? "another machine"} · {new Date(draft.createdAt).toLocaleString()}
+          {draft.sourceMachineName ? `from ${draft.sourceMachineName} · ` : "staged edits · "}
+          {new Date(draft.createdAt).toLocaleString()}
         </span>
       </div>
       <div className="mb-3 flex flex-wrap gap-1.5">

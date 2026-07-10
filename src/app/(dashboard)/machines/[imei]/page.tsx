@@ -208,7 +208,7 @@ export default async function MachineDetailPage({
                 <h3 className="mb-2 text-[11px] uppercase tracking-wide text-taupe">Menu items (recipes / combos)</h3>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {menu.unify.map((item, i) => (
-                    <ComboEditor key={i} imei={imei} item={item} hopperIngredients={hopperIngredients} />
+                    <ComboEditor key={i} imei={imei} machineId={config?.machineId ?? null} item={item} hopperIngredients={hopperIngredients} />
                   ))}
                 </div>
               </div>
@@ -231,7 +231,7 @@ export default async function MachineDetailPage({
                         linkedBaseId={config?.baseProductId ?? null}
                       />
                     ) : (
-                      <ProductEditor key={i} imei={imei} item={item} ingredients={ingredients} />
+                      <ProductEditor key={i} imei={imei} machineId={config?.machineId ?? null} item={item} ingredients={ingredients} />
                     ),
                   )}
                 </div>

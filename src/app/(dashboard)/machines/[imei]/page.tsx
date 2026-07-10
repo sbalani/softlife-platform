@@ -9,6 +9,7 @@ import { getProducts } from "@/lib/data/products";
 import { getMachines } from "@/lib/data/machines";
 import { getPendingMenuDraft } from "@/lib/data/menu-drafts";
 import { MachineConfigForm } from "./MachineConfigForm";
+import { DraftBulkActions } from "./DraftBulkActions";
 import { MachinePushButton } from "./MachinePushButton";
 import { RemoteControls } from "./RemoteControls";
 import { MediaManager } from "./MediaManager";
@@ -19,7 +20,6 @@ import { BaseHopperCard } from "./BaseHopperCard";
 import { PushSolidToppingsButton } from "./PushSolidToppingsButton";
 import { ComboEditor, type HopperIngredientOption } from "./ComboEditor";
 import { CopyMenuButton } from "./CopyMenuButton";
-import { PendingDraftBanner } from "./PendingDraftBanner";
 import { DeviceSettingsPanel } from "./DeviceSettingsPanel";
 import { LogLotForm } from "./LogLotForm";
 import { AreaChart } from "@/components/charts";
@@ -44,6 +44,7 @@ export default async function MachineDetailPage({
   const { machines: allMachines } = await getMachines();
   const otherMachines = allMachines.filter((m) => m.device_imei !== imei).map((m) => ({ id: m.id, name: m.name }));
   const pendingDraft = config?.machineId ? await getPendingMenuDraft(config.machineId) : null;
+  const draftByPosition = new Map((pendingDraft?.items ?? []).map((it) => [it.position, it]));
 
   // What a combo can actually be built from — only what's currently loaded in
   // this machine's hoppers, since that's all it can physically dispense.
@@ -198,9 +199,13 @@ export default async function MachineDetailPage({
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-display text-lg font-bold text-cocoa">Product menu on machine (live, editable)</h2>
-          <CopyMenuButton sourceImei={imei} machines={otherMachines} />
+          <div className="flex items-center gap-3">
+            {pendingDraft && pendingDraft.items.length > 1 && (
+              <DraftBulkActions imei={imei} draftId={pendingDraft.id} count={pendingDraft.items.length} />
+            )}
+            <CopyMenuButton sourceImei={imei} machines={otherMachines} />
+          </div>
         </div>
-        {pendingDraft && <PendingDraftBanner imei={imei} draft={pendingDraft} />}
         {menu.diy.length > 0 || menu.unify.length > 0 ? (
           <div className="space-y-4">
             {menu.unify.length > 0 && (
@@ -208,7 +213,15 @@ export default async function MachineDetailPage({
                 <h3 className="mb-2 text-[11px] uppercase tracking-wide text-taupe">Menu items (recipes / combos)</h3>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {menu.unify.map((item, i) => (
-                    <ComboEditor key={i} imei={imei} machineId={config?.machineId ?? null} item={item} hopperIngredients={hopperIngredients} />
+                    <ComboEditor
+                      key={i}
+                      imei={imei}
+                      machineId={config?.machineId ?? null}
+                      item={item}
+                      hopperIngredients={hopperIngredients}
+                      draftId={pendingDraft?.id ?? null}
+                      draftItem={draftByPosition.get(String(item.position)) ?? null}
+                    />
                   ))}
                 </div>
               </div>
@@ -229,9 +242,19 @@ export default async function MachineDetailPage({
                         item={item}
                         bases={ingredients.filter((p) => p.type === "base")}
                         linkedBaseId={config?.baseProductId ?? null}
+                        draftId={pendingDraft?.id ?? null}
+                        draftItem={draftByPosition.get(String(item.position)) ?? null}
                       />
                     ) : (
-                      <ProductEditor key={i} imei={imei} machineId={config?.machineId ?? null} item={item} ingredients={ingredients} />
+                      <ProductEditor
+                        key={i}
+                        imei={imei}
+                        machineId={config?.machineId ?? null}
+                        item={item}
+                        ingredients={ingredients}
+                        draftId={pendingDraft?.id ?? null}
+                        draftItem={draftByPosition.get(String(item.position)) ?? null}
+                      />
                     ),
                   )}
                 </div>

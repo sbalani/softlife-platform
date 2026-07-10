@@ -690,6 +690,64 @@ export async function pushMenuDraft(imei: string, draftId: string): Promise<Push
   }
 }
 
+async function removeDraftItemAt(s: ServiceClient, draftId: string, position: string): Promise<void> {
+  const { data: draft } = await s.from("machine_menu_drafts").select("id,items").eq("id", draftId).maybeSingle();
+  if (!draft) return;
+  const items = ((draft.items as DraftItemInput[]) ?? []).filter((d) => d.position !== position);
+  if (items.length) {
+    await s.from("machine_menu_drafts").update({ items }).eq("id", draftId);
+  } else {
+    await s.from("machine_menu_drafts").delete().eq("id", draftId);
+  }
+}
+
+/** Pushes just one position's staged item — the per-card "Push to machine"
+ * shown in place on the hopper/combo/base editor itself, not a separate
+ * summary. Clears only that position from the draft on success. */
+export async function pushDraftItemAt(imei: string, draftId: string, position: string): Promise<ProductUpdateResult> {
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+  const cfg = getConfigFromEnv();
+  if (!cfg) return { ok: false, error: "Huaxin not configured." };
+
+  try {
+    const s = await createServiceClient();
+    const { data: draft } = await s.from("machine_menu_drafts").select("id,items").eq("id", draftId).maybeSingle();
+    if (!draft) return { ok: false, error: "Draft not found." };
+    const it = ((draft.items as DraftItemInput[]) ?? []).find((d) => d.position === position);
+    if (!it) return { ok: false, error: "Draft item not found." };
+
+    const items: DiyItem[] = [];
+    if (it.goodsName) items.push({ position: it.position, code: "goodsName", value: it.goodsName });
+    if (it.price) items.push({ position: it.position, code: "price", value: it.price });
+    if (it.imagePath) items.push({ position: it.position, code: "imagePath", value: it.imagePath });
+    if (it.allergyPath) items.push({ position: it.position, code: "allergyPath", value: it.allergyPath });
+    if (!items.length) return { ok: false, error: "Nothing to push." };
+
+    await pushProductDiy(cfg, imei, items);
+    try { await refreshProduct(cfg, imei); } catch { /* best-effort */ }
+
+    await removeDraftItemAt(s, draftId, position);
+    revalidatePath(`/machines/${imei}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Discards just one position's staged item without pushing — reverts that
+ * card back to showing live data. */
+export async function revertDraftItemAt(imei: string, draftId: string, position: string): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+  try {
+    const s = await createServiceClient();
+    await removeDraftItemAt(s, draftId, position);
+    revalidatePath(`/machines/${imei}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export async function dismissMenuDraft(imei: string, draftId: string): Promise<{ ok: boolean; error?: string }> {
   if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
   try {

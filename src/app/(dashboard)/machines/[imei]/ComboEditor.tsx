@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { pushComboToMachine, saveComboDraft, uploadMenuItemImage } from "./actions";
+import { pushComboToMachine, saveComboDraft, pushDraftItemAt, revertDraftItemAt, uploadMenuItemImage } from "./actions";
 import type { ProductDiyItem } from "@/lib/huaxin/client";
+import type { MenuDraftItem } from "@/lib/data/menu-drafts";
 
 const input = "w-full rounded border border-line bg-white px-2 py-1.5 text-xs text-cocoa focus:border-terracotta focus:outline-none";
 const lbl = "mb-0.5 block text-[10px] uppercase tracking-wide text-taupe";
@@ -17,11 +18,15 @@ export function ComboEditor({
   machineId,
   item,
   hopperIngredients,
+  draftId,
+  draftItem,
 }: {
   imei: string;
   machineId: string | null;
   item: ProductDiyItem;
   hopperIngredients: HopperIngredientOption[];
+  draftId?: string | null;
+  draftItem?: MenuDraftItem | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -82,30 +87,75 @@ export function ComboEditor({
     });
   };
 
+  const pushDraft = () => {
+    if (!draftId) return;
+    startTransition(async () => {
+      const res = await pushDraftItemAt(imei, draftId, String(item.position ?? "0"));
+      setResult(res.ok ? "Updated & synced." : res.error ?? "Failed");
+    });
+  };
+
+  const revertDraft = () => {
+    if (!draftId) return;
+    startTransition(async () => {
+      const res = await revertDraftItemAt(imei, draftId, String(item.position ?? "0"));
+      if (!res.ok) setResult(res.error ?? "Failed");
+    });
+  };
+
+  const displayName = draftItem ? draftItem.goodsName : item.goodsName;
+  const displayPrice = draftItem ? draftItem.price : item.price;
+  const displayImage = draftItem ? draftItem.imagePath : item.imagePath;
+
   return (
-    <div className="rounded-xl border border-line p-3">
+    <div className={`rounded-xl border p-3 ${draftItem ? "border-terracotta/50 bg-terracotta/5" : "border-line"}`}>
       {!editing ? (
         <div className="flex items-center gap-3">
-          {item.imagePath ? (
-            <img src={item.imagePath} alt={item.goodsName} referrerPolicy="no-referrer" className="h-12 w-12 rounded-lg object-cover" />
+          {displayImage ? (
+            <img src={displayImage} alt={displayName} referrerPolicy="no-referrer" className="h-12 w-12 rounded-lg object-cover" />
           ) : (
             <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-cream text-taupe">—</div>
           )}
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold text-cocoa">{item.goodsName ?? "—"}</div>
+            <div className="flex items-center gap-1.5">
+              {draftItem && (
+                <span className="shrink-0 rounded-full bg-terracotta px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">Draft</span>
+              )}
+              <div className="truncate text-sm font-semibold text-cocoa">{displayName || "—"}</div>
+            </div>
             <div className="text-[10px] text-taupe">
-              Combo {item.position} · price {item.price ?? "—"}{item.stock ? ` · stock ${item.stock}` : ""}
+              Combo {item.position} · price {displayPrice ?? "—"}{!draftItem && item.stock ? ` · stock ${item.stock}` : ""}
             </div>
           </div>
-          <button
-            onClick={() => {
-              setEditing(true);
-              setResult(null);
-            }}
-            className="shrink-0 rounded bg-cream px-2 py-1 text-[10px] font-bold text-terracotta hover:bg-sand"
-          >
-            ✎ Edit
-          </button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {draftItem && (
+              <>
+                <button
+                  onClick={pushDraft}
+                  disabled={pending}
+                  className="rounded bg-terracotta px-2 py-1 text-[10px] font-bold text-white hover:bg-terracotta-dark disabled:opacity-60"
+                >
+                  {pending ? "…" : "Push"}
+                </button>
+                <button
+                  onClick={revertDraft}
+                  disabled={pending}
+                  className="rounded border border-line bg-white px-2 py-1 text-[10px] font-bold text-cocoa hover:bg-cream disabled:opacity-60"
+                >
+                  Revert
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => {
+                setEditing(true);
+                setResult(null);
+              }}
+              className="rounded bg-cream px-2 py-1 text-[10px] font-bold text-terracotta hover:bg-sand"
+            >
+              ✎ Edit
+            </button>
+          </div>
         </div>
       ) : (
         <div className="space-y-2">

@@ -236,6 +236,7 @@ export async function pushProductDiy(
   items: { position: string; code: string; value: string }[],
 ) {
   return call("/machine/cloud/api/batch/motify/data", cfg, {
+    device_imei: deviceImei,
     data: { serialNum: String(Date.now()), type: "productDiy", deviceImei, data: items },
   });
 }
@@ -248,6 +249,7 @@ export async function refreshProduct(cfg: HuaxinConfig, deviceImei: string) {
 
 export async function sendCommand(cfg: HuaxinConfig, deviceImei: string, command: string): Promise<Envelope> {
   return call("/machine/cloud/api/remote/control/data", cfg, {
+    device_imei: deviceImei,
     data: { serialNum: String(Date.now()), type: "operate", deviceImei, data: { command, value: "1" } },
   });
 }
@@ -283,6 +285,7 @@ export async function removeDeviceMedia(cfg: HuaxinConfig, deviceImei: string, r
 
 export async function updateDeviceInfo(cfg: HuaxinConfig, deviceImei: string, fields: Record<string, string>[]) {
   return call("/machine/cloud/api/batch/motify/data", cfg, {
+    device_imei: deviceImei,
     data: { serialNum: String(Date.now()), type: "deviceInfo", deviceImei, data: fields },
   });
 }
@@ -294,6 +297,7 @@ export async function getDeviceSettings(cfg: HuaxinConfig, deviceImei: string) {
 
 export async function pushDeviceSetting(cfg: HuaxinConfig, deviceImei: string, code: string, value: string) {
   return call("/machine/cloud/api/remote/control/data", cfg, {
+    device_imei: deviceImei,
     data: { serialNum: String(Date.now()), type: "configure", deviceImei, data: { code, value } },
   });
 }

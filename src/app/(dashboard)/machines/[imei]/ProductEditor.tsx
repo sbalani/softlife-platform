@@ -58,12 +58,15 @@ export function ProductEditor({
     }
   };
 
+  // Always send the current form values, even if they look unchanged from
+  // what we last fetched — that's exactly the case for a deliberate re-push
+  // when a previous push didn't actually take on the machine.
   const buildFields = () => {
     const fields: Record<string, string> = {};
-    if (name !== (item.goodsName ?? "")) fields.goodsName = name;
-    if (price !== (item.price ?? "")) fields.price = price;
-    if (marketPrice !== (item.marketPrice ?? "")) fields.marketPrice = marketPrice;
-    if (imagePath !== (item.imagePath ?? "")) fields.imagePath = imagePath;
+    if (name) fields.goodsName = name;
+    if (price) fields.price = price;
+    if (marketPrice) fields.marketPrice = marketPrice;
+    if (imagePath) fields.imagePath = imagePath;
     if (allergyPath) fields.allergyPath = allergyPath;
     return fields;
   };

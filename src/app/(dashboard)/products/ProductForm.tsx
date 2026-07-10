@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useActionState } from "react";
 import { createProduct, updateProduct, type ProductResult } from "./actions";
 import { extractFromSheet, type ExtractResult } from "./extract";
+import { AllergenCompositeField } from "./AllergenCompositeField";
 import type { Allergen } from "@/lib/data/allergens";
 import type { Product } from "@/lib/data/products";
 
@@ -123,6 +124,7 @@ export function ProductForm({ allergens, product }: { allergens: Allergen[]; pro
           <Field labelText="Country of origin"><input name="country_of_origin" defaultValue={ex?.country_of_origin ?? product?.country_of_origin ?? ""} placeholder="Spain" className={`w-full ${input}`} /></Field>
           <AllergenGroup allergens={allergens} name="contains" title="Allergens — contains" selected={ex?.containsIds ?? containsIds} />
           <AllergenGroup allergens={allergens} name="may_contain" title="Allergens — may contain" selected={ex?.mayContainIds ?? mayContainIds} />
+          <AllergenCompositeField initialUrl={product?.allergen_url ?? null} />
         </Section>
 
         <Section title="Nutrition (per 100g)">

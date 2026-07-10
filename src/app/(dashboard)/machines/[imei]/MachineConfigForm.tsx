@@ -25,15 +25,6 @@ export function MachineConfigForm({ config, imei, tenants }: { config: MachineCo
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <label className="block">
-          <span className={labelClass}>Base product</span>
-          <select name="base_product_id" defaultValue={config.baseProductId ?? ""} className={selectClass}>
-            <option value="">—</option>
-            {config.bases.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
           <span className={labelClass}>Profile</span>
           <select
             name="profile"

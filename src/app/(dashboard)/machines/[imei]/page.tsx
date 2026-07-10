@@ -222,7 +222,14 @@ export default async function MachineDetailPage({
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {menu.diy.map((item, i) =>
                     String(item.position) === "1" ? (
-                      <BaseHopperCard key={i} imei={imei} item={item} baseProduct={baseProduct ? { id: baseProduct.id, name: baseProduct.name, image_url: baseProduct.image_url } : null} />
+                      <BaseHopperCard
+                        key={i}
+                        imei={imei}
+                        machineId={config?.machineId ?? null}
+                        item={item}
+                        bases={ingredients.filter((p) => p.type === "base")}
+                        linkedBaseId={config?.baseProductId ?? null}
+                      />
                     ) : (
                       <ProductEditor key={i} imei={imei} item={item} ingredients={ingredients} />
                     ),

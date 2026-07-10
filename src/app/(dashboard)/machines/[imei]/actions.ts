@@ -25,14 +25,15 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
 
   try {
     const s = await createServiceClient();
-    const base = String(fd.get("base_product_id") ?? "");
     const profile = String(fd.get("profile") ?? "");
     const lastClean = String(fd.get("last_full_clean") ?? "");
 
+    // base_product_id is NOT touched here — it's set from the Base hopper
+    // card in the product menu section (updateBaseHopper), which is the one
+    // place that both pushes to the machine and keeps this field linked.
     const { error: mErr } = await s
       .from("machines")
       .update({
-        base_product_id: base || null,
         profile: profile || null,
         last_full_clean_date: lastClean ? new Date(lastClean).toISOString() : null,
         customer_id: String(fd.get("customer_id") ?? "") || null,
@@ -171,27 +172,38 @@ export async function pushSolidToppings(_prev: PushResult | null, fd: FormData):
   }
 }
 
-export async function pushBaseToMachine(imei: string, productId: string): Promise<ProductUpdateResult> {
+/** The Base hopper (lane 1) is the one place base is set — no separate
+ * "Base product" dropdown in the config form anymore, since that was a
+ * second, divergent path to the same field. Pushes to the machine and, when
+ * the picked ingredient came from the catalog (productId set), links
+ * machines.base_product_id so combos/lot-tracking can resolve it. Free-typed
+ * edits (no catalog pick) push without touching the link, same as any other
+ * hopper's manual edit. */
+export async function updateBaseHopper(
+  imei: string,
+  machineId: string | null,
+  productId: string | null,
+  fields: Record<string, string>,
+): Promise<ProductUpdateResult> {
   const cfg = getConfigFromEnv();
   if (!cfg) return { ok: false, error: "Huaxin not configured." };
-  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
-  try {
-    const s = await createServiceClient();
-    const { data: p } = await s.from("products").select("name,price,image_url,allergen_url").eq("id", productId).maybeSingle();
-    if (!p) return { ok: false, error: "Base product not found." };
-    const items: DiyItem[] = [
-      { position: BASE_LANE, code: "goodsName", value: String(p.name ?? "") },
-      { position: BASE_LANE, code: "price", value: String(p.price ?? 0) },
-    ];
-    if (p.image_url) items.push({ position: BASE_LANE, code: "imagePath", value: String(p.image_url) });
-    if (p.allergen_url) items.push({ position: BASE_LANE, code: "allergyPath", value: String(p.allergen_url) });
+  const items: DiyItem[] = Object.entries(fields)
+    .filter(([, v]) => v.trim() !== "")
+    .map(([code, value]) => ({ position: BASE_LANE, code, value }));
+  if (!items.length) return { ok: false, error: "Nothing to update." };
 
+  try {
     const result = await pushProductDiy(cfg, imei, items);
-    if (String(result.code) === "200") {
-      try { await refreshProduct(cfg, imei); } catch { /* best-effort */ }
-      return { ok: true };
+    if (String(result.code) !== "200") {
+      return { ok: false, error: result.msg ?? "Update rejected" };
     }
-    return { ok: false, error: result.msg ?? "Update rejected" };
+    try { await refreshProduct(cfg, imei); } catch { /* best-effort */ }
+
+    if (isSupabaseConfigured() && machineId && productId) {
+      const s = await createServiceClient();
+      await s.from("machines").update({ base_product_id: productId }).eq("id", machineId);
+    }
+    return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

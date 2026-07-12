@@ -74,15 +74,17 @@ export default async function MachineDetailPage({
     <div>
       <Link href="/machines" className="text-sm font-semibold text-terracotta">← Machines</Link>
 
-      <header className="mt-3 mb-8 flex items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-3xl font-bold text-cocoa">{name}</h1>
-          <p className="mt-1 text-sm text-taupe">{location ?? "—"} · IMEI {imei}</p>
+      <header className="mt-3 mb-8 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+        <div className="min-w-0">
+          <h1 className="break-words font-display text-2xl font-bold text-cocoa sm:text-3xl">{name}</h1>
+          <p className="mt-1 break-words text-sm text-taupe">{location ?? "—"} · IMEI {imei}</p>
         </div>
-        <span className={`rounded-full px-3 py-1 text-xs font-bold ${online ? "bg-sage/15 text-sage" : "bg-taupe/15 text-taupe"}`}>
-          {online ? "Online" : "Offline"}
-        </span>
-        <MachineSyncButton imei={imei} />
+        <div className="flex items-center gap-3">
+          <span className={`rounded-full px-3 py-1 text-xs font-bold ${online ? "bg-sage/15 text-sage" : "bg-taupe/15 text-taupe"}`}>
+            {online ? "Online" : "Offline"}
+          </span>
+          <MachineSyncButton imei={imei} />
+        </div>
       </header>
 
       {/* Configuration + Push + Remote */}
@@ -136,7 +138,8 @@ export default async function MachineDetailPage({
         {lotHistory.length > 0 && (
           <div className="mt-4 border-t border-line pt-3">
             <h3 className="mb-2 text-[11px] uppercase tracking-wide text-taupe">Recent lot history</h3>
-            <table className="w-full text-xs">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[480px] text-xs">
               <thead className="text-left text-[10px] uppercase text-taupe"><tr><th className="py-1">Date</th><th className="py-1">Position</th><th className="py-1">Product</th><th className="py-1">Lot</th><th className="py-1 text-right">Qty</th></tr></thead>
               <tbody className="divide-y divide-line">
                 {lotHistory.map((h) => (
@@ -150,6 +153,7 @@ export default async function MachineDetailPage({
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </section>
@@ -228,7 +232,7 @@ export default async function MachineDetailPage({
             )}
             {menu.diy.length > 0 && (
               <div>
-                <div className="mb-2 flex items-center justify-between">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-[11px] uppercase tracking-wide text-taupe">Hoppers / ingredients</h3>
                   {config?.machineId && <PushSolidToppingsButton imei={imei} />}
                 </div>
@@ -279,7 +283,7 @@ export default async function MachineDetailPage({
             <AreaChart data={telemetry.temperatures.map((t) => ({ label: t.time ?? "", value: t.value }))} />
           </div>
         ) : (
-          <p className="mt-3 text-sm text-taupe">No temperature readings in the last 7 days.</p>
+          <p className="mt-3 text-sm text-taupe">No temperature readings in the last 24 hours.</p>
         )}
       </section>
 
@@ -287,7 +291,8 @@ export default async function MachineDetailPage({
       <section className="rounded-2xl border border-line bg-white p-5">
         <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Recent orders</h2>
         {telemetry && telemetry.orders.length ? (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
             <thead className="text-left text-[11px] uppercase tracking-wide text-taupe">
               <tr><th className="py-2">Time</th><th className="py-2">Order #</th><th className="py-2">Product</th><th className="py-2 text-right">Price</th><th className="py-2 text-right">State</th></tr>
             </thead>
@@ -303,6 +308,7 @@ export default async function MachineDetailPage({
               ))}
             </tbody>
           </table>
+          </div>
         ) : (
           <p className="text-sm text-taupe">No orders in the last 7 days.</p>
         )}

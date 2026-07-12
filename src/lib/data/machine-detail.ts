@@ -54,10 +54,13 @@ export async function getMachineDetail(imei: string): Promise<MachineDetail | nu
 
   const began = ymd(new Date(Date.now() - 7 * 86_400_000)) + " 00:00:00";
   const end = ymd(new Date()) + " 23:59:59";
+  // Huaxin's temperature endpoint returns empty for long windows — the
+  // /temperatures page always worked because it asks for 24h. Same here.
+  const tempBegan = ymd(new Date(Date.now() - 86_400_000)) + " 00:00:00";
 
   let temperatures: DetailTemp[] = [];
   try {
-    const t = await pullTemperatures(cfg, imei, began, end);
+    const t = await pullTemperatures(cfg, imei, tempBegan, end);
     const category = t.category ?? [];
     const series = (t.dataset ?? [])[0];
     temperatures = (series?.data ?? []).map((p, i) => ({

@@ -1,76 +1,99 @@
 import { AreaChart, KpiCard, VBarChart } from "@/components/charts";
+import { getOrders } from "@/lib/data/orders";
+import { getMachines } from "@/lib/data/machines";
+import { getAlerts } from "@/lib/data/alerts";
 
 export const dynamic = "force-dynamic";
 
-const TOPPINGS = [
-  { label: "Oreo", value: 420 },
-  { label: "Rainbow", value: 380 },
-  { label: "Hazelnut", value: 260 },
-  { label: "Chocolate", value: 210 },
-  { label: "Caramel", value: 160 },
-];
+function isSameDay(iso: string, ref: Date) {
+  const d = new Date(iso);
+  return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth() && d.getDate() === ref.getDate();
+}
 
-const SAUCES = [
-  { label: "Chocolate", value: 300 },
-  { label: "Caramel", value: 250 },
-  { label: "Strawberry", value: 180 },
-  { label: "White Choc", value: 120 },
-];
+export default async function DashboardPage() {
+  const [{ orders, source: ordersSource }, { machines }, { alerts, source: alertsSource }] = await Promise.all([
+    getOrders(),
+    getMachines(),
+    getAlerts(),
+  ]);
 
-const TOP_MACHINES = [
-  { label: "B84MAX-001", value: 1280 },
-  { label: "B84MAX-002", value: 940 },
-  { label: "B84MAX-003", value: 760 },
-];
+  const completed = orders.filter((o) => o.order_state === "COMPLETE");
+  const totalSales = completed.reduce((s, o) => s + o.price, 0);
 
-export default function DashboardPage() {
+  const today = new Date();
+  const yesterday = new Date(Date.now() - 86_400_000);
+  const ordersToday = orders.filter((o) => isSameDay(o.order_time, today)).length;
+  const ordersYesterday = orders.filter((o) => isSameDay(o.order_time, yesterday)).length;
+
+  const online = machines.filter((m) => m.net_online).length;
+  const critical = alerts.filter((a) => a.severity === "critical").length;
+
+  // Servings per product across completed orders (each order line's goodsName).
+  const productCounts = new Map<string, number>();
+  for (const o of completed) {
+    const names = o.products.length ? o.products.map((p) => p.goodsName ?? "") : [o.product_name];
+    for (const n of names) {
+      if (!n) continue;
+      productCounts.set(n, (productCounts.get(n) ?? 0) + 1);
+    }
+  }
+  const topProducts = [...productCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([label, value]) => ({ label, value }));
+
+  const machineRevenue = new Map<string, number>();
+  for (const o of completed) {
+    const name = o.machine_name ?? o.device_imei ?? "Unknown";
+    machineRevenue.set(name, (machineRevenue.get(name) ?? 0) + o.price);
+  }
+  const topMachines = [...machineRevenue.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([label, value]) => ({ label, value: Number(value.toFixed(2)) }));
+
+  const isSample = ordersSource === "sample";
+
   return (
     <div>
-      <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-3xl font-bold text-cocoa">Dashboard</h1>
-          <p className="mt-1 text-sm text-taupe">Fleet performance overview</p>
-        </div>
-        <div className="flex items-center gap-3 text-sm">
-          <select className="rounded-lg border border-line bg-white px-3 py-2 text-cocoa">
-            <option>YTD</option>
-            <option>Last 30 days</option>
-            <option>Last 7 days</option>
-          </select>
-          <select className="rounded-lg border border-line bg-white px-3 py-2 text-cocoa">
-            <option>Top 5</option>
-            <option>Top 10</option>
-            <option>All</option>
-          </select>
-        </div>
+      <header className="mb-8">
+        <h1 className="font-display text-3xl font-bold text-cocoa">Dashboard</h1>
+        <p className="mt-1 text-sm text-taupe">Fleet performance — last 30 days</p>
       </header>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <KpiCard label="Total sales" value="€4,820" hint="this month" accent="#d47e54" />
-        <KpiCard label="Active machines" value="3" hint="of 3 online" accent="#6fa98c" />
-        <KpiCard label="Orders today" value="18" hint="vs 12 yesterday" accent="#d47e54" />
-        <KpiCard label="Open alerts" value="2" hint="1 critical" accent="#dc2626" />
+        <KpiCard label="Total sales" value={`€${totalSales.toFixed(2)}`} hint="completed orders, 30 days" accent="#d47e54" />
+        <KpiCard label="Machines online" value={`${online}`} hint={`of ${machines.length} machines`} accent="#6fa98c" />
+        <KpiCard
+          label="Orders today"
+          value={`${ordersToday}`}
+          hint={`vs ${ordersYesterday} yesterday`}
+          accent="#d47e54"
+        />
+        <KpiCard
+          label="Open alerts"
+          value={`${alertsSource === "sample" ? "—" : alerts.length}`}
+          hint={alertsSource === "sample" ? "no alert data yet" : `${critical} critical`}
+          accent="#dc2626"
+        />
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <section className="rounded-2xl border border-line bg-white p-5">
-          <h2 className="font-display text-lg font-bold text-cocoa">Best Performing Toppings YTD</h2>
-          <p className="mb-2 text-xs text-taupe">Servings per topping</p>
-          <AreaChart data={TOPPINGS} color="#d47e54" />
+          <h2 className="font-display text-lg font-bold text-cocoa">Top Products</h2>
+          <p className="mb-2 text-xs text-taupe">Servings per product, completed orders (30 days)</p>
+          <AreaChart data={topProducts} color="#d47e54" />
         </section>
         <section className="rounded-2xl border border-line bg-white p-5">
-          <h2 className="font-display text-lg font-bold text-cocoa">Best Performing Sauces YTD</h2>
-          <p className="mb-2 text-xs text-taupe">Servings per sauce</p>
-          <AreaChart data={SAUCES} color="#6fa98c" />
+          <h2 className="font-display text-lg font-bold text-cocoa">Top Machines by Sales</h2>
+          <p className="mb-2 text-xs text-taupe">Completed order revenue (€, 30 days)</p>
+          <VBarChart data={topMachines} color="#6fa98c" />
         </section>
       </div>
 
-      <section className="mt-6 rounded-2xl border border-line bg-white p-5">
-        <h2 className="mb-4 font-display text-lg font-bold text-cocoa">Top Machines by Sales</h2>
-        <VBarChart data={TOP_MACHINES} color="#d47e54" />
-      </section>
-
-      <p className="mt-4 text-xs text-taupe">Sample data — connect Supabase + run the Huaxin sync for live analytics.</p>
+      {isSample && (
+        <p className="mt-4 text-xs text-taupe">Sample data — connect Supabase + Huaxin keys in .env.local for live analytics.</p>
+      )}
     </div>
   );
 }

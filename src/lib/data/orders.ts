@@ -92,6 +92,9 @@ function mapHuaxinOrder(o: HuaxinOrder, machineName: string, deviceImei: string)
  *  any field the view doesn't have (e.g. `products`). */
 function orderFromSupabaseRow(row: Record<string, unknown>): Order {
   const price = Number(row.price ?? 0);
+  // The webhook stores raw numeric status codes ("3"), not names — normalize
+  // so state filters/revenue math treat cached rows the same as live ones.
+  const rawState = String(row.order_state ?? "");
   return {
     id: row.id as string,
     order_time: (row.order_time as string) ?? new Date().toISOString(),
@@ -99,7 +102,7 @@ function orderFromSupabaseRow(row: Record<string, unknown>): Order {
     device_imei: (row.device_imei as string) ?? null,
     order_code: (row.order_code as string) ?? "",
     out_trade_no: null,
-    order_state: (row.order_state as string) ?? "",
+    order_state: STATE_MAP[rawState] ?? rawState,
     status_code: "",
     price,
     market_price: null,
@@ -155,33 +158,38 @@ export async function getOrders(filters?: {
   refundedOnly?: boolean;
   serverModeOnly?: boolean;
 }): Promise<{ orders: Order[]; source: Source }> {
+  // Live Huaxin is the primary source: the Supabase cache only holds orders
+  // whose webhook events happened to arrive, so preferring it hid entire
+  // machines' orders. Cache rows the live pull doesn't return (webhook-only
+  // events, or a flaky live call for one device) still merge in by order_code.
   let orders: Order[] = [];
   let source: Source = "sample";
 
-  if (isSupabaseConfigured()) {
-    try {
-      const supabase = await createServiceClient();
-      const { data, error } = await supabase.from("v_orders").select("*").order("order_time", { ascending: false }).limit(100);
-      if (!error && data && data.length) {
-        orders = (data as Record<string, unknown>[]).map(orderFromSupabaseRow);
-        source = "supabase";
-      }
-    } catch {
-      /* fall through */
-    }
-  }
-
-  if (source === "sample" && getConfigFromEnv()) {
+  if (getConfigFromEnv()) {
     try {
       orders = await getOrdersLive();
       source = "huaxin";
     } catch (e) {
       console.error("[orders] Huaxin live failed:", e);
-      return { orders: [], source: "huaxin" };
     }
   }
 
-  if (source === "sample" && !getConfigFromEnv()) {
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = await createServiceClient();
+      const { data, error } = await supabase.from("v_orders").select("*").order("order_time", { ascending: false }).limit(100);
+      if (!error && data) {
+        const seen = new Set(orders.map((o) => o.order_code));
+        const cacheRows = (data as Record<string, unknown>[]).map(orderFromSupabaseRow).filter((o) => !seen.has(o.order_code));
+        orders = [...orders, ...cacheRows].sort((a, b) => +new Date(b.order_time) - +new Date(a.order_time));
+        if (source === "sample" && orders.length) source = "supabase";
+      }
+    } catch {
+      /* cache merge is best-effort */
+    }
+  }
+
+  if (source === "sample" && !orders.length) {
     return { orders: SAMPLE, source: "sample" };
   }
 

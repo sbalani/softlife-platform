@@ -11,7 +11,7 @@ export function MachineMap({ address, lat, lng }: { address: string | null; lat:
     <iframe
       title="Machine location"
       src={`https://maps.google.com/maps?q=${encodeURIComponent(q)}&z=15&output=embed`}
-      className="h-64 w-full rounded-xl border border-line"
+      className="h-96 w-full rounded-xl border border-line"
       loading="lazy"
       referrerPolicy="no-referrer-when-downgrade"
     />

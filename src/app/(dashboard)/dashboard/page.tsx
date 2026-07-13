@@ -1,4 +1,5 @@
-import { AreaChart, HBarChart, KpiCard, VBarChart } from "@/components/charts";
+import { AreaChart, HBarChart, KpiCard } from "@/components/charts";
+import { MachineChartClient } from "./MachineChartClient";
 import { getOrders } from "@/lib/data/orders";
 import { getMachines } from "@/lib/data/machines";
 import { getAlerts } from "@/lib/data/alerts";

@@ -7,6 +7,8 @@ import {
   pullTemperatures,
 } from "@/lib/huaxin/client";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { geocodeAddress } from "@/lib/geocode";
+import { translateLocation } from "@/lib/i18n/huaxin";
 
 export type SyncResult = { ok: boolean; summary: string };
 
@@ -107,9 +109,32 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
       }
     }
 
+    // Geocode machines whose effective address changed (or was never
+    // geocoded) so the map views have coordinates. Nominatim allows 1 req/s.
+    let geocoded = 0;
+    try {
+      const { data: rows } = await supabase
+        .from("machines")
+        .select("id,location,location_override,geocoded_from");
+      for (const m of (rows as { id: string; location: string | null; location_override: string | null; geocoded_from: string | null }[]) ?? []) {
+        const effective = m.location_override || translateLocation(m.location);
+        if (!effective || effective === m.geocoded_from) continue;
+        const hit = await geocodeAddress(effective);
+        await new Promise((r) => setTimeout(r, 1100));
+        if (!hit) continue;
+        await supabase
+          .from("machines")
+          .update({ latitude: hit.lat, longitude: hit.lng, geocoded_from: effective })
+          .eq("id", m.id);
+        geocoded++;
+      }
+    } catch {
+      /* geocoding is best-effort */
+    }
+
     return {
       ok: true,
-      summary: `Synced ${machines} machine(s), ${temps} temperature reading(s), ${orders} order(s).`,
+      summary: `Synced ${machines} machine(s), ${temps} temperature reading(s), ${orders} order(s), geocoded ${geocoded} location(s).`,
     };
   } catch (e) {
     return {

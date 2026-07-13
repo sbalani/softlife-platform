@@ -38,6 +38,10 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
         last_full_clean_date: lastClean ? new Date(lastClean).toISOString() : null,
         customer_id: String(fd.get("customer_id") ?? "") || null,
         payment_model: String(fd.get("payment_model") ?? "automatic"),
+        location_override: String(fd.get("location_override") ?? "").trim() || null,
+        // Address may have changed — clear the geocode cache marker so the
+        // next sync re-geocodes coordinates for the map views.
+        geocoded_from: null,
       })
       .eq("id", machineId);
     if (mErr) return { ok: false, error: mErr.message };

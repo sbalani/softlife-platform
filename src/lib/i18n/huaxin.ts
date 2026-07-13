@@ -139,3 +139,43 @@ export function translateStatusValue(value: string | null | undefined): string {
   };
   return common[value] ?? value;
 }
+
+// ---- Detected device locations (device list .deviceLocation) ----
+// Huaxin reports addresses as a Chinese region prefix glued to a Latin street
+// address, e.g. "安达卢西亚马拉加Calle Obispo Salvador de los Reyes9".
+// Translate known place-name prefixes and reorder to street-first.
+
+export const LOCATION_PLACE_MAP: Record<string, string> = {
+  "西班牙": "Spain",
+  "安达卢西亚": "Andalucía",
+  "马拉加": "Málaga",
+  "马德里": "Madrid",
+  "巴塞罗那": "Barcelona",
+  "塞维利亚": "Sevilla",
+  "格拉纳达": "Granada",
+  "科尔多瓦": "Córdoba",
+  "加的斯": "Cádiz",
+  "瓦伦西亚": "Valencia",
+};
+
+export function translateLocation(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  // Split leading CJK prefix from the Latin remainder.
+  const m = raw.match(/^([一-鿿]+)(.*)$/);
+  if (!m) return raw;
+  let [, cjk, rest] = m;
+  const places: string[] = [];
+  while (cjk.length) {
+    const hit = Object.keys(LOCATION_PLACE_MAP)
+      .filter((k) => cjk.startsWith(k))
+      .sort((a, b) => b.length - a.length)[0];
+    if (!hit) break;
+    places.push(LOCATION_PLACE_MAP[hit]);
+    cjk = cjk.slice(hit.length);
+  }
+  if (cjk.length) places.push(cjk); // untranslated leftover, keep visible
+  rest = rest.trim().replace(/(\D)(\d+)$/, "$1 $2"); // "Reyes9" -> "Reyes 9"
+  if (!rest) return places.join(", ") || raw;
+  // Street first, then region (most-specific place last-but-first order reversed).
+  return [rest, ...places.reverse()].join(", ");
+}

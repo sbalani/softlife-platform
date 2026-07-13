@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getMachines } from "@/lib/data/machines";
 import { SyncStatusesButton } from "./SyncStatusesButton";
+import { FleetMap } from "@/components/maps";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,9 @@ export default async function MachinesPage({
   const pageSize = 10;
 
   const { machines, source } = await getMachines();
+  const mapMarkers = machines
+    .filter((m) => m.latitude != null && m.longitude != null)
+    .map((m) => ({ name: m.name, location: m.location, lat: m.latitude!, lng: m.longitude!, online: m.net_online }));
 
   const isActive = (m: (typeof machines)[number]) => m.state === "active";
   const filtered = machines.filter((m) => {
@@ -213,6 +217,18 @@ export default async function MachinesPage({
           </div>
         </div>
       </div>
+
+      {mapMarkers.length > 0 && (
+        <section className="mt-6">
+          <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Fleet map</h2>
+          <FleetMap markers={mapMarkers} />
+          {machines.length > mapMarkers.length && (
+            <p className="mt-2 text-xs text-taupe">
+              {machines.length - mapMarkers.length} machine(s) not yet geocoded — run Settings → Sync now to place them.
+            </p>
+          )}
+        </section>
+      )}
 
       {source === "sample" && (
         <p className="mt-4 text-xs text-taupe">Sample data — connect Supabase to see live machines.</p>

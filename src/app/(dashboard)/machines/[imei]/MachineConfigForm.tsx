@@ -51,6 +51,15 @@ export function MachineConfigForm({ config, imei, tenants }: { config: MachineCo
           </select>
         </label>
         <label className="block">
+          <span className={labelClass}>Location (override)</span>
+          <input
+            name="location_override"
+            defaultValue={config.locationOverride ?? ""}
+            placeholder={config.location ?? "Detected automatically"}
+            className={selectClass}
+          />
+        </label>
+        <label className="block">
           <span className={labelClass}>Payment model</span>
           <select name="payment_model" defaultValue={config.paymentModel ?? "automatic"} className={selectClass}>
             <option value="automatic">Automatic (end users pay machine)</option>

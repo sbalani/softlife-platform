@@ -23,6 +23,8 @@ import { CopyMenuButton } from "./CopyMenuButton";
 import { DeviceSettingsPanel } from "./DeviceSettingsPanel";
 import { LogLotForm } from "./LogLotForm";
 import { AreaChart } from "@/components/charts";
+import { MachineMap } from "@/components/maps";
+import { translateLocation } from "@/lib/i18n/huaxin";
 
 export const dynamic = "force-dynamic";
 
@@ -67,7 +69,9 @@ export default async function MachineDetailPage({
   if (!config && !telemetry) notFound();
 
   const name = config?.name ?? telemetry?.name ?? imei;
-  const location = config?.location ?? telemetry?.location ?? null;
+  // config.location is already override-or-translated; the telemetry fallback
+  // is the raw Huaxin value and still needs translating.
+  const location = config?.location ?? translateLocation(telemetry?.location) ?? null;
   const online = telemetry?.online ?? false;
 
   return (
@@ -86,6 +90,15 @@ export default async function MachineDetailPage({
           <MachineSyncButton imei={imei} />
         </div>
       </header>
+
+      {/* Location map */}
+      {location && (
+        <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+          <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Location</h2>
+          <p className="mb-3 text-sm text-taupe">{location}</p>
+          <MachineMap address={location} lat={config?.latitude ?? null} lng={config?.longitude ?? null} />
+        </section>
+      )}
 
       {/* Configuration + Push + Remote */}
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">

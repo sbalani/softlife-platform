@@ -1,4 +1,5 @@
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { translateLocation } from "@/lib/i18n/huaxin";
 import type { Source } from "./machines";
 
 export type ProductOpt = { id: string; name: string; type: string };
@@ -7,6 +8,9 @@ export type MachineConfig = {
   machineId: string | null;
   name: string;
   location: string | null;
+  locationOverride: string | null;
+  latitude: number | null;
+  longitude: number | null;
   baseProductId: string | null;
   profile: string | null;
   lastFullClean: string | null;
@@ -30,7 +34,7 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
     const s = await createServiceClient();
     const { data: m } = await s
       .from("machines")
-      .select("id,name,location,base_product_id,profile,last_full_clean_date,payment_model,customer_id,created_at")
+      .select("id,name,location,location_override,latitude,longitude,base_product_id,profile,last_full_clean_date,payment_model,customer_id,created_at")
       .eq("device_imei", imei)
       .maybeSingle();
     const machine = m as Record<string, unknown> | null;
@@ -50,7 +54,10 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
     return {
       machineId: (machine?.id as string) ?? null,
       name: (machine?.name as string) ?? imei,
-      location: (machine?.location as string) ?? null,
+      location: (machine?.location_override as string) || translateLocation(machine?.location as string) || null,
+      locationOverride: (machine?.location_override as string) ?? null,
+      latitude: (machine?.latitude as number) ?? null,
+      longitude: (machine?.longitude as number) ?? null,
       baseProductId: (machine?.base_product_id as string) ?? null,
       profile: (machine?.profile as string) ?? null,
       lastFullClean: (machine?.last_full_clean_date as string) ?? null,

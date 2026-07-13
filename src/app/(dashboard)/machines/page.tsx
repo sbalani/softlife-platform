@@ -39,7 +39,7 @@ export default async function MachinesPage({
   const filtered = machines.filter((m) => {
     const matchesQ =
       !q ||
-      [m.name, m.ref, m.device_imei, m.customer]
+      [m.name, m.ref, m.device_imei, m.customer, m.location]
         .some((v) => (v ?? "").toLowerCase().includes(q));
     const matchesStatus =
       status === "all" ? true : status === "active" ? isActive(m) : !isActive(m);
@@ -130,7 +130,7 @@ export default async function MachinesPage({
                   <td className="px-4 py-3 text-taupe">{idx}</td>
                   <td className="px-4 py-3 font-semibold text-cocoa">{m.name}</td>
                   <td className="px-4 py-3 font-mono text-xs text-taupe">{m.ref ?? m.device_imei ?? "—"}</td>
-                  <td className="px-4 py-3 text-cocoa">{m.customer ?? "—"}</td>
+                  <td className="px-4 py-3 text-cocoa">{m.location ?? "—"}</td>
                   <td className="px-4 py-3 text-taupe">
                     {m.created_at ? new Date(m.created_at).toLocaleDateString() : "—"}
                   </td>

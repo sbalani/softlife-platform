@@ -6,6 +6,7 @@ export type Machine = {
   name: string;
   ref: string | null;
   device_imei: string | null;
+  location: string | null;
   customer: string | null;
   warehouse: string | null;
   state: string;
@@ -20,9 +21,9 @@ export type Machine = {
 export type Source = "supabase" | "huaxin" | "sample";
 
 const SAMPLE: Machine[] = [
-  { id: "101", name: "B84MAX-001", ref: "SL-001", device_imei: "867395075018172", customer: "Cafetería Centro", warehouse: "Madrid Central", state: "active", base_product: "Base Vainilla", last_full_clean_date: "2026-06-18T08:00:00Z", ingredient_count: 3, latest_temp: -4.2, created_at: "2026-01-15T09:00:00Z", net_online: true },
-  { id: "102", name: "B84MAX-002", ref: "SL-002", device_imei: "867395075018173", customer: "Cafetería Centro", warehouse: "Madrid Central", state: "active", base_product: "Base Yoghurt", last_full_clean_date: "2026-06-21T07:30:00Z", ingredient_count: 2, latest_temp: -3.8, created_at: "2026-02-02T09:00:00Z", net_online: true },
-  { id: "103", name: "B84MAX-003", ref: "SL-003", device_imei: "867395075018174", customer: "Hotel Mar", warehouse: "Costa Depot", state: "active", base_product: "Base Vainilla", last_full_clean_date: "2026-06-10T09:15:00Z", ingredient_count: 3, latest_temp: null, created_at: "2026-03-21T09:00:00Z", net_online: false },
+  { id: "101", name: "B84MAX-001", ref: "SL-001", device_imei: "867395075018172", location: "Calle Mayor 12, Madrid", customer: "Cafetería Centro", warehouse: "Madrid Central", state: "active", base_product: "Base Vainilla", last_full_clean_date: "2026-06-18T08:00:00Z", ingredient_count: 3, latest_temp: -4.2, created_at: "2026-01-15T09:00:00Z", net_online: true },
+  { id: "102", name: "B84MAX-002", ref: "SL-002", device_imei: "867395075018173", location: "Calle Mayor 12, Madrid", customer: "Cafetería Centro", warehouse: "Madrid Central", state: "active", base_product: "Base Yoghurt", last_full_clean_date: "2026-06-21T07:30:00Z", ingredient_count: 2, latest_temp: -3.8, created_at: "2026-02-02T09:00:00Z", net_online: true },
+  { id: "103", name: "B84MAX-003", ref: "SL-003", device_imei: "867395075018174", location: "Paseo Marítimo 4, Málaga", customer: "Hotel Mar", warehouse: "Costa Depot", state: "active", base_product: "Base Vainilla", last_full_clean_date: "2026-06-10T09:15:00Z", ingredient_count: 3, latest_temp: null, created_at: "2026-03-21T09:00:00Z", net_online: false },
 ];
 
 function fromDevice(d: HuaxinDevice): Machine {
@@ -32,7 +33,8 @@ function fromDevice(d: HuaxinDevice): Machine {
     name: label,
     ref: d.deviceId ?? null,
     device_imei: d.deviceImei ?? null,
-    customer: (d.deviceLocation as string) ?? null,
+    location: (d.deviceLocation as string) ?? null,
+    customer: null,
     warehouse: null,
     state: "active",
     base_product: null,

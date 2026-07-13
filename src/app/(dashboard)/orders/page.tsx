@@ -1,5 +1,6 @@
 import { getOrders } from "@/lib/data/orders";
 import { DataSourceNote } from "@/components/data-source-note";
+import { UpdateOrdersButton } from "./UpdateOrdersButton";
 
 export const dynamic = "force-dynamic";
 
@@ -42,13 +43,16 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
 
   return (
     <div>
-      <header className="mb-6">
-        <h1 className="font-display text-3xl font-bold text-cocoa">Orders</h1>
-        <p className="mt-1 text-sm text-taupe">
-          {orders.length} order(s) · Machine revenue €{machineRevenue.toFixed(2)} ·
-          Franchisee-billed €{franchiseeOwed.toFixed(2)} ·
-          {" "}{couponCount} coupon(s) · {refundedCount} refund(s)
-        </p>
+      <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="font-display text-3xl font-bold text-cocoa">Orders</h1>
+          <p className="mt-1 text-sm text-taupe">
+            {orders.length} order(s) · Machine revenue €{machineRevenue.toFixed(2)} ·
+            Franchisee-billed €{franchiseeOwed.toFixed(2)} ·
+            {" "}{couponCount} coupon(s) · {refundedCount} refund(s)
+          </p>
+        </div>
+        <UpdateOrdersButton />
       </header>
 
       {/* Filters */}

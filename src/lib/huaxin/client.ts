@@ -190,13 +190,13 @@ export type TempPayload = {
   dataset?: { seriesname?: string; data?: { value?: string | number }[] }[];
 };
 
-export async function listOrders(
+export async function listOrdersPage(
   cfg: HuaxinConfig,
   deviceImei: string,
   began?: string,
   end?: string,
   page = 1,
-): Promise<HuaxinOrder[]> {
+): Promise<{ records: HuaxinOrder[]; totalPage: number }> {
   const data = await call("/machine/cloud/api/device/orders", cfg, {
     device_imei: deviceImei,
     beganTime: began ?? "",
@@ -204,9 +204,43 @@ export async function listOrders(
     page: String(page),
   });
   const payload = data.data;
-  if (Array.isArray(payload)) return payload as HuaxinOrder[];
-  const obj = payload as { records?: HuaxinOrder[]; list?: HuaxinOrder[]; orders?: HuaxinOrder[] } | null;
-  return obj?.records ?? obj?.list ?? obj?.orders ?? [];
+  if (Array.isArray(payload)) return { records: payload as HuaxinOrder[], totalPage: 1 };
+  const obj = payload as { records?: HuaxinOrder[]; list?: HuaxinOrder[]; orders?: HuaxinOrder[]; totalPage?: number } | null;
+  return {
+    records: obj?.records ?? obj?.list ?? obj?.orders ?? [],
+    totalPage: Number(obj?.totalPage ?? 1) || 1,
+  };
+}
+
+export async function listOrders(
+  cfg: HuaxinConfig,
+  deviceImei: string,
+  began?: string,
+  end?: string,
+  page = 1,
+): Promise<HuaxinOrder[]> {
+  return (await listOrdersPage(cfg, deviceImei, began, end, page)).records;
+}
+
+/** Walks every page of the orders endpoint — page 1 alone silently truncates
+ *  busy periods or long backfill windows. Capped to keep a pathological
+ *  totalPage from hammering the API. */
+export async function listAllOrders(
+  cfg: HuaxinConfig,
+  deviceImei: string,
+  began?: string,
+  end?: string,
+  maxPages = 50,
+): Promise<HuaxinOrder[]> {
+  const first = await listOrdersPage(cfg, deviceImei, began, end, 1);
+  const out = [...first.records];
+  const pages = Math.min(first.totalPage, maxPages);
+  for (let p = 2; p <= pages; p++) {
+    const { records } = await listOrdersPage(cfg, deviceImei, began, end, p);
+    if (!records.length) break;
+    out.push(...records);
+  }
+  return out;
 }
 
 export type ProductDiyItem = {

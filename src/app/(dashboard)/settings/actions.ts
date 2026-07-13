@@ -2,8 +2,8 @@
 
 import {
   getConfigFromEnv,
+  listAllOrders,
   listDevices,
-  listOrders,
   pullTemperatures,
 } from "@/lib/huaxin/client";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
@@ -84,7 +84,8 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
       }
 
       try {
-        const ords = (await listOrders(cfg, d.deviceImei, began, end)).filter((o) => o.orderCode);        const rows = ords.map((o) => ({
+        const ords = (await listAllOrders(cfg, d.deviceImei, began, end)).filter((o) => o.orderCode);
+        const rows = ords.map((o) => ({
           machine_id: machineId,
           device_imei: d.deviceImei,
           order_code: o.orderCode!,

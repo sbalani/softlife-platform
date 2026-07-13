@@ -1,5 +1,5 @@
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { getConfigFromEnv, listDevices, listOrders, type HuaxinOrder } from "@/lib/huaxin/client";
+import { getConfigFromEnv, listDevices, listAllOrders, type HuaxinOrder } from "@/lib/huaxin/client";
 import { translatePayType, isServerModeOrder, isAdminOverride } from "@/lib/i18n/huaxin";
 import type { Source } from "./machines";
 
@@ -139,7 +139,7 @@ async function getOrdersLive(): Promise<Order[]> {
     if (!d.deviceImei) continue;
     const machineName = (d.deviceLabel as string) || d.deviceName || d.deviceImei;
     try {
-      const ords = await listOrders(cfg, d.deviceImei, began, end);
+      const ords = await listAllOrders(cfg, d.deviceImei, began, end);
       for (const o of ords) {
         out.push(mapHuaxinOrder(o, machineName, d.deviceImei));
       }

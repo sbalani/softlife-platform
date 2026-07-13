@@ -5,7 +5,7 @@ import {
   listDevices,
   listDeviceMedia,
   listDeviceProducts,
-  listOrders,
+  listAllOrders,
   pullTemperatures,
 } from "@/lib/huaxin/client";
 
@@ -73,7 +73,7 @@ export async function getMachineDetail(imei: string): Promise<MachineDetail | nu
 
   let orders: DetailOrder[] = [];
   try {
-    const ords = await listOrders(cfg, imei, began, end);
+    const ords = await listAllOrders(cfg, imei, began, end);
     orders = ords.map((o) => ({
       order_time: toIso(o.createTime) ?? new Date().toISOString(),
       order_code: o.orderCode ?? "",

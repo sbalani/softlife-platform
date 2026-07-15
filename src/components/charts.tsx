@@ -23,6 +23,39 @@ export function KpiCard({
   );
 }
 
+// ---- Legacy AreaChart (used by machine temperature page) ----
+
+export function AreaChart({
+  data,
+  color = "#d47e54",
+  height = 130,
+}: {
+  data: { label: string; value: number }[];
+  color?: string;
+  height?: number;
+}) {
+  if (!data.length) {
+    return <div className="flex items-center justify-center text-sm text-taupe" style={{ height }}>No data</div>;
+  }
+  const w = 360;
+  const h = height;
+  const pad = 10;
+  const max = Math.max(...data.map((d) => d.value), 1);
+  const step = (w - pad * 2) / Math.max(data.length - 1, 1);
+  const pts = data.map((d, i) => [
+    pad + i * step,
+    h - pad - (d.value / max) * (h - pad * 2),
+  ]);
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+  const area = `${line} L${pts[pts.length - 1][0].toFixed(1)},${h - pad} L${pts[0][0].toFixed(1)},${h - pad} Z`;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height }}>
+      <path d={area} fill={color} opacity={0.16} />
+      <path d={line} fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 // ---- Interactive line chart with axes + tooltips ----
 
 export function LineChart({

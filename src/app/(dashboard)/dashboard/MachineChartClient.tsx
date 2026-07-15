@@ -3,14 +3,14 @@
 import { useState } from "react";
 import { VBarChart } from "@/components/charts";
 
-type MachineDatum = { label: string; value: number; units: number };
+type MachineDatum = { label: string; value: number; units: number; href?: string };
 
 export function MachineChartClient({ data }: { data: MachineDatum[] }) {
   const [mode, setMode] = useState<"euro" | "units">("euro");
 
   const chartData = mode === "euro"
-    ? data.map((d) => ({ label: d.label, value: d.value }))
-    : data.map((d) => ({ label: d.label, value: d.units }));
+    ? data.map((d) => ({ label: d.label, value: d.value, href: d.href }))
+    : data.map((d) => ({ label: d.label, value: d.units, href: d.href }));
 
   return (
     <div>

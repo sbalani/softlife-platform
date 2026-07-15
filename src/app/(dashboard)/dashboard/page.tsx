@@ -1,4 +1,4 @@
-import { AreaChart, HBarChart, KpiCard } from "@/components/charts";
+import { LineChart, HBarChart, KpiCard } from "@/components/charts";
 import { MachineChartClient } from "./MachineChartClient";
 import { getOrders } from "@/lib/data/orders";
 import { getMachines } from "@/lib/data/machines";
@@ -91,7 +91,15 @@ export default async function DashboardPage() {
   const topMachines = [...machineRevenue.entries()]
     .sort((a, b) => b[1].revenue - a[1].revenue)
     .slice(0, 6)
-    .map(([label, v]) => ({ label, value: Number(v.revenue.toFixed(2)), units: v.units }));
+    .map(([label, v]) => {
+      const machine = machines.find((m) => m.name === label);
+      return {
+        label,
+        value: Number(v.revenue.toFixed(2)),
+        units: v.units,
+        href: machine?.device_imei ? `/machines/${machine.device_imei}` : undefined,
+      };
+    });
 
   const isSample = ordersSource === "sample";
 
@@ -125,9 +133,9 @@ export default async function DashboardPage() {
       {/* Sales line chart */}
       <section className="mt-6 rounded-2xl border border-line bg-white p-5">
         <h2 className="font-display text-lg font-bold text-cocoa">Sales trend</h2>
-        <p className="mb-2 text-xs text-taupe">Revenue per day (last 14 active days)</p>
+        <p className="mb-2 text-xs text-taupe">Revenue per day — hover any point for details</p>
         {salesLineData.length > 0 ? (
-          <AreaChart data={salesLineData} color="#d47e54" height={160} />
+          <LineChart data={salesLineData} color="#d47e54" height={200} unit="€" />
         ) : (
           <p className="flex h-40 items-center justify-center text-sm text-taupe">No sales data yet.</p>
         )}
@@ -137,7 +145,7 @@ export default async function DashboardPage() {
         {/* Topping consumption */}
         <section className="rounded-2xl border border-line bg-white p-5">
           <h2 className="font-display text-lg font-bold text-cocoa">Topping consumption</h2>
-          <p className="mb-3 text-xs text-taupe">Units served per ingredient</p>
+          <p className="mb-3 text-xs text-taupe">How many times each hopper ingredient was served. Names come from the machine's own hopper labels.</p>
           {topToppings.length > 0 ? (
             <HBarChart data={topToppings} color="#d47e54" unit="×" />
           ) : (
@@ -148,7 +156,7 @@ export default async function DashboardPage() {
         {/* Best-selling combos */}
         <section className="rounded-2xl border border-line bg-white p-5">
           <h2 className="font-display text-lg font-bold text-cocoa">Best-selling combos</h2>
-          <p className="mb-3 text-xs text-taupe">Multi-ingredient orders, by frequency</p>
+          <p className="mb-3 text-xs text-taupe">Orders with 2+ toppings, by frequency. Each combo is the set of toppings in one order.</p>
           {topCombos.length > 0 ? (
             <HBarChart data={topCombos} color="#6fa98c" unit="×" />
           ) : (

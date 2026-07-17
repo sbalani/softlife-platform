@@ -30,7 +30,7 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
   try {
     const supabase = await createServiceClient();
     const devices = await listDevices(cfg, { force: true });
-    const began = ymd(new Date(Date.now() - 7 * 86_400_000)) + " 00:00:00";
+    const began = ymd(new Date(Date.now() - 90 * 86_400_000)) + " 00:00:00";
     const end = ymd(new Date()) + " 23:59:59";
 
     let machines = 0;
@@ -134,7 +134,7 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
 
     return {
       ok: true,
-      summary: `Synced ${machines} machine(s), ${temps} temperature reading(s), ${orders} order(s), geocoded ${geocoded} location(s).`,
+      summary: `Synced ${machines} machine(s), ${temps} temperature reading(s), ${orders} order(s) (90-day window), geocoded ${geocoded} location(s).`,
     };
   } catch (e) {
     return {

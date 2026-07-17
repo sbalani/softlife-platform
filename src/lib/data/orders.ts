@@ -147,7 +147,7 @@ async function getOrdersLive(): Promise<Order[]> {
       console.error(`[orders] Failed for device ${d.deviceImei}:`, e);
     }
   }
-  return out.sort((a, b) => +new Date(b.order_time) - +new Date(a.order_time)).slice(0, 100);
+  return out.sort((a, b) => +new Date(b.order_time) - +new Date(a.order_time));
 }
 
 export async function getOrders(filters?: {
@@ -177,7 +177,7 @@ export async function getOrders(filters?: {
   if (isSupabaseConfigured()) {
     try {
       const supabase = await createServiceClient();
-      const { data, error } = await supabase.from("v_orders").select("*").order("order_time", { ascending: false }).limit(100);
+      const { data, error } = await supabase.from("v_orders").select("*").order("order_time", { ascending: false }).limit(1000);
       if (!error && data) {
         const seen = new Set(orders.map((o) => o.order_code));
         const cacheRows = (data as Record<string, unknown>[]).map(orderFromSupabaseRow).filter((o) => !seen.has(o.order_code));

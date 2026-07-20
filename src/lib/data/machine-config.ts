@@ -16,6 +16,8 @@ export type MachineConfig = {
   lastFullClean: string | null;
   paymentModel: string | null;
   customerId: string | null;
+  nayaxId: string | null;
+  displayName: string | null;
   ingredients: { position: string; product_id: string | null; product_type: string; current_lot_name: string | null; last_loaded_date: string | null }[];
   bases: ProductOpt[];
   toppings: ProductOpt[];
@@ -34,7 +36,7 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
     const s = await createServiceClient();
     const { data: m } = await s
       .from("machines")
-      .select("id,name,location,location_override,latitude,longitude,base_product_id,profile,last_full_clean_date,payment_model,customer_id,created_at")
+      .select("id,name,location,location_override,latitude,longitude,base_product_id,profile,last_full_clean_date,payment_model,customer_id,nayax_id,display_name,created_at")
       .eq("device_imei", imei)
       .maybeSingle();
     const machine = m as Record<string, unknown> | null;
@@ -63,6 +65,8 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
       lastFullClean: (machine?.last_full_clean_date as string) ?? null,
       paymentModel: (machine?.payment_model as string) ?? null,
       customerId: (machine?.customer_id as string) ?? null,
+      nayaxId: (machine?.nayax_id as string) ?? null,
+      displayName: (machine?.display_name as string) ?? null,
       ingredients,
       bases: products.filter((p) => p.type === "base"),
       toppings: products.filter((p) => p.type === "topping"),

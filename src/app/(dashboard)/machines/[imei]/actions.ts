@@ -35,6 +35,8 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
       .from("machines")
       .update({
         profile: profile || null,
+        display_name: String(fd.get("display_name") ?? "").trim() || null,
+        nayax_id: String(fd.get("nayax_id") ?? "").trim() || null,
         last_full_clean_date: lastClean ? new Date(lastClean).toISOString() : null,
         customer_id: String(fd.get("customer_id") ?? "") || null,
         payment_model: String(fd.get("payment_model") ?? "automatic"),

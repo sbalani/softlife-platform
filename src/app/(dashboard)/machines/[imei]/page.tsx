@@ -68,7 +68,7 @@ export default async function MachineDetailPage({
 
   if (!config && !telemetry) notFound();
 
-  const name = config?.name ?? telemetry?.name ?? imei;
+  const name = config?.displayName ?? config?.name ?? telemetry?.name ?? imei;
   // config.location is already override-or-translated; the telemetry fallback
   // is the raw Huaxin value and still needs translating.
   const location = config?.location ?? translateLocation(telemetry?.location) ?? null;
@@ -81,7 +81,10 @@ export default async function MachineDetailPage({
       <header className="mt-3 mb-8 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
         <div className="min-w-0">
           <h1 className="break-words font-display text-2xl font-bold text-cocoa sm:text-3xl">{name}</h1>
-          <p className="mt-1 break-words text-sm text-taupe">{location ?? "—"} · IMEI {imei}</p>
+          <p className="mt-1 break-words text-sm text-taupe">
+            {location ?? "—"} · IMEI {imei}
+            {config?.nayaxId && <span className="ml-2 rounded-full bg-cream px-2 py-0.5 text-[10px] font-bold text-taupe">Nayax: {config.nayaxId}</span>}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <span className={`rounded-full px-3 py-1 text-xs font-bold ${online ? "bg-sage/15 text-sage" : "bg-taupe/15 text-taupe"}`}>

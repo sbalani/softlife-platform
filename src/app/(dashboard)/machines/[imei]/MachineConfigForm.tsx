@@ -38,8 +38,16 @@ export function MachineConfigForm({ config, imei, tenants }: { config: MachineCo
           </select>
         </label>
         <label className="block">
+          <span className={labelClass}>Display name</span>
+          <input type="text" name="display_name" defaultValue={config.displayName ?? ""} placeholder="e.g. Málaga Centro" className={selectClass} />
+        </label>
+        <label className="block">
           <span className={labelClass}>Last full clean</span>
           <input type="date" name="last_full_clean" defaultValue={lastCleanDate} className={selectClass} />
+        </label>
+        <label className="block">
+          <span className={labelClass}>Nayax terminal ID</span>
+          <input type="text" name="nayax_id" defaultValue={config.nayaxId ?? ""} placeholder="e.g. 123456" className={selectClass} />
         </label>
         <label className="block">
           <span className={labelClass}>Franchisee / customer</span>

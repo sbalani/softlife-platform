@@ -1,4 +1,5 @@
-import { LineChart, HBarChart, KpiCard } from "@/components/charts";
+import { LineChart } from "@/components/LineChart";
+import { HBarChart, KpiCard } from "@/components/charts";
 import { MachineChartClient } from "./MachineChartClient";
 import { getOrders } from "@/lib/data/orders";
 import { getMachines } from "@/lib/data/machines";

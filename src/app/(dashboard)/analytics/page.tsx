@@ -1,6 +1,7 @@
 import { getOrders } from "@/lib/data/orders";
 import { getMachines } from "@/lib/data/machines";
-import { LineChart, HBarChart, KpiCard, VBarChart } from "@/components/charts";
+import { LineChart } from "@/components/LineChart";
+import { HBarChart, KpiCard, VBarChart } from "@/components/charts";
 
 export const dynamic = "force-dynamic";
 

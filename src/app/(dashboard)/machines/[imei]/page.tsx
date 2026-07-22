@@ -48,6 +48,15 @@ export default async function MachineDetailPage({
   const pendingDraft = config?.machineId ? await getPendingMenuDraft(config.machineId) : null;
   const draftByPosition = new Map((pendingDraft?.items ?? []).map((it) => [it.position, it]));
 
+  // Map Huaxin lane numbers to config positions for ingredient linking
+  const HUAXIN_TO_CONFIG_POS: Record<string, string> = {
+    "2": "solid_1", "3": "solid_2", "4": "solid_3",
+    "5": "liquid_1", "6": "liquid_2", "7": "liquid_3",
+  };
+  const linkedProductIdByLane = new Map(
+    (config?.ingredients ?? []).map((ing) => [ing.position, ing.product_id ?? null]),
+  );
+
   // What a combo can actually be built from — only what's currently loaded in
   // this machine's hoppers, since that's all it can physically dispense.
   const CONFIG_POSITION_LABELS: Record<string, string> = {
@@ -272,6 +281,7 @@ export default async function MachineDetailPage({
                         machineId={config?.machineId ?? null}
                         item={item}
                         ingredients={ingredients}
+                        linkedProductId={linkedProductIdByLane.get(HUAXIN_TO_CONFIG_POS[String(item.position)] ?? "") ?? null}
                         draftId={pendingDraft?.id ?? null}
                         draftItem={draftByPosition.get(String(item.position)) ?? null}
                       />

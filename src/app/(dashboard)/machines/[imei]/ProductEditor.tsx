@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { updateMachineProduct, saveHopperDraft, pushDraftItemAt, revertDraftItemAt, uploadMenuItemImage } from "./actions";
+import { updateMachineProduct, saveHopperDraft, pushDraftItemAt, revertDraftItemAt, uploadMenuItemImage, saveProductVariant, saveNewIngredient } from "./actions";
 import type { ProductDiyItem } from "@/lib/huaxin/client";
 import type { MenuDraftItem } from "@/lib/data/menu-drafts";
 
@@ -10,7 +10,6 @@ const lbl = "mb-0.5 block text-[10px] uppercase tracking-wide text-taupe";
 
 type IngredientOption = { id: string; name: string; price: number; image_url: string | null; allergen_url: string | null };
 
-// Matches the LANE_MAP in actions.ts — hopper 1 is the base, 2-4 solids, 5-7 liquids.
 const HOPPER_LABELS: Record<string, string> = {
   "1": "Base",
   "2": "Solid Topping 1",
@@ -21,11 +20,17 @@ const HOPPER_LABELS: Record<string, string> = {
   "7": "Liquid Topping 3",
 };
 
+const HUAXIN_TO_CONFIG: Record<string, string> = {
+  "2": "solid_1", "3": "solid_2", "4": "solid_3",
+  "5": "liquid_1", "6": "liquid_2", "7": "liquid_3",
+};
+
 export function ProductEditor({
   imei,
   machineId,
   item,
   ingredients,
+  linkedProductId,
   draftId,
   draftItem,
 }: {
@@ -33,6 +38,7 @@ export function ProductEditor({
   machineId: string | null;
   item: ProductDiyItem;
   ingredients?: IngredientOption[];
+  linkedProductId?: string | null;
   draftId?: string | null;
   draftItem?: MenuDraftItem | null;
 }) {
@@ -40,14 +46,20 @@ export function ProductEditor({
   const [pending, startTransition] = useTransition();
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [pushed, setPushed] = useState(false);
 
-  // Editing continues from the staged draft when one exists, not live data —
-  // otherwise reopening the editor would silently discard the draft's values.
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(linkedProductId ?? null);
+  const [modified, setModified] = useState(false);
   const [name, setName] = useState(draftItem?.goodsName ?? item.goodsName ?? "");
   const [price, setPrice] = useState(draftItem?.price ?? item.price ?? "");
   const [marketPrice, setMarketPrice] = useState(item.marketPrice ?? "");
   const [imagePath, setImagePath] = useState(draftItem?.imagePath ?? item.imagePath ?? "");
   const [allergyPath, setAllergyPath] = useState(draftItem?.allergyPath ?? "");
+
+  const selectedIngredient = ingredients?.find((i) => i.id === selectedProductId) ?? null;
+  const pos = String(item.position ?? "0");
+  const configPos = HUAXIN_TO_CONFIG[pos];
+  const productType = configPos?.startsWith("solid") ? "topping" : "sauce";
 
   const uploadImage = async (file: File) => {
     setUploading(true);
@@ -57,6 +69,7 @@ export function ProductEditor({
       const res = await uploadMenuItemImage(fd);
       if (res.ok && res.url) {
         setImagePath(res.url);
+        setModified(true);
       } else {
         setResult(res.error ?? "Upload failed");
       }
@@ -65,9 +78,6 @@ export function ProductEditor({
     }
   };
 
-  // Always send the current form values, even if they look unchanged from
-  // what we last fetched — that's exactly the case for a deliberate re-push
-  // when a previous push didn't actually take on the machine.
   const buildFields = () => {
     const fields: Record<string, string> = {};
     if (name) fields.goodsName = name;
@@ -80,9 +90,13 @@ export function ProductEditor({
 
   const push = () => {
     startTransition(async () => {
-      const res = await updateMachineProduct(imei, String(item.position ?? "0"), buildFields());
+      const res = await updateMachineProduct(imei, pos, buildFields(), {
+        productId: selectedProductId,
+        machineId,
+      });
       if (res.ok) {
         setResult("Updated & synced.");
+        setPushed(true);
         setEditing(false);
       } else {
         setResult(res.error ?? "Failed");
@@ -92,7 +106,7 @@ export function ProductEditor({
 
   const saveDraft = () => {
     startTransition(async () => {
-      const res = await saveHopperDraft(imei, machineId, String(item.position ?? "0"), buildFields());
+      const res = await saveHopperDraft(imei, machineId, pos, buildFields());
       setResult(res.ok ? "Saved to draft." : res.error ?? "Failed");
       if (res.ok) setEditing(false);
     });
@@ -101,7 +115,7 @@ export function ProductEditor({
   const pushDraft = () => {
     if (!draftId) return;
     startTransition(async () => {
-      const res = await pushDraftItemAt(imei, draftId, String(item.position ?? "0"));
+      const res = await pushDraftItemAt(imei, draftId, pos);
       setResult(res.ok ? "Updated & synced." : res.error ?? "Failed");
     });
   };
@@ -109,15 +123,47 @@ export function ProductEditor({
   const revertDraft = () => {
     if (!draftId) return;
     startTransition(async () => {
-      const res = await revertDraftItemAt(imei, draftId, String(item.position ?? "0"));
+      const res = await revertDraftItemAt(imei, draftId, pos);
       if (!res.ok) setResult(res.error ?? "Failed");
     });
   };
 
-  const label = HOPPER_LABELS[String(item.position)] ?? `Hopper ${item.position}`;
+  const doSaveVariant = () => {
+    if (!selectedProductId) return;
+    startTransition(async () => {
+      const res = await saveProductVariant(selectedProductId, {
+        name, price, image_url: imagePath || undefined, allergen_url: allergyPath || undefined,
+      });
+      setResult(res.ok ? "Ingredient updated." : res.error ?? "Failed");
+      if (res.ok) { setModified(false); setPushed(false); }
+    });
+  };
+
+  const doSaveNew = () => {
+    startTransition(async () => {
+      const res = await saveNewIngredient(
+        { name, price, image_url: imagePath || undefined, allergen_url: allergyPath || undefined },
+        productType, machineId, configPos,
+      );
+      if (res.ok && res.productId) {
+        setSelectedProductId(res.productId);
+        setModified(false);
+        setPushed(false);
+        setResult("Saved as new ingredient.");
+      } else {
+        setResult(res.error ?? "Failed");
+      }
+    });
+  };
+
+  const label = HOPPER_LABELS[pos] ?? `Hopper ${item.position}`;
   const displayName = draftItem ? draftItem.goodsName : item.goodsName;
   const displayPrice = draftItem ? draftItem.price : item.price;
   const displayImage = draftItem ? draftItem.imagePath : item.imagePath;
+
+  const showSaveOptions = pushed && !editing && (
+    (selectedProductId && modified) || (!selectedProductId && !!name)
+  );
 
   return (
     <div className={`rounded-xl border p-3 ${draftItem ? "border-terracotta/50 bg-terracotta/5" : "border-line"}`}>
@@ -137,6 +183,8 @@ export function ProductEditor({
             </div>
             <div className="text-[10px] text-taupe">
               {label} · price {displayPrice ?? "—"}
+              {selectedIngredient && <span className="ml-1 text-sage">· linked: {selectedIngredient.name}</span>}
+              {!selectedProductId && displayName && <span className="ml-1 text-warning">· Other</span>}
               {!draftItem && item.marketPrice ? ` · market ${item.marketPrice}` : ""}
               {!draftItem && item.stock ? ` · stock ${item.stock}` : ""}
             </div>
@@ -161,10 +209,7 @@ export function ProductEditor({
               </>
             )}
             <button
-              onClick={() => {
-                setEditing(true);
-                setResult(null);
-              }}
+              onClick={() => { setEditing(true); setResult(null); setPushed(false); }}
               className="rounded bg-cream px-2 py-1 text-[10px] font-bold text-terracotta hover:bg-sand"
             >
               ✎ Edit
@@ -179,20 +224,27 @@ export function ProductEditor({
           </div>
           {ingredients && ingredients.length > 0 && (
             <label className="block">
-              <span className={lbl}>Fill from ingredient catalog</span>
+              <span className={lbl}>Ingredient</span>
               <select
-                defaultValue=""
+                value={selectedProductId ?? "other"}
                 onChange={(e) => {
-                  const ing = ingredients.find((i) => i.id === e.target.value);
-                  if (!ing) return;
-                  setName(ing.name);
-                  setPrice(String(ing.price));
-                  if (ing.image_url) setImagePath(ing.image_url);
-                  if (ing.allergen_url) setAllergyPath(ing.allergen_url);
+                  if (e.target.value === "other") {
+                    setSelectedProductId(null);
+                  } else {
+                    const ing = ingredients.find((i) => i.id === e.target.value);
+                    if (ing) {
+                      setSelectedProductId(ing.id);
+                      setName(ing.name);
+                      setPrice(String(ing.price));
+                      if (ing.image_url) setImagePath(ing.image_url);
+                      if (ing.allergen_url) setAllergyPath(ing.allergen_url);
+                    }
+                  }
+                  setModified(false);
                 }}
                 className={input}
               >
-                <option value="" disabled>Choose an ingredient…</option>
+                <option value="other">Other (free type)</option>
                 {ingredients.map((i) => (
                   <option key={i.id} value={i.id}>{i.name}</option>
                 ))}
@@ -202,11 +254,11 @@ export function ProductEditor({
           <div className="grid grid-cols-2 gap-2">
             <label className="block">
               <span className={lbl}>Name</span>
-              <input value={name} onChange={(e) => setName(e.target.value)} className={input} />
+              <input value={name} onChange={(e) => { setName(e.target.value); setModified(true); }} className={input} />
             </label>
             <label className="block">
               <span className={lbl}>Price</span>
-              <input value={price} onChange={(e) => setPrice(e.target.value)} className={input} />
+              <input value={price} onChange={(e) => { setPrice(e.target.value); setModified(true); }} className={input} />
             </label>
             <label className="block">
               <span className={lbl}>Market price</span>
@@ -238,15 +290,15 @@ export function ProductEditor({
             </div>
             <input
               value={imagePath}
-              onChange={(e) => setImagePath(e.target.value)}
+              onChange={(e) => { setImagePath(e.target.value); setModified(true); }}
               className={`${input} mt-1`}
               placeholder="https://… (or upload above)"
             />
             {uploading && <span className="mt-0.5 block text-[10px] text-taupe">Uploading…</span>}
           </label>
           <label className="block">
-            <span className={lbl}>Allergen image URL (new)</span>
-            <input value={allergyPath} onChange={(e) => setAllergyPath(e.target.value)} className={input} placeholder="https://…" />
+            <span className={lbl}>Allergen image URL</span>
+            <input value={allergyPath} onChange={(e) => { setAllergyPath(e.target.value); setModified(true); }} className={input} placeholder="https://…" />
           </label>
           <div className="flex items-center gap-2">
             <button
@@ -266,7 +318,39 @@ export function ProductEditor({
           </div>
         </div>
       )}
-      {result && (
+      {showSaveOptions && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-line pt-2">
+          <span className="text-[10px] text-taupe">Save to catalog:</span>
+          {selectedProductId && modified && (
+            <>
+              <button
+                onClick={doSaveVariant}
+                disabled={pending}
+                className="rounded bg-sage px-2 py-1 text-[10px] font-bold text-white hover:bg-sage/80 disabled:opacity-60"
+              >
+                {pending ? "…" : `Update "${selectedIngredient?.name ?? "ingredient"}"`}
+              </button>
+              <button
+                onClick={doSaveNew}
+                disabled={pending}
+                className="rounded border border-line bg-white px-2 py-1 text-[10px] font-bold text-cocoa hover:bg-cream disabled:opacity-60"
+              >
+                Save as new variant
+              </button>
+            </>
+          )}
+          {!selectedProductId && (
+            <button
+              onClick={doSaveNew}
+              disabled={pending}
+              className="rounded bg-sage px-2 py-1 text-[10px] font-bold text-white hover:bg-sage/80 disabled:opacity-60"
+            >
+              {pending ? "…" : "Save as new ingredient"}
+            </button>
+          )}
+        </div>
+      )}
+      {result && !showSaveOptions && (
         <p className={`mt-2 text-[10px] ${result.includes("Updated") || result.includes("Saved") ? "text-sage" : "text-danger"}`}>
           {result}
         </p>

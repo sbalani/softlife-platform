@@ -10,9 +10,7 @@ export function MachineConfigForm({ config, imei, tenants }: { config: MachineCo
   const [profile, setProfile] = useState(config.profile ?? "");
   const [res, action, pending] = useActionState<SaveResult | null, FormData>(saveMachineConfig, null);
 
-  const ing = (pos: string) => config.ingredients.find((i) => i.position === pos)?.product_id ?? "";
   const lastCleanDate = config.lastFullClean ? config.lastFullClean.slice(0, 10) : "";
-  const slots = profile === "3+3" ? 3 : 0;
 
   const selectClass =
     "rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa focus:border-terracotta focus:outline-none";
@@ -76,33 +74,6 @@ export function MachineConfigForm({ config, imei, tenants }: { config: MachineCo
           </select>
         </label>
       </div>
-
-      {slots > 0 && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {Array.from({ length: slots }).map((_, i) => (
-            <label key={`solid_${i + 1}`} className="block">
-              <span className={labelClass}>Solid Topping {i + 1}</span>
-              <select name={`solid_${i + 1}`} defaultValue={ing(`solid_${i + 1}`)} className={selectClass}>
-                <option value="">—</option>
-                {config.toppings.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </label>
-          ))}
-          {Array.from({ length: slots }).map((_, i) => (
-            <label key={`liquid_${i + 1}`} className="block">
-              <span className={labelClass}>Liquid Topping {i + 1}</span>
-              <select name={`liquid_${i + 1}`} defaultValue={ing(`liquid_${i + 1}`)} className={selectClass}>
-                <option value="">—</option>
-                {config.sauces.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </label>
-          ))}
-        </div>
-      )}
 
       <div className="flex items-center gap-4">
         <button

@@ -8,15 +8,6 @@ import { generateAllergenComposite } from "@/lib/allergens/composite";
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
 
-const SLOTS: { position: string; product_type: string }[] = [
-  { position: "solid_1", product_type: "topping" },
-  { position: "solid_2", product_type: "topping" },
-  { position: "solid_3", product_type: "topping" },
-  { position: "liquid_1", product_type: "sauce" },
-  { position: "liquid_2", product_type: "sauce" },
-  { position: "liquid_3", product_type: "sauce" },
-];
-
 export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData): Promise<SaveResult> {
   if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
   const machineId = String(fd.get("machine_id") ?? "");
@@ -48,19 +39,6 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
       .eq("id", machineId);
     if (mErr) return { ok: false, error: mErr.message };
 
-    await s.from("machine_ingredients").delete().eq("machine_id", machineId);
-
-    const rows = SLOTS.map((slot) => {
-      const pid = String(fd.get(slot.position) ?? "");
-      if (!pid) return null;
-      return { machine_id: machineId, position: slot.position, product_id: pid, product_type: slot.product_type, enabled: true };
-    }).filter(Boolean) as { machine_id: string; position: string; product_id: string; product_type: string; enabled: boolean }[];
-
-    if (rows.length) {
-      const { error: iErr } = await s.from("machine_ingredients").insert(rows);
-      if (iErr) return { ok: false, error: iErr.message };
-    }
-
     revalidatePath(`/machines/${imei}`);
     return { ok: true };
   } catch (e) {
@@ -77,6 +55,15 @@ const LANE_MAP: Record<string, string> = {
 };
 const BASE_LANE = "1";
 const SOLID_POSITIONS = ["solid_1", "solid_2", "solid_3"];
+
+const HUAXIN_LANE_TO_CONFIG: Record<string, { position: string; product_type: string }> = {
+  "2": { position: "solid_1", product_type: "topping" },
+  "3": { position: "solid_2", product_type: "topping" },
+  "4": { position: "solid_3", product_type: "topping" },
+  "5": { position: "liquid_1", product_type: "sauce" },
+  "6": { position: "liquid_2", product_type: "sauce" },
+  "7": { position: "liquid_3", product_type: "sauce" },
+};
 
 type DiyItem = { position: string; code: string; value: string };
 type ServiceClient = Awaited<ReturnType<typeof createServiceClient>>;
@@ -374,6 +361,7 @@ export async function updateMachineProduct(
   imei: string,
   position: string,
   fields: Record<string, string>,
+  options?: { productId?: string | null; machineId?: string | null },
 ): Promise<ProductUpdateResult> {
   const cfg = getConfigFromEnv();
   if (!cfg) return { ok: false, error: "Huaxin not configured." };
@@ -385,6 +373,29 @@ export async function updateMachineProduct(
     const result = await pushProductDiy(cfg, imei, items);
     if (String(result.code) === "200") {
       try { await refreshProduct(cfg, imei); } catch { /* best-effort */ }
+
+      if (options?.machineId && isSupabaseConfigured()) {
+        const s = await createServiceClient();
+        const configPos = HUAXIN_LANE_TO_CONFIG[String(position)];
+        if (configPos) {
+          const { data: existing } = await s.from("machine_ingredients")
+            .select("id").eq("machine_id", options.machineId).eq("position", configPos.position).maybeSingle();
+          if (existing) {
+            await s.from("machine_ingredients")
+              .update({ product_id: options.productId ?? null })
+              .eq("id", (existing as { id: string }).id);
+          } else {
+            await s.from("machine_ingredients").insert({
+              machine_id: options.machineId,
+              position: configPos.position,
+              product_id: options.productId ?? null,
+              product_type: configPos.product_type,
+              enabled: true,
+            });
+          }
+        }
+      }
+
       return { ok: true };
     }
     return { ok: false, error: result.msg ?? "Update rejected" };
@@ -761,6 +772,73 @@ export async function dismissMenuDraft(imei: string, draftId: string): Promise<{
     await s.from("machine_menu_drafts").delete().eq("id", draftId);
     revalidatePath(`/machines/${imei}`);
     return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export type SaveIngredientResult = { ok: boolean; error?: string; productId?: string };
+
+export async function saveProductVariant(
+  productId: string,
+  fields: { name: string; price: string; image_url?: string; allergen_url?: string },
+): Promise<SaveIngredientResult> {
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+  try {
+    const s = await createServiceClient();
+    const { error } = await s.from("products").update({
+      name: fields.name,
+      price: parseFloat(fields.price) || 0,
+      image_url: fields.image_url || null,
+      allergen_url: fields.allergen_url || null,
+    }).eq("id", productId);
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, productId };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function saveNewIngredient(
+  fields: { name: string; price: string; image_url?: string; allergen_url?: string },
+  productType: string,
+  machineId?: string | null,
+  configPosition?: string,
+): Promise<SaveIngredientResult> {
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+  try {
+    const s = await createServiceClient();
+    const { data, error } = await s.from("products").insert({
+      name: fields.name,
+      price: parseFloat(fields.price) || 0,
+      image_url: fields.image_url || null,
+      allergen_url: fields.allergen_url || null,
+      type: productType,
+    }).select("id").single();
+    if (error) return { ok: false, error: error.message };
+
+    if (machineId && data) {
+      const productId = (data as { id: string }).id;
+      if (configPosition) {
+        const { data: existing } = await s.from("machine_ingredients")
+          .select("id").eq("machine_id", machineId).eq("position", configPosition).maybeSingle();
+        if (existing) {
+          await s.from("machine_ingredients").update({ product_id: productId }).eq("id", (existing as { id: string }).id);
+        } else {
+          await s.from("machine_ingredients").insert({
+            machine_id: machineId,
+            position: configPosition,
+            product_id: productId,
+            product_type: configPosition.startsWith("solid") ? "topping" : "sauce",
+            enabled: true,
+          });
+        }
+      } else {
+        await s.from("machines").update({ base_product_id: productId }).eq("id", machineId);
+      }
+      return { ok: true, productId };
+    }
+    return { ok: true, productId: (data as { id: string })?.id };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

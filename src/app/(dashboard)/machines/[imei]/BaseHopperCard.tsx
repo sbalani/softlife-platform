@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { updateBaseHopper, saveBaseDraft, pushDraftItemAt, revertDraftItemAt, uploadMenuItemImage } from "./actions";
+import { updateBaseHopper, saveBaseDraft, pushDraftItemAt, revertDraftItemAt, uploadMenuItemImage, saveProductVariant, saveNewIngredient } from "./actions";
 import type { ProductDiyItem } from "@/lib/huaxin/client";
 import type { MenuDraftItem } from "@/lib/data/menu-drafts";
 
@@ -32,6 +32,8 @@ export function BaseHopperCard({
   const [pending, startTransition] = useTransition();
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [pushed, setPushed] = useState(false);
+  const [modified, setModified] = useState(false);
 
   const [selectedId, setSelectedId] = useState<string | null>(linkedBaseId);
   const [name, setName] = useState(item?.goodsName ?? "");
@@ -40,6 +42,39 @@ export function BaseHopperCard({
   const [allergyPath, setAllergyPath] = useState("");
 
   const linkedBase = bases.find((b) => b.id === linkedBaseId) ?? null;
+  const selectedBase = bases.find((b) => b.id === selectedId) ?? null;
+
+  const doSaveVariant = () => {
+    if (!selectedId) return;
+    startTransition(async () => {
+      const res = await saveProductVariant(selectedId, {
+        name, price, image_url: imagePath || undefined, allergen_url: allergyPath || undefined,
+      });
+      setResult(res.ok ? "Ingredient updated." : res.error ?? "Failed");
+      if (res.ok) { setModified(false); setPushed(false); }
+    });
+  };
+
+  const doSaveNew = () => {
+    startTransition(async () => {
+      const res = await saveNewIngredient(
+        { name, price, image_url: imagePath || undefined, allergen_url: allergyPath || undefined },
+        "base", machineId, undefined,
+      );
+      if (res.ok && res.productId) {
+        setSelectedId(res.productId);
+        setModified(false);
+        setPushed(false);
+        setResult("Saved as new ingredient.");
+      } else {
+        setResult(res.error ?? "Failed");
+      }
+    });
+  };
+
+  const showSaveOptions = pushed && !editing && (
+    (selectedId && modified) || (!selectedId && !!name)
+  );
 
   const uploadImage = async (file: File) => {
     setUploading(true);
@@ -47,7 +82,7 @@ export function BaseHopperCard({
       const fd = new FormData();
       fd.set("image", file);
       const res = await uploadMenuItemImage(fd);
-      if (res.ok && res.url) setImagePath(res.url);
+      if (res.ok && res.url) { setImagePath(res.url); setModified(true); }
       else setResult(res.error ?? "Upload failed");
     } finally {
       setUploading(false);
@@ -68,6 +103,7 @@ export function BaseHopperCard({
       const res = await updateBaseHopper(imei, machineId, selectedId, buildFields());
       if (res.ok) {
         setResult("Updated & synced.");
+        setPushed(true);
         setEditing(false);
       } else {
         setResult(res.error ?? "Failed");
@@ -120,7 +156,10 @@ export function BaseHopperCard({
               <div className="truncate text-sm font-semibold text-cocoa">{displayName}</div>
             </div>
             <div className="text-[10px] text-taupe">
-              Base · price {displayPrice ?? "—"}{!draftItem && item?.stock ? ` · stock ${item.stock}` : ""}
+              Base · price {displayPrice ?? "—"}
+              {selectedBase && <span className="ml-1 text-sage">· linked: {selectedBase.name}</span>}
+              {!selectedId && displayName && displayName !== "No base set" && <span className="ml-1 text-warning">· Other</span>}
+              {!draftItem && item?.stock ? ` · stock ${item.stock}` : ""}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
@@ -161,21 +200,27 @@ export function BaseHopperCard({
           </div>
           {bases.length > 0 && (
             <label className="block">
-              <span className={lbl}>Fill from ingredient catalog</span>
+              <span className={lbl}>Ingredient</span>
               <select
-                defaultValue=""
+                value={selectedId ?? "other"}
                 onChange={(e) => {
-                  const b = bases.find((x) => x.id === e.target.value);
-                  if (!b) return;
-                  setSelectedId(b.id);
-                  setName(b.name);
-                  setPrice(String(b.price));
-                  if (b.image_url) setImagePath(b.image_url);
-                  if (b.allergen_url) setAllergyPath(b.allergen_url);
+                  if (e.target.value === "other") {
+                    setSelectedId(null);
+                  } else {
+                    const b = bases.find((x) => x.id === e.target.value);
+                    if (b) {
+                      setSelectedId(b.id);
+                      setName(b.name);
+                      setPrice(String(b.price));
+                      if (b.image_url) setImagePath(b.image_url);
+                      if (b.allergen_url) setAllergyPath(b.allergen_url);
+                    }
+                  }
+                  setModified(false);
                 }}
                 className={input}
               >
-                <option value="" disabled>Choose a base…</option>
+                <option value="other">Other (free type)</option>
                 {bases.map((b) => (
                   <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
@@ -185,11 +230,11 @@ export function BaseHopperCard({
           <div className="grid grid-cols-2 gap-2">
             <label className="block">
               <span className={lbl}>Name</span>
-              <input value={name} onChange={(e) => setName(e.target.value)} className={input} />
+              <input value={name} onChange={(e) => { setName(e.target.value); setModified(true); }} className={input} />
             </label>
             <label className="block">
               <span className={lbl}>Price</span>
-              <input value={price} onChange={(e) => setPrice(e.target.value)} className={input} />
+              <input value={price} onChange={(e) => { setPrice(e.target.value); setModified(true); }} className={input} />
             </label>
           </div>
           <label className="block">
@@ -213,7 +258,7 @@ export function BaseHopperCard({
             </div>
             <input
               value={imagePath}
-              onChange={(e) => setImagePath(e.target.value)}
+              onChange={(e) => { setImagePath(e.target.value); setModified(true); }}
               className={`${input} mt-1`}
               placeholder="https://… (or upload above)"
             />
@@ -221,7 +266,7 @@ export function BaseHopperCard({
           </label>
           <label className="block">
             <span className={lbl}>Allergen image URL</span>
-            <input value={allergyPath} onChange={(e) => setAllergyPath(e.target.value)} className={input} placeholder="https://…" />
+            <input value={allergyPath} onChange={(e) => { setAllergyPath(e.target.value); setModified(true); }} className={input} placeholder="https://…" />
           </label>
           <div className="flex items-center gap-2">
             <button
@@ -241,7 +286,39 @@ export function BaseHopperCard({
           </div>
         </div>
       )}
-      {result && (
+      {showSaveOptions && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-line pt-2">
+          <span className="text-[10px] text-taupe">Save to catalog:</span>
+          {selectedId && modified && (
+            <>
+              <button
+                onClick={doSaveVariant}
+                disabled={pending}
+                className="rounded bg-sage px-2 py-1 text-[10px] font-bold text-white hover:bg-sage/80 disabled:opacity-60"
+              >
+                {pending ? "…" : `Update "${selectedBase?.name ?? "base"}"`}
+              </button>
+              <button
+                onClick={doSaveNew}
+                disabled={pending}
+                className="rounded border border-line bg-white px-2 py-1 text-[10px] font-bold text-cocoa hover:bg-cream disabled:opacity-60"
+              >
+                Save as new variant
+              </button>
+            </>
+          )}
+          {!selectedId && (
+            <button
+              onClick={doSaveNew}
+              disabled={pending}
+              className="rounded bg-sage px-2 py-1 text-[10px] font-bold text-white hover:bg-sage/80 disabled:opacity-60"
+            >
+              {pending ? "…" : "Save as new ingredient"}
+            </button>
+          )}
+        </div>
+      )}
+      {result && !showSaveOptions && (
         <p className={`mt-2 text-[10px] ${result.includes("Updated") || result.includes("Saved") ? "text-sage" : "text-danger"}`}>
           {result}
         </p>

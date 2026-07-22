@@ -2,13 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { updateMachineProduct, saveHopperDraft, pushDraftItemAt, revertDraftItemAt, uploadMenuItemImage, saveProductVariant, saveNewIngredient } from "./actions";
+import { localizedGoodsName } from "@/lib/huaxin/client";
 import type { ProductDiyItem } from "@/lib/huaxin/client";
 import type { MenuDraftItem } from "@/lib/data/menu-drafts";
 
 const input = "w-full rounded border border-line bg-white px-2 py-1.5 text-xs text-cocoa focus:border-terracotta focus:outline-none";
 const lbl = "mb-0.5 block text-[10px] uppercase tracking-wide text-taupe";
 
-type IngredientOption = { id: string; name: string; price: number; image_url: string | null; allergen_url: string | null };
+type IngredientOption = { id: string; name: string; name_es?: string; price: number; image_url: string | null; allergen_url: string | null };
 
 const HOPPER_LABELS: Record<string, string> = {
   "1": "Base",
@@ -50,7 +51,7 @@ export function ProductEditor({
 
   const [selectedProductId, setSelectedProductId] = useState<string | null>(linkedProductId ?? null);
   const [modified, setModified] = useState(false);
-  const [name, setName] = useState(draftItem?.goodsName ?? item.goodsName ?? "");
+  const [name, setName] = useState(draftItem?.goodsName ?? localizedGoodsName(item) ?? "");
   const [price, setPrice] = useState(draftItem?.price ?? item.price ?? "");
   const [marketPrice, setMarketPrice] = useState(item.marketPrice ?? "");
   const [imagePath, setImagePath] = useState(draftItem?.imagePath ?? item.imagePath ?? "");
@@ -157,7 +158,9 @@ export function ProductEditor({
   };
 
   const label = HOPPER_LABELS[pos] ?? `Hopper ${item.position}`;
-  const displayName = draftItem ? draftItem.goodsName : item.goodsName;
+  const liveEsName = localizedGoodsName(item);
+  const internalName = item.goodsName;
+  const displayName = draftItem ? draftItem.goodsName : liveEsName;
   const displayPrice = draftItem ? draftItem.price : item.price;
   const displayImage = draftItem ? draftItem.imagePath : item.imagePath;
 
@@ -183,6 +186,7 @@ export function ProductEditor({
             </div>
             <div className="text-[10px] text-taupe">
               {label} · price {displayPrice ?? "—"}
+              {!draftItem && internalName && internalName !== liveEsName && <span className="ml-1 text-taupe/60">· int: {internalName}</span>}
               {selectedIngredient && <span className="ml-1 text-sage">· linked: {selectedIngredient.name}</span>}
               {!selectedProductId && displayName && <span className="ml-1 text-warning">· Other</span>}
               {!draftItem && item.marketPrice ? ` · market ${item.marketPrice}` : ""}
@@ -246,7 +250,7 @@ export function ProductEditor({
               >
                 <option value="other">Other (free type)</option>
                 {ingredients.map((i) => (
-                  <option key={i.id} value={i.id}>{i.name}</option>
+                  <option key={i.id} value={i.id}>{i.name_es || i.name}</option>
                 ))}
               </select>
             </label>

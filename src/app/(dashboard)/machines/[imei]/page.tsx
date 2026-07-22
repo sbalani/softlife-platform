@@ -10,6 +10,7 @@ import { getMachines } from "@/lib/data/machines";
 import { getPendingMenuDraft } from "@/lib/data/menu-drafts";
 import { MachineConfigForm } from "./MachineConfigForm";
 import { DraftBulkActions } from "./DraftBulkActions";
+import { DismissDraftButton } from "./DismissDraftButton";
 import { MachinePushButton } from "./MachinePushButton";
 import { RemoteControls } from "./RemoteControls";
 import { MediaManager } from "./MediaManager";
@@ -229,14 +230,25 @@ export default async function MachineDetailPage({
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-display text-lg font-bold text-cocoa">Product menu on machine (live, editable)</h2>
           <div className="flex items-center gap-3">
-            {pendingDraft && pendingDraft.items.length > 1 && (
-              <DraftBulkActions imei={imei} draftId={pendingDraft.id} count={pendingDraft.items.length} />
-            )}
             <CopyMenuButton sourceImei={imei} machines={otherMachines} />
           </div>
         </div>
         {menu.diy.length > 0 || menu.unify.length > 0 ? (
           <div className="space-y-4">
+            {pendingDraft && pendingDraft.items.length > 0 && (
+              <div className="flex items-center justify-between rounded-xl border border-terracotta/40 bg-terracotta/5 px-4 py-2.5">
+                <div className="text-xs">
+                  <span className="font-bold text-terracotta">{pendingDraft.items.length} draft item(s) pending</span>
+                  <span className="ml-2 text-taupe">— values shown below are draft edits, not live data.</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {pendingDraft.items.length > 1 && (
+                    <DraftBulkActions imei={imei} draftId={pendingDraft.id} count={pendingDraft.items.length} />
+                  )}
+                  <DismissDraftButton imei={imei} draftId={pendingDraft.id} />
+                </div>
+              </div>
+            )}
             {menu.unify.length > 0 && (
               <div>
                 <h3 className="mb-2 text-[11px] uppercase tracking-wide text-taupe">Menu items (recipes / combos)</h3>
@@ -269,7 +281,7 @@ export default async function MachineDetailPage({
                         imei={imei}
                         machineId={config?.machineId ?? null}
                         item={item}
-                        bases={ingredients.filter((p) => p.type === "base")}
+                        bases={ingredients.filter((p) => p.type === "base").map((p) => ({ id: p.id, name: p.name, name_es: p.name_translations?.es, price: p.price, image_url: p.image_url, allergen_url: p.allergen_url }))}
                         linkedBaseId={config?.baseProductId ?? null}
                         draftId={pendingDraft?.id ?? null}
                         draftItem={draftByPosition.get(String(item.position)) ?? null}
@@ -280,7 +292,7 @@ export default async function MachineDetailPage({
                         imei={imei}
                         machineId={config?.machineId ?? null}
                         item={item}
-                        ingredients={ingredients}
+                        ingredients={ingredients.map((p) => ({ id: p.id, name: p.name, name_es: p.name_translations?.es, price: p.price, image_url: p.image_url, allergen_url: p.allergen_url }))}
                         linkedProductId={linkedProductIdByLane.get(HUAXIN_TO_CONFIG_POS[String(item.position)] ?? "") ?? null}
                         draftId={pendingDraft?.id ?? null}
                         draftItem={draftByPosition.get(String(item.position)) ?? null}

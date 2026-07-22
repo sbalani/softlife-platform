@@ -23,6 +23,15 @@ const num = (v: FormDataEntryValue | null) => {
   return Number.isFinite(n) && String(v ?? "").trim() !== "" ? n : null;
 };
 
+function buildTranslations(fd: FormData): Record<string, string> | null {
+  const out: Record<string, string> = {};
+  for (const [field, lang] of [["name_es", "es"], ["name_en", "en"], ["name_cn", "cn"]] as const) {
+    const v = str(fd.get(field));
+    if (v) out[lang] = v;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 export type ComposeResult = { ok: boolean; url?: string; error?: string };
 
 /** Client-triggered preview: build the composite from whatever's currently
@@ -85,6 +94,7 @@ export async function createProduct(_prev: ProductResult | null, fd: FormData): 
 
     const { data: inserted, error } = await s.from("products").insert({
       name,
+      name_translations: buildTranslations(fd),
       type: String(fd.get("type") ?? "topping"),
       sku: str(fd.get("sku")),
       description: str(fd.get("description")),
@@ -149,6 +159,7 @@ export async function updateProduct(_prev: ProductResult | null, fd: FormData): 
     const s = await createServiceClient();
     const vals: Record<string, unknown> = {
       name,
+      name_translations: buildTranslations(fd),
       type: String(fd.get("type") ?? "topping"),
       sku: str(fd.get("sku")),
       description: str(fd.get("description")),

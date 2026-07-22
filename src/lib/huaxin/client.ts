@@ -255,6 +255,11 @@ export type ProductDiyItem = {
   intro?: string;
 };
 
+export function localizedGoodsName(item: ProductDiyItem, lang = "es"): string {
+  const lp = item.languagePacks?.find((p) => p.code === lang);
+  return lp?.goodsName || item.goodsName || "";
+}
+
 export async function listDeviceProducts(cfg: HuaxinConfig, deviceImei: string): Promise<{ diy: ProductDiyItem[]; unify: ProductDiyItem[] }> {
   const data = await call("/machine/cloud/api/device/product", cfg, { device_imei: deviceImei });
   const payload = data.data as { diy?: ProductDiyItem[]; unify?: ProductDiyItem[] } | null;

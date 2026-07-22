@@ -5,6 +5,7 @@ export type ProductAllergen = { id: string; name: string; slug: string; logo_url
 export type Product = {
   id: string;
   name: string;
+  name_translations: Record<string, string> | null;
   type: string;
   sku: string | null;
   description: string | null;
@@ -42,6 +43,7 @@ export async function getProducts(): Promise<Product[]> {
       return {
         id: p.id as string,
         name: p.name as string,
+        name_translations: (p.name_translations as Record<string, string>) ?? null,
         type: p.type as string,
         sku: (p.sku as string) ?? null,
         odoo_id: (p.odoo_id as number) ?? null,

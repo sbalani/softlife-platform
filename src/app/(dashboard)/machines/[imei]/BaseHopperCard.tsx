@@ -2,13 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { updateBaseHopper, saveBaseDraft, pushDraftItemAt, revertDraftItemAt, uploadMenuItemImage, saveProductVariant, saveNewIngredient } from "./actions";
+import { localizedGoodsName } from "@/lib/huaxin/client";
 import type { ProductDiyItem } from "@/lib/huaxin/client";
 import type { MenuDraftItem } from "@/lib/data/menu-drafts";
 
 const input = "w-full rounded border border-line bg-white px-2 py-1.5 text-xs text-cocoa focus:border-terracotta focus:outline-none";
 const lbl = "mb-0.5 block text-[10px] uppercase tracking-wide text-taupe";
 
-type BaseOption = { id: string; name: string; price: number; image_url: string | null; allergen_url: string | null };
+type BaseOption = { id: string; name: string; name_es?: string; price: number; image_url: string | null; allergen_url: string | null };
 const BASE_POSITION = "1";
 
 export function BaseHopperCard({
@@ -36,7 +37,7 @@ export function BaseHopperCard({
   const [modified, setModified] = useState(false);
 
   const [selectedId, setSelectedId] = useState<string | null>(linkedBaseId);
-  const [name, setName] = useState(item?.goodsName ?? "");
+  const [name, setName] = useState(item ? (draftItem?.goodsName ?? localizedGoodsName(item)) ?? "" : "");
   const [price, setPrice] = useState(item?.price ?? "");
   const [imagePath, setImagePath] = useState(item?.imagePath ?? "");
   const [allergyPath, setAllergyPath] = useState("");
@@ -135,7 +136,9 @@ export function BaseHopperCard({
     });
   };
 
-  const displayName = draftItem ? draftItem.goodsName : item?.goodsName || linkedBase?.name || "No base set";
+  const liveEsName = item ? localizedGoodsName(item) : "";
+  const internalName = item?.goodsName;
+  const displayName = draftItem ? draftItem.goodsName : liveEsName || linkedBase?.name || "No base set";
   const displayPrice = draftItem ? draftItem.price : item?.price;
   const displayImage = draftItem ? draftItem.imagePath : item?.imagePath || linkedBase?.image_url;
 
@@ -157,6 +160,7 @@ export function BaseHopperCard({
             </div>
             <div className="text-[10px] text-taupe">
               Base · price {displayPrice ?? "—"}
+              {!draftItem && internalName && internalName !== liveEsName && <span className="ml-1 text-taupe/60">· int: {internalName}</span>}
               {selectedBase && <span className="ml-1 text-sage">· linked: {selectedBase.name}</span>}
               {!selectedId && displayName && displayName !== "No base set" && <span className="ml-1 text-warning">· Other</span>}
               {!draftItem && item?.stock ? ` · stock ${item.stock}` : ""}
@@ -222,7 +226,7 @@ export function BaseHopperCard({
               >
                 <option value="other">Other (free type)</option>
                 {bases.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
+                  <option key={b.id} value={b.id}>{b.name_es || b.name}</option>
                 ))}
               </select>
             </label>

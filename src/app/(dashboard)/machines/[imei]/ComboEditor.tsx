@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { pushComboToMachine, saveComboDraft, pushDraftItemAt, revertDraftItemAt, uploadMenuItemImage } from "./actions";
+import { localizedGoodsName } from "@/lib/huaxin/client";
 import type { ProductDiyItem } from "@/lib/huaxin/client";
 import type { MenuDraftItem } from "@/lib/data/menu-drafts";
 
@@ -103,7 +104,9 @@ export function ComboEditor({
     });
   };
 
-  const displayName = draftItem ? draftItem.goodsName : item.goodsName;
+  const liveEsName = localizedGoodsName(item);
+  const internalName = item.goodsName;
+  const displayName = draftItem ? draftItem.goodsName : liveEsName;
   const displayPrice = draftItem ? draftItem.price : item.price;
   const displayImage = draftItem ? draftItem.imagePath : item.imagePath;
 
@@ -124,7 +127,9 @@ export function ComboEditor({
               <div className="truncate text-sm font-semibold text-cocoa">{displayName || "—"}</div>
             </div>
             <div className="text-[10px] text-taupe">
-              Combo {item.position} · price {displayPrice ?? "—"}{!draftItem && item.stock ? ` · stock ${item.stock}` : ""}
+              Combo {item.position} · price {displayPrice ?? "—"}
+              {!draftItem && internalName && internalName !== liveEsName && <span className="ml-1 text-taupe/60">· int: {internalName}</span>}
+              {!draftItem && item.stock ? ` · stock ${item.stock}` : ""}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">

@@ -25,9 +25,9 @@ const num = (v: FormDataEntryValue | null) => {
 
 function buildTranslations(fd: FormData): Record<string, string> | null {
   const out: Record<string, string> = {};
-  for (const [field, lang] of [["name_es", "es"], ["name_en", "en"], ["name_cn", "cn"]] as const) {
+  for (const field of ["name_es", "name_US", "name_CN", "name_KH"]) {
     const v = str(fd.get(field));
-    if (v) out[lang] = v;
+    if (v) out[field.replace("name_", "")] = v;
   }
   return Object.keys(out).length ? out : null;
 }

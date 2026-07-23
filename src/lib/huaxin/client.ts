@@ -260,6 +260,12 @@ export function localizedGoodsName(item: ProductDiyItem, lang = "es"): string {
   return lp?.goodsName || item.goodsName || "";
 }
 
+export function languagePackEntries(item: ProductDiyItem): { code: string; goodsName: string }[] {
+  return (item.languagePacks ?? [])
+    .filter((p): p is { code: string; goodsName: string } => !!p.code && !!p.goodsName)
+    .map((p) => ({ code: p.code, goodsName: p.goodsName }));
+}
+
 export async function listDeviceProducts(cfg: HuaxinConfig, deviceImei: string): Promise<{ diy: ProductDiyItem[]; unify: ProductDiyItem[] }> {
   const data = await call("/machine/cloud/api/device/product", cfg, { device_imei: deviceImei });
   const payload = data.data as { diy?: ProductDiyItem[]; unify?: ProductDiyItem[] } | null;

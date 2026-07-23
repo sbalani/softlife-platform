@@ -61,6 +61,13 @@ export default async function IngredientsPage() {
                   <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold capitalize ${TYPE_TONE[p.type] ?? "bg-cream text-taupe"}`}>{p.type}</span>
                 </div>
                 <p className="truncate text-xs text-taupe">{p.brand ? `${p.brand} · ` : ""}{p.sku ? `SKU ${p.sku}` : "—"}</p>
+                {p.name_translations && (
+                  <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-taupe/70">
+                    {Object.entries(p.name_translations).map(([lang, val]) => (
+                      <span key={lang}><span className="font-bold uppercase">{lang}:</span> {val}</span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { updateBaseHopper, saveBaseDraft, pushDraftItemAt, revertDraftItemAt, uploadMenuItemImage, saveProductVariant, saveNewIngredient } from "./actions";
-import { localizedGoodsName } from "@/lib/huaxin/client";
+import { localizedGoodsName, languagePackEntries } from "@/lib/huaxin/client";
 import type { ProductDiyItem } from "@/lib/huaxin/client";
 import type { MenuDraftItem } from "@/lib/data/menu-drafts";
 
@@ -138,6 +138,7 @@ export function BaseHopperCard({
 
   const liveEsName = item ? localizedGoodsName(item) : "";
   const internalName = item?.goodsName;
+  const locales = item ? languagePackEntries(item) : [];
   const displayName = draftItem ? draftItem.goodsName : liveEsName || linkedBase?.name || "No base set";
   const displayPrice = draftItem ? draftItem.price : item?.price;
   const displayImage = draftItem ? draftItem.imagePath : item?.imagePath || linkedBase?.image_url;
@@ -160,11 +161,17 @@ export function BaseHopperCard({
             </div>
             <div className="text-[10px] text-taupe">
               Base · price {displayPrice ?? "—"}
-              {!draftItem && internalName && internalName !== liveEsName && <span className="ml-1 text-taupe/60">· int: {internalName}</span>}
               {selectedBase && <span className="ml-1 text-sage">· linked: {selectedBase.name}</span>}
               {!selectedId && displayName && displayName !== "No base set" && <span className="ml-1 text-warning">· Other</span>}
               {!draftItem && item?.stock ? ` · stock ${item.stock}` : ""}
             </div>
+            {!draftItem && locales.length > 0 && (
+              <div className="mt-0.5 flex flex-wrap gap-x-2 text-[9px] text-taupe/60">
+                {locales.map((lp) => (
+                  <span key={lp.code}><span className="font-bold uppercase">{lp.code}:</span> {lp.goodsName}</span>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {draftItem && (

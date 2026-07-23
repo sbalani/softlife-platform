@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { pushComboToMachine, saveComboDraft, pushDraftItemAt, revertDraftItemAt, uploadMenuItemImage } from "./actions";
-import { localizedGoodsName } from "@/lib/huaxin/client";
+import { localizedGoodsName, languagePackEntries } from "@/lib/huaxin/client";
 import type { ProductDiyItem } from "@/lib/huaxin/client";
 import type { MenuDraftItem } from "@/lib/data/menu-drafts";
 
@@ -106,6 +106,7 @@ export function ComboEditor({
 
   const liveEsName = localizedGoodsName(item);
   const internalName = item.goodsName;
+  const locales = languagePackEntries(item);
   const displayName = draftItem ? draftItem.goodsName : liveEsName;
   const displayPrice = draftItem ? draftItem.price : item.price;
   const displayImage = draftItem ? draftItem.imagePath : item.imagePath;
@@ -128,9 +129,15 @@ export function ComboEditor({
             </div>
             <div className="text-[10px] text-taupe">
               Combo {item.position} · price {displayPrice ?? "—"}
-              {!draftItem && internalName && internalName !== liveEsName && <span className="ml-1 text-taupe/60">· int: {internalName}</span>}
               {!draftItem && item.stock ? ` · stock ${item.stock}` : ""}
             </div>
+            {!draftItem && locales.length > 0 && (
+              <div className="mt-0.5 flex flex-wrap gap-x-2 text-[9px] text-taupe/60">
+                {locales.map((lp) => (
+                  <span key={lp.code}><span className="font-bold uppercase">{lp.code}:</span> {lp.goodsName}</span>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {draftItem && (

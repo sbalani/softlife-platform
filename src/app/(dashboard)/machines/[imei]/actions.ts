@@ -376,12 +376,11 @@ export async function updateMachineProduct(
       const { data: prod } = await s.from("products")
         .select("name,name_translations").eq("id", options.productId).maybeSingle();
       if (prod) {
-        const t = (prod as { name_translations?: Record<string, string> | null; name?: string }).name_translations;
-        const packs = [
-          ...(t?.es ? [{ code: "es", goodsName: t.es }] : []),
-          ...(t?.en ? [{ code: "US", goodsName: t.en }] : []),
-          ...(prod.name ? [{ code: "CN", goodsName: (prod as { name: string }).name }] : []),
-        ];
+        const t = (prod as { name_translations?: Record<string, string> | null }).name_translations;
+        const packs: { code: string; goodsName: string }[] = [];
+        for (const [code, name] of Object.entries(t ?? {})) {
+          if (name) packs.push({ code, goodsName: name });
+        }
         if (packs.length) {
           items.push({ position: String(position), code: "languagePacks", value: JSON.stringify(packs) });
         }

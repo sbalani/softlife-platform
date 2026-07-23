@@ -239,3 +239,40 @@ export async function linkProductToOdoo(_prev: ProductResult | null, fd: FormDat
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
+
+export async function addProductAlias(productId: string, alias: string): Promise<ProductResult> {
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+  const trimmed = alias.trim();
+  if (!trimmed) return { ok: false, error: "Alias cannot be empty." };
+  try {
+    const s = await createServiceClient();
+    const { error } = await s.from("product_aliases").insert({ product_id: productId, alias: trimmed });
+    if (error) {
+      if (error.code === "23505") return { ok: false, error: "That alias already exists." };
+      return { ok: false, error: error.message };
+    }
+    revalidatePath("/products");
+    revalidatePath("/orders");
+    revalidatePath("/analytics");
+    revalidatePath("/dashboard");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function removeProductAlias(aliasId: string): Promise<ProductResult> {
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+  try {
+    const s = await createServiceClient();
+    const { error } = await s.from("product_aliases").delete().eq("id", aliasId);
+    if (error) return { ok: false, error: error.message };
+    revalidatePath("/products");
+    revalidatePath("/orders");
+    revalidatePath("/analytics");
+    revalidatePath("/dashboard");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}

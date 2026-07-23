@@ -3,6 +3,7 @@ import { getAllergens } from "@/lib/data/allergens";
 import { getOdooSkus } from "@/lib/data/odoo";
 import { ProductForm } from "./ProductForm";
 import { LinkOdooControl } from "./LinkOdooControl";
+import { AliasManager } from "./AliasManager";
 
 export const dynamic = "force-dynamic";
 
@@ -102,6 +103,8 @@ export default async function IngredientsPage() {
             <details className="mt-2 border-t border-line pt-2">
               <summary className="cursor-pointer text-[11px] font-semibold text-taupe hover:text-terracotta">✎ Edit</summary>
               <div className="mt-3">
+                <span className="mb-1 block text-[11px] uppercase tracking-wide text-taupe">Aliases (merge sales from other names)</span>
+                <AliasManager productId={p.id} aliases={p.aliases} />
                 <ProductForm allergens={allergens} product={p} />
               </div>
             </details>

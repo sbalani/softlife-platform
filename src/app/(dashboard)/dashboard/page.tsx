@@ -6,6 +6,7 @@ import { getMachines } from "@/lib/data/machines";
 import { getAlerts } from "@/lib/data/alerts";
 import { ymd } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
+import { getAliasMap, resolveProductName } from "@/lib/data/products";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,7 @@ export default async function DashboardPage() {
   ]);
 
   const tz = await getDisplayTimezone();
+  const aliasMap = await getAliasMap();
   const completed = orders.filter((o) => o.order_state === "COMPLETE" && !o.is_admin_override);
   const totalSales = completed.reduce((s, o) => s + o.price, 0);
   const totalUnits = completed.reduce((s, o) => s + o.nums, 0);
@@ -62,7 +64,8 @@ export default async function DashboardPage() {
     const names = o.products.length ? o.products.map((p) => p.goodsName ?? "") : [o.product_name];
     for (const n of names) {
       if (!n) continue;
-      productCounts.set(n, (productCounts.get(n) ?? 0) + 1);
+      const resolved = resolveProductName(n, aliasMap);
+      productCounts.set(resolved, (productCounts.get(resolved) ?? 0) + 1);
     }
   }
   const topToppings = [...productCounts.entries()]

@@ -94,10 +94,17 @@ async function syncProductsToIngredients(
 ): Promise<void> {
   if (!cfg) return;
   const { diy } = await listDeviceProducts(cfg, imei);
-  const { data: allProducts } = await s.from("products").select("id,name,type");
-  const products = (allProducts as { id: string; name: string; type: string }[]) ?? [];
+  const { data: allProducts } = await s.from("products").select("id,name,type,image_url");
+  const products = (allProducts as { id: string; name: string; type: string; image_url: string | null }[]) ?? [];
   const findMatch = (name: string) =>
     products.find((p) => p.name.toLowerCase().trim() === name.toLowerCase().trim());
+
+  const syncImage = async (productId: string | undefined | null, huaxinImage: string | undefined) => {
+    if (!productId || !huaxinImage) return;
+    const p = products.find((x) => x.id === productId);
+    if (!p || p.image_url === huaxinImage) return;
+    await s.from("products").update({ image_url: huaxinImage }).eq("id", productId);
+  };
 
   // Base (lane 1) → machines.base_product_id
   const baseItem = diy.find((d) => String(d.position) === "1");
@@ -106,6 +113,7 @@ async function syncProductsToIngredients(
     await s.from("machines")
       .update({ base_product_id: match?.id ?? null })
       .eq("id", machineId);
+    await syncImage(match?.id, baseItem.imagePath);
   }
 
   // Lanes 2-7 → machine_ingredients (preserve lot data on existing rows)
@@ -120,6 +128,7 @@ async function syncProductsToIngredients(
     if (!item) continue;
     const goodsName = (item.goodsName ?? "").trim();
     const match = goodsName ? findMatch(goodsName) : null;
+    await syncImage(match?.id, item.imagePath);
     const existingId = existingByPos.get(mapping.position);
     if (existingId) {
       await s.from("machine_ingredients")

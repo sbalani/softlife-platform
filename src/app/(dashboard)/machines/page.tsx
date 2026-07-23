@@ -2,6 +2,8 @@ import Link from "next/link";
 import { getMachines } from "@/lib/data/machines";
 import { SyncStatusesButton } from "./SyncStatusesButton";
 import { FleetMap } from "@/components/maps";
+import { formatDate } from "@/lib/dates";
+import { getDisplayTimezone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +35,7 @@ export default async function MachinesPage({
   const status = sp.status ?? "all";
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
   const pageSize = 10;
+  const tz = await getDisplayTimezone();
 
   const { machines, source } = await getMachines();
   const mapMarkers = machines
@@ -136,7 +139,7 @@ export default async function MachinesPage({
                   <td className="px-4 py-3 font-mono text-xs text-taupe">{m.ref ?? m.device_imei ?? "—"}</td>
                   <td className="px-4 py-3 text-cocoa">{m.location ?? "—"}</td>
                   <td className="px-4 py-3 text-taupe">
-                    {m.created_at ? new Date(m.created_at).toLocaleDateString() : "—"}
+                    {m.created_at ? formatDate(m.created_at, tz) : "—"}
                   </td>
                   <td className="px-4 py-3">
                     <span

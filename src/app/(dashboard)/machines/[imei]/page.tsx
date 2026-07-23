@@ -8,6 +8,8 @@ import { getTenants } from "@/lib/data/franchisees";
 import { getProducts } from "@/lib/data/products";
 import { getMachines } from "@/lib/data/machines";
 import { getPendingMenuDraft } from "@/lib/data/menu-drafts";
+import { formatDateTime, formatDate } from "@/lib/dates";
+import { getDisplayTimezone } from "@/lib/timezone";
 import { MachineConfigForm } from "./MachineConfigForm";
 import { DraftBulkActions } from "./DraftBulkActions";
 import { DismissDraftButton } from "./DismissDraftButton";
@@ -35,6 +37,7 @@ export default async function MachineDetailPage({
   params: Promise<{ imei: string }>;
 }) {
   const { imei } = await params;
+  const tz = await getDisplayTimezone();
   const config = await getMachineConfig(imei);
   const tenants = await getTenants();
   const telemetry = await getMachineDetail(imei);
@@ -148,7 +151,7 @@ export default async function MachineDetailPage({
                     ) : (
                       <span className="text-taupe">No lot recorded</span>
                     )}
-                    {ing.last_loaded_date && <span className="ml-2 text-taupe">· {new Date(ing.last_loaded_date).toLocaleDateString()}</span>}
+                    {ing.last_loaded_date && <span className="ml-2 text-taupe">· {formatDate(ing.last_loaded_date, tz)}</span>}
                   </div>
                 </div>
               ))}
@@ -170,7 +173,7 @@ export default async function MachineDetailPage({
               <tbody className="divide-y divide-line">
                 {lotHistory.map((h) => (
                   <tr key={h.id}>
-                    <td className="py-1 text-cocoa">{new Date(h.device_event_time).toLocaleDateString()}</td>
+                    <td className="py-1 text-cocoa">{formatDate(h.device_event_time, tz)}</td>
                     <td className="py-1 text-taupe">{h.position ?? "—"}</td>
                     <td className="py-1 text-cocoa">{h.product_name ?? "—"}</td>
                     <td className="py-1 font-mono text-cocoa">{h.lot_name}</td>
@@ -313,7 +316,7 @@ export default async function MachineDetailPage({
         <div className="flex items-center justify-between">
           <h2 className="font-display text-lg font-bold text-cocoa">Cylinder temperature</h2>
           {telemetry?.last_report && (
-            <span className="text-xs text-taupe">Last report {new Date(telemetry.last_report.replace(" ", "T")).toLocaleString()}</span>
+            <span className="text-xs text-taupe">Last report {formatDateTime(telemetry.last_report, tz)}</span>
           )}
         </div>
         {telemetry && telemetry.temperatures.length ? (
@@ -337,7 +340,7 @@ export default async function MachineDetailPage({
             <tbody className="divide-y divide-line">
               {telemetry.orders.slice(0, 20).map((o) => (
                 <tr key={o.order_code}>
-                  <td className="py-2 text-cocoa">{new Date(o.order_time).toLocaleString()}</td>
+                  <td className="py-2 text-cocoa">{formatDateTime(o.order_time, tz)}</td>
                   <td className="py-2 font-mono text-xs text-taupe">{o.order_code}</td>
                   <td className="py-2 text-cocoa">{o.product_name || "—"}</td>
                   <td className="py-2 text-right text-cocoa">€{o.price.toFixed(2)}</td>

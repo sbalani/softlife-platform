@@ -1,4 +1,6 @@
 import { getLatestTemperatures } from "@/lib/data/temperatures";
+import { formatDateTime } from "@/lib/dates";
+import { getDisplayTimezone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +12,7 @@ function tempColor(v: number) {
 
 export default async function TemperaturesPage() {
   const { temps, source } = await getLatestTemperatures();
+  const tz = await getDisplayTimezone();
   return (
     <div>
       <header className="mb-8">
@@ -35,7 +38,7 @@ export default async function TemperaturesPage() {
                   {v.toFixed(1)}°C
                 </div>
                 <p className="mt-1 text-xs text-taupe">
-                  {t.reading_time ? new Date(t.reading_time).toLocaleString() : "—"}
+                  {formatDateTime(t.reading_time, tz)}
                 </p>
               </article>
             );

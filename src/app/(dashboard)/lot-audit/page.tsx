@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { getLotUsages } from "@/lib/data/lot-audit";
+import { formatDateTime } from "@/lib/dates";
+import { getDisplayTimezone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +24,7 @@ const TYPE_TONE: Record<string, string> = {
 export default async function LotAuditPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
   const usages = await getLotUsages(sp);
+  const tz = await getDisplayTimezone();
 
   const input = "rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa focus:border-terracotta focus:outline-none";
   const label = "mb-1 block text-[11px] uppercase tracking-wide text-taupe";
@@ -68,7 +71,7 @@ export default async function LotAuditPage({ searchParams }: { searchParams: Pro
           <tbody className="divide-y divide-line">
             {usages.map((u) => (
               <tr key={u.id} className="hover:bg-cream/50">
-                <td className="px-4 py-3 text-cocoa">{new Date(u.device_event_time).toLocaleString()}</td>
+                <td className="px-4 py-3 text-cocoa">{formatDateTime(u.device_event_time, tz)}</td>
                 <td className="px-4 py-3 font-semibold text-cocoa">{u.machine_name ?? u.device_imei ?? "—"}</td>
                 <td className="px-4 py-3 text-taupe">{u.position ?? "—"}</td>
                 <td className="px-4 py-3 text-cocoa">{u.product_name ?? "—"}</td>

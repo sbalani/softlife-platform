@@ -1,6 +1,8 @@
 import { getOdooSkus, getOdooLots } from "@/lib/data/odoo";
 import { DataSourceNote } from "@/components/data-source-note";
 import { CreateIngredientButton } from "./CreateIngredientButton";
+import { formatDateTime } from "@/lib/dates";
+import { getDisplayTimezone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +12,7 @@ export default async function OdooPage() {
     getOdooLots(),
   ]);
 
+  const tz = await getDisplayTimezone();
   return (
     <div>
       <header className="mb-6">
@@ -87,7 +90,7 @@ export default async function OdooPage() {
                   <td className="px-4 py-3 text-taupe">{l.expiration_date ?? "—"}</td>
                   <td className="px-4 py-3 text-taupe">{l.warehouse_name ?? "—"}</td>
                   <td className="px-4 py-3 text-taupe">
-                    {l.updated_at ? new Date(l.updated_at).toLocaleString() : "—"}
+                    {l.updated_at ? formatDateTime(l.updated_at, tz) : "—"}
                   </td>
                 </tr>
               ))}

@@ -2,11 +2,14 @@ import { getMachines } from "@/lib/data/machines";
 import { getLots } from "@/lib/data/lots";
 import { getRefillHistory } from "@/lib/data/refills";
 import { RefillForm } from "./RefillForm";
+import { formatDateTime } from "@/lib/dates";
+import { getDisplayTimezone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
 export default async function RefillsPage() {
   const [{ machines }, lots, history] = await Promise.all([getMachines(), getLots(), getRefillHistory()]);
+  const tz = await getDisplayTimezone();
 
   // FIFO: oldest released stock first — matches the mobile app's suggestion order.
   const availableLots = lots
@@ -47,7 +50,7 @@ export default async function RefillsPage() {
                     <span className="font-display text-base font-bold text-cocoa">{r.machine_name ?? "Unknown machine"}</span>
                     <span className="ml-2 text-xs text-taupe">by {r.operator_name ?? "—"}</span>
                   </div>
-                  <span className="text-xs text-taupe">{new Date(r.device_event_time).toLocaleString()}</span>
+                  <span className="text-xs text-taupe">{formatDateTime(r.device_event_time, tz)}</span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {r.lines.map((l, i) => (

@@ -1,6 +1,9 @@
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getConfigFromEnv } from "@/lib/huaxin/client";
 import { SyncButton } from "./SyncButton";
+import { TimezoneSelector } from "./TimezoneSelector";
+import { formatDateTime, tzAbbrev } from "@/lib/dates";
+import { getDisplayTimezone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +29,7 @@ function Stat({ label, v }: { label: string; v: number | null }) {
 
 export default async function SettingsPage() {
   const cfg = getConfigFromEnv();
+  const tz = await getDisplayTimezone();
   const [machines, temps, orders, faults] = await Promise.all([
     count("machines"),
     count("huaxin_temperatures"),
@@ -64,8 +68,16 @@ export default async function SettingsPage() {
         </p>
         <SyncButton />
         <div className="mt-3 text-xs text-taupe">
-          Last sync: {lastSync ? new Date(lastSync).toLocaleString() : "never"}
+          Last sync: {lastSync ? formatDateTime(lastSync, tz) : "never"}
         </div>
+      </section>
+
+      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+        <h2 className="font-display text-lg font-bold text-cocoa">Display timezone</h2>
+        <p className="mt-1 mb-3 text-sm text-taupe">
+          All dates and times across the dashboard are shown in this timezone. Currently {tzAbbrev(tz)}.
+        </p>
+        <TimezoneSelector current={tz} />
       </section>
 
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">

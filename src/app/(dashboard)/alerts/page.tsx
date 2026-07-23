@@ -1,4 +1,6 @@
 import { getAlerts } from "@/lib/data/alerts";
+import { formatDateTime } from "@/lib/dates";
+import { getDisplayTimezone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +12,7 @@ const SEV: Record<string, { ring: string; dot: string; label: string }> = {
 
 export default async function AlertsPage() {
   const { alerts, source } = await getAlerts();
+  const tz = await getDisplayTimezone();
   return (
     <div>
       <header className="mb-8">
@@ -37,7 +40,7 @@ export default async function AlertsPage() {
                     )}
                   </div>
                   <p className="mt-1.5 font-semibold text-cocoa">{a.message}</p>
-                  <p className="mt-1 text-xs text-taupe">{new Date(a.created_at).toLocaleString()}</p>
+                  <p className="mt-1 text-xs text-taupe">{formatDateTime(a.created_at, tz)}</p>
                 </div>
                 {a.remaining_pct != null && (
                   <div className="text-right">

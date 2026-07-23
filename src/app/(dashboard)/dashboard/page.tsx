@@ -4,17 +4,17 @@ import { MachineChartClient } from "./MachineChartClient";
 import { getOrders } from "@/lib/data/orders";
 import { getMachines } from "@/lib/data/machines";
 import { getAlerts } from "@/lib/data/alerts";
+import { ymd } from "@/lib/dates";
+import { getDisplayTimezone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
-function dayKey(iso: string): string {
-  const d = new Date(iso.replace(" ", "T"));
-  return d.toISOString().slice(0, 10);
+function dayKey(iso: string, tz: string): string {
+  return ymd(new Date(iso.replace(" ", "T")), tz);
 }
 
-function isSameDay(iso: string, ref: Date) {
-  const d = new Date(iso.replace(" ", "T"));
-  return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth() && d.getDate() === ref.getDate();
+function isSameDay(iso: string, ref: Date, tz: string): boolean {
+  return dayKey(iso, tz) === ymd(ref, tz);
 }
 
 export default async function DashboardPage() {
@@ -24,14 +24,15 @@ export default async function DashboardPage() {
     getAlerts(),
   ]);
 
+  const tz = await getDisplayTimezone();
   const completed = orders.filter((o) => o.order_state === "COMPLETE" && !o.is_admin_override);
   const totalSales = completed.reduce((s, o) => s + o.price, 0);
   const totalUnits = completed.reduce((s, o) => s + o.nums, 0);
 
   const today = new Date();
   const yesterday = new Date(Date.now() - 86_400_000);
-  const ordersToday = orders.filter((o) => isSameDay(o.order_time, today)).length;
-  const ordersYesterday = orders.filter((o) => isSameDay(o.order_time, yesterday)).length;
+  const ordersToday = orders.filter((o) => isSameDay(o.order_time, today, tz)).length;
+  const ordersYesterday = orders.filter((o) => isSameDay(o.order_time, yesterday, tz)).length;
 
   const online = machines.filter((m) => m.net_online).length;
   const critical = alerts.filter((a) => a.severity === "critical").length;
@@ -40,18 +41,18 @@ export default async function DashboardPage() {
   const revenueByDay = new Map<string, number>();
   const unitsByDay = new Map<string, number>();
   for (const o of completed) {
-    const key = dayKey(o.order_time);
+    const key = dayKey(o.order_time, tz);
     revenueByDay.set(key, (revenueByDay.get(key) ?? 0) + o.price);
     unitsByDay.set(key, (unitsByDay.get(key) ?? 0) + o.nums);
   }
   const sortedDays = [...revenueByDay.keys()].sort();
   const recentDays = sortedDays.slice(-14);
   const salesLineData = recentDays.map((d) => ({
-    label: new Date(d).toLocaleDateString("en", { day: "numeric", month: "short" }),
+    label: new Date(d).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: tz }),
     value: Number((revenueByDay.get(d) ?? 0).toFixed(2)),
   }));
   const unitsLineData = recentDays.map((d) => ({
-    label: new Date(d).toLocaleDateString("en", { day: "numeric", month: "short" }),
+    label: new Date(d).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: tz }),
     value: unitsByDay.get(d) ?? 0,
   }));
 

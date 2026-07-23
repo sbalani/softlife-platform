@@ -2,16 +2,18 @@ import { getOrders } from "@/lib/data/orders";
 import { getMachines } from "@/lib/data/machines";
 import { LineChart } from "@/components/LineChart";
 import { HBarChart, KpiCard, VBarChart } from "@/components/charts";
+import { ymd } from "@/lib/dates";
+import { getDisplayTimezone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
-function dayKey(iso: string): string {
-  const d = new Date(iso.replace(" ", "T"));
-  return d.toISOString().slice(0, 10);
+function dayKey(iso: string, tz: string): string {
+  return ymd(new Date(iso.replace(" ", "T")), tz);
 }
 
 export default async function AnalyticsPage() {
   const [{ orders, source }, { machines }] = await Promise.all([getOrders(), getMachines()]);
+  const tz = await getDisplayTimezone();
   const completed = orders.filter((o) => o.order_state === "COMPLETE" && !o.is_admin_override);
   const totalRevenue = completed.reduce((s, o) => s + o.price, 0);
   const totalUnits = completed.reduce((s, o) => s + o.nums, 0);
@@ -21,13 +23,13 @@ export default async function AnalyticsPage() {
   const revenueByDay = new Map<string, number>();
   const unitsByDay = new Map<string, number>();
   for (const o of completed) {
-    const key = dayKey(o.order_time);
+    const key = dayKey(o.order_time, tz);
     revenueByDay.set(key, (revenueByDay.get(key) ?? 0) + o.price);
     unitsByDay.set(key, (unitsByDay.get(key) ?? 0) + o.nums);
   }
   const sortedDays = [...revenueByDay.keys()].sort();
-  const revenueTrend = sortedDays.map((d) => ({ label: new Date(d).toLocaleDateString("en", { day: "numeric", month: "short" }), value: Number((revenueByDay.get(d) ?? 0).toFixed(2)) }));
-  const unitsTrend = sortedDays.map((d) => ({ label: new Date(d).toLocaleDateString("en", { day: "numeric", month: "short" }), value: unitsByDay.get(d) ?? 0 }));
+  const revenueTrend = sortedDays.map((d) => ({ label: new Date(d).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: tz }), value: Number((revenueByDay.get(d) ?? 0).toFixed(2)) }));
+  const unitsTrend = sortedDays.map((d) => ({ label: new Date(d).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: tz }), value: unitsByDay.get(d) ?? 0 }));
 
   // Revenue by weekday (Monday=0 ... Sunday=6)
   const weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -35,7 +37,8 @@ export default async function AnalyticsPage() {
   const weekdayCount = [0, 0, 0, 0, 0, 0, 0];
   for (const o of completed) {
     const d = new Date(o.order_time.replace(" ", "T"));
-    const dow = (d.getDay() + 6) % 7;
+    const local = new Date(d.toLocaleString("en-US", { timeZone: tz }));
+    const dow = (local.getDay() + 6) % 7;
     weekdayRevenue[dow] += o.price;
     weekdayCount[dow]++;
   }
@@ -46,7 +49,8 @@ export default async function AnalyticsPage() {
   const hourlyCount = new Array(24).fill(0);
   for (const o of completed) {
     const d = new Date(o.order_time.replace(" ", "T"));
-    const h = d.getHours();
+    const local = new Date(d.toLocaleString("en-US", { timeZone: tz }));
+    const h = local.getHours();
     hourlyRevenue[h] += o.price;
     hourlyCount[h]++;
   }

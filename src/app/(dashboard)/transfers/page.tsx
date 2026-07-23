@@ -1,9 +1,12 @@
 import { getTransfers } from "@/lib/data/transfers";
+import { formatDate } from "@/lib/dates";
+import { getDisplayTimezone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
 export default async function TransfersPage() {
   const transfers = await getTransfers();
+  const tz = await getDisplayTimezone();
 
   return (
     <div>
@@ -30,7 +33,7 @@ export default async function TransfersPage() {
             {transfers.map((t) => (
               <tr key={t.id} className="hover:bg-cream/50">
                 <td className="px-5 py-3 font-semibold text-cocoa">{t.name}</td>
-                <td className="px-5 py-3 text-taupe">{new Date(t.date).toLocaleDateString()}</td>
+                <td className="px-5 py-3 text-taupe">{formatDate(t.date, tz)}</td>
                 <td className="px-5 py-3 text-cocoa">{t.machine_name ?? "—"}</td>
                 <td className="px-5 py-3 text-taupe">{t.from_tenant ?? "—"}</td>
                 <td className="px-5 py-3 text-cocoa">{t.to_tenant ?? "—"}</td>

@@ -1,10 +1,13 @@
 import { getTenants } from "@/lib/data/franchisees";
+import { formatDate } from "@/lib/dates";
+import { getDisplayTimezone } from "@/lib/timezone";
 import { TenantForm } from "./TenantForm";
 
 export const dynamic = "force-dynamic";
 
 export default async function FranchiseesPage() {
   const tenants = await getTenants();
+  const tz = await getDisplayTimezone();
 
   return (
     <div>
@@ -35,7 +38,7 @@ export default async function FranchiseesPage() {
                 <td className="px-5 py-3 font-semibold text-cocoa">{t.name}</td>
                 <td className="px-5 py-3 capitalize text-cocoa">{t.kind}</td>
                 <td className="px-5 py-3 text-taupe">
-                  {new Date(t.created_at).toLocaleDateString()}
+                  {formatDate(t.created_at, tz)}
                 </td>
               </tr>
             ))}

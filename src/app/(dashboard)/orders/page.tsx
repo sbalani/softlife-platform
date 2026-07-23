@@ -1,6 +1,8 @@
 import { getOrders } from "@/lib/data/orders";
 import { DataSourceNote } from "@/components/data-source-note";
 import { UpdateOrdersButton } from "./UpdateOrdersButton";
+import { formatDateTime } from "@/lib/dates";
+import { getDisplayTimezone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +41,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const machineRevenue = completed.filter((o) => !o.is_server_mode).reduce((s, o) => s + o.price, 0);
   const franchiseeOwed = completed.filter((o) => o.is_server_mode).reduce((s, o) => s + o.price, 0);
   const couponCount = orders.filter((o) => o.coupon_used).length;
+  const tz = await getDisplayTimezone();
   const refundedCount = orders.filter((o) => o.refund_status === "Refunded").length;
 
   return (
@@ -107,7 +110,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             {orders.map((o) => (
               <tr key={o.id} className="hover:bg-cream/50">
                 <td className="px-4 py-3 text-cocoa whitespace-nowrap text-xs">
-                  {o.order_time ? new Date(o.order_time.replace(" ", "T")).toLocaleString() : "—"}
+                  {o.order_time ? formatDateTime(o.order_time, tz) : "—"}
                 </td>
                 <td className="px-4 py-3 font-semibold text-cocoa whitespace-nowrap text-xs">{o.machine_name ?? o.device_imei ?? "—"}</td>
                 <td className="px-4 py-3 text-cocoa">

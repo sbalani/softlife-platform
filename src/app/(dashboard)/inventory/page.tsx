@@ -1,4 +1,6 @@
 import { getLots } from "@/lib/data/lots";
+import { formatDate } from "@/lib/dates";
+import { getDisplayTimezone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +12,7 @@ const TONE: Record<string, string> = {
 
 export default async function InventoryPage() {
   const lots = await getLots();
+  const tz = await getDisplayTimezone();
 
   return (
     <div>
@@ -43,7 +46,7 @@ export default async function InventoryPage() {
                 </td>
                 <td className="px-5 py-3 text-taupe">{l.tenant_name ?? "—"}</td>
                 <td className="px-5 py-3 text-taupe">
-                  {l.device_event_time ? new Date(l.device_event_time).toLocaleDateString() : "—"}
+                  {formatDate(l.device_event_time, tz)}
                 </td>
               </tr>
             ))}

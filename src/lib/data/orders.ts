@@ -134,20 +134,21 @@ async function getOrdersLive(): Promise<Order[]> {
   const devices = await listDevices(cfg);
   const began = ymd(new Date(Date.now() - 30 * 86_400_000)) + " 00:00:00";
   const end = ymd(new Date()) + " 23:59:59";
-  const out: Order[] = [];
-  for (const d of devices) {
-    if (!d.deviceImei) continue;
-    const machineName = (d.deviceLabel as string) || d.deviceName || d.deviceImei;
-    try {
-      const ords = await listAllOrders(cfg, d.deviceImei, began, end);
-      for (const o of ords) {
-        out.push(mapHuaxinOrder(o, machineName, d.deviceImei));
+
+  const results = await Promise.all(
+    devices.filter((d) => d.deviceImei).map(async (d) => {
+      const machineName = (d.deviceLabel as string) || d.deviceName || d.deviceImei!;
+      try {
+        const ords = await listAllOrders(cfg, d.deviceImei!, began, end);
+        return ords.map((o) => mapHuaxinOrder(o, machineName, d.deviceImei!));
+      } catch (e) {
+        console.error(`[orders] Failed for device ${d.deviceImei}:`, e);
+        return [];
       }
-    } catch (e) {
-      console.error(`[orders] Failed for device ${d.deviceImei}:`, e);
-    }
-  }
-  return out.sort((a, b) => +new Date(b.order_time) - +new Date(a.order_time));
+    }),
+  );
+
+  return results.flat().sort((a, b) => +new Date(b.order_time) - +new Date(a.order_time));
 }
 
 export async function getOrders(filters?: {

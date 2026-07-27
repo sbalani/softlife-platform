@@ -13,9 +13,12 @@ function dayKey(iso: string, tz: string): string {
 }
 
 export default async function AnalyticsPage() {
-  const [{ orders, source }, { machines }] = await Promise.all([getOrders(), getMachines()]);
-  const tz = await getDisplayTimezone();
-  const aliasMap = await getAliasMap();
+  const [{ orders, source }, { machines }, tz, aliasMap] = await Promise.all([
+    getOrders(),
+    getMachines(),
+    getDisplayTimezone(),
+    getAliasMap(),
+  ]);
   const completed = orders.filter((o) => o.order_state === "COMPLETE" && !o.is_admin_override);
   const totalRevenue = completed.reduce((s, o) => s + o.price, 0);
   const totalUnits = completed.reduce((s, o) => s + o.nums, 0);

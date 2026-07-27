@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 
 export type ProductAllergen = { id: string; name: string; slug: string; logo_url: string | null };
@@ -32,7 +33,7 @@ export type Product = {
   aliases: ProductAlias[];
 };
 
-export async function getProducts(): Promise<Product[]> {
+async function _getProducts(): Promise<Product[]> {
   if (!isSupabaseConfigured()) return [];
   try {
     const s = await createServiceClient();
@@ -80,29 +81,20 @@ export async function getProducts(): Promise<Product[]> {
   }
 }
 
+export const getProducts = cache(_getProducts);
+
 export type AliasMap = Map<string, { productId: string; productName: string }>;
 
-export async function getAliasMap(): Promise<AliasMap> {
-  if (!isSupabaseConfigured()) return new Map();
-  try {
-    const s = await createServiceClient();
-    const { data } = await s
-      .from("product_aliases")
-      .select("alias,product_id,products(name)");
-    const rows = (data as Record<string, unknown>[] | null) ?? [];
-    const map: AliasMap = new Map();
-    const prods = await getProducts();
-    const byId = new Map(prods.map((p) => [p.id, p.name]));
-    for (const r of rows) {
-      const prodsArr = r.products as { name: string }[] | undefined;
-      const name = prodsArr?.[0]?.name ?? byId.get(r.product_id as string) ?? (r.alias as string);
-      map.set((r.alias as string).toLowerCase().trim(), { productId: r.product_id as string, productName: name });
+export const getAliasMap = cache(async (): Promise<AliasMap> => {
+  const map: AliasMap = new Map();
+  const prods = await getProducts();
+  for (const p of prods) {
+    for (const a of p.aliases) {
+      map.set(a.alias.toLowerCase().trim(), { productId: p.id, productName: p.name });
     }
-    return map;
-  } catch {
-    return new Map();
   }
-}
+  return map;
+});
 
 export function resolveProductName(rawName: string, aliasMap: AliasMap): string {
   const resolved = aliasMap.get(rawName.toLowerCase().trim());

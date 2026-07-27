@@ -19,14 +19,13 @@ function isSameDay(iso: string, ref: Date, tz: string): boolean {
 }
 
 export default async function DashboardPage() {
-  const [{ orders, source: ordersSource }, { machines }, { alerts, source: alertsSource }] = await Promise.all([
+  const [{ orders, source: ordersSource }, { machines }, { alerts, source: alertsSource }, tz, aliasMap] = await Promise.all([
     getOrders(),
     getMachines(),
     getAlerts(),
+    getDisplayTimezone(),
+    getAliasMap(),
   ]);
-
-  const tz = await getDisplayTimezone();
-  const aliasMap = await getAliasMap();
   const completed = orders.filter((o) => o.order_state === "COMPLETE" && !o.is_admin_override);
   const totalSales = completed.reduce((s, o) => s + o.price, 0);
   const totalUnits = completed.reduce((s, o) => s + o.nums, 0);

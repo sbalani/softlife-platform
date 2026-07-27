@@ -37,17 +37,19 @@ export default async function MachineDetailPage({
   params: Promise<{ imei: string }>;
 }) {
   const { imei } = await params;
-  const tz = await getDisplayTimezone();
-  const config = await getMachineConfig(imei);
-  const tenants = await getTenants();
-  const telemetry = await getMachineDetail(imei);
-  const menu = await getMachineMenu(imei);
-  const status = await getMachineStatus(imei);
-  const media = await getMachineMedia(imei);
-  const lotHistory = await getMachineLotHistory(imei);
-  const ingredients = await getProducts();
+  const [tz, config, tenants, telemetry, menu, status, media, lotHistory, ingredients, { machines: allMachines }] = await Promise.all([
+    getDisplayTimezone(),
+    getMachineConfig(imei),
+    getTenants(),
+    getMachineDetail(imei),
+    getMachineMenu(imei),
+    getMachineStatus(imei),
+    getMachineMedia(imei),
+    getMachineLotHistory(imei),
+    getProducts(),
+    getMachines(),
+  ]);
   const baseProduct = config?.baseProductId ? ingredients.find((p) => p.id === config.baseProductId) ?? null : null;
-  const { machines: allMachines } = await getMachines();
   const otherMachines = allMachines.filter((m) => m.device_imei !== imei).map((m) => ({ id: m.id, name: m.name }));
   const pendingDraft = config?.machineId ? await getPendingMenuDraft(config.machineId) : null;
   const draftByPosition = new Map((pendingDraft?.items ?? []).map((it) => [it.position, it]));

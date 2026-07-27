@@ -284,10 +284,14 @@ export async function pushProductDiy(
   deviceImei: string,
   items: DiyPushItem[],
 ) {
-  return call("/machine/cloud/api/batch/motify/data", cfg, {
+  const body = {
     device_imei: deviceImei,
     data: { serialNum: String(Date.now()), type: "productDiy", deviceImei, data: items },
-  });
+  };
+  console.log("[huaxin] pushProductDiy:", JSON.stringify(body, null, 2));
+  const result = await call("/machine/cloud/api/batch/motify/data", cfg, body);
+  console.log("[huaxin] pushProductDiy response:", JSON.stringify(result));
+  return result;
 }
 
 export async function refreshProduct(cfg: HuaxinConfig, deviceImei: string) {

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getConfigFromEnv, editDeviceMedia, listDeviceProducts, pushDeviceSetting, pushProductDiy, refreshProduct, refreshResource, removeDeviceMedia, sendCommand, updateDeviceInfo } from "@/lib/huaxin/client";
+import type { DiyPushItem } from "@/lib/huaxin/client";
 import { generateAllergenComposite } from "@/lib/allergens/composite";
 
 export type SaveResult = { ok: boolean; error?: string };
@@ -365,9 +366,31 @@ export async function updateMachineProduct(
 ): Promise<ProductUpdateResult> {
   const cfg = getConfigFromEnv();
   if (!cfg) return { ok: false, error: "Huaxin not configured." };
-  const items = Object.entries(fields)
+  const items: DiyPushItem[] = Object.entries(fields)
     .filter(([, v]) => v.trim() !== "")
     .map(([code, value]) => ({ position: String(position), code, value }));
+
+  // Push per-language goodsName using the correct Huaxin format:
+  // { code: "language", value: { language: "es", code: "goodsName", value: "..." } }
+  if (options?.productId && isSupabaseConfigured()) {
+    try {
+      const s = await createServiceClient();
+      const { data: prod } = await s.from("products")
+        .select("name,name_translations").eq("id", options.productId).maybeSingle();
+      if (prod) {
+        const t = (prod as { name_translations?: Record<string, string> | null }).name_translations;
+        for (const [lang, name] of Object.entries(t ?? {})) {
+          if (name) {
+            items.push({
+              position: String(position),
+              code: "language",
+              value: { language: lang, code: "goodsName", value: name },
+            });
+          }
+        }
+      }
+    } catch { /* best-effort */ }
+  }
 
   if (!items.length) return { ok: false, error: "Nothing to update." };
   try {

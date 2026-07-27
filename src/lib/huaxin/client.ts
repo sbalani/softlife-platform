@@ -277,10 +277,12 @@ export async function listDeviceProducts(cfg: HuaxinConfig, deviceImei: string):
   };
 }
 
+export type DiyPushItem = { position: string; code: string; value: string | { language: string; code: string; value: string } };
+
 export async function pushProductDiy(
   cfg: HuaxinConfig,
   deviceImei: string,
-  items: { position: string; code: string; value: string }[],
+  items: DiyPushItem[],
 ) {
   return call("/machine/cloud/api/batch/motify/data", cfg, {
     device_imei: deviceImei,

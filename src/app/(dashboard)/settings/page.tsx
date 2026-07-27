@@ -2,6 +2,8 @@ import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server
 import { getConfigFromEnv } from "@/lib/huaxin/client";
 import { SyncButton } from "./SyncButton";
 import { TimezoneSelector } from "./TimezoneSelector";
+import { ApiKeyManager } from "./ApiKeyManager";
+import { listApiKeys } from "./api-key-actions";
 import { formatDateTime, tzAbbrev } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 
@@ -30,11 +32,12 @@ function Stat({ label, v }: { label: string; v: number | null }) {
 export default async function SettingsPage() {
   const cfg = getConfigFromEnv();
   const tz = await getDisplayTimezone();
-  const [machines, temps, orders, faults] = await Promise.all([
+  const [machines, temps, orders, faults, apiKeys] = await Promise.all([
     count("machines"),
     count("huaxin_temperatures"),
     count("huaxin_orders"),
     count("huaxin_faults"),
+    listApiKeys(),
   ]);
 
   let lastSync: string | null = null;
@@ -78,6 +81,15 @@ export default async function SettingsPage() {
           All dates and times across the dashboard are shown in this timezone. Currently {tzAbbrev(tz)}.
         </p>
         <TimezoneSelector current={tz} />
+      </section>
+
+      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+        <h2 className="font-display text-lg font-bold text-cocoa">MCP API keys</h2>
+        <p className="mt-1 mb-4 max-w-2xl text-sm text-taupe">
+          Generate per-user keys to connect ChatGPT, Claude, or other AI tools to your SoftLife data.
+          Endpoint: <code className="rounded bg-cream px-1 text-xs">https://awsfqnymosevmhawbukf.supabase.co/functions/v1/softlife-mcp?key=YOUR_KEY</code>
+        </p>
+        <ApiKeyManager keys={apiKeys} />
       </section>
 
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">

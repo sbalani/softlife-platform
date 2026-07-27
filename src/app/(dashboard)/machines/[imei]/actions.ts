@@ -369,25 +369,6 @@ export async function updateMachineProduct(
     .filter(([, v]) => v.trim() !== "")
     .map(([code, value]) => ({ position: String(position), code, value }));
 
-  // Attach languagePacks from the linked catalog product's translations
-  if (options?.productId && isSupabaseConfigured()) {
-    try {
-      const s = await createServiceClient();
-      const { data: prod } = await s.from("products")
-        .select("name,name_translations").eq("id", options.productId).maybeSingle();
-      if (prod) {
-        const t = (prod as { name_translations?: Record<string, string> | null }).name_translations;
-        const packs: { code: string; goodsName: string }[] = [];
-        for (const [code, name] of Object.entries(t ?? {})) {
-          if (name) packs.push({ code, goodsName: name });
-        }
-        if (packs.length) {
-          items.push({ position: String(position), code: "languagePacks", value: JSON.stringify(packs) });
-        }
-      }
-    } catch { /* best-effort — translations are nice-to-have on push */ }
-  }
-
   if (!items.length) return { ok: false, error: "Nothing to update." };
   try {
     const result = await pushProductDiy(cfg, imei, items);

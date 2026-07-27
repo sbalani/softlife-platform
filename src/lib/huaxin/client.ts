@@ -256,12 +256,14 @@ export type ProductDiyItem = {
 };
 
 export function localizedGoodsName(item: ProductDiyItem, lang = "es"): string {
-  const lp = item.languagePacks?.find((p) => p.code === lang);
+  const packs = Array.isArray(item.languagePacks) ? item.languagePacks : [];
+  const lp = packs.find((p) => p.code === lang);
   return lp?.goodsName || item.goodsName || "";
 }
 
 export function languagePackEntries(item: ProductDiyItem): { code: string; goodsName: string }[] {
-  return (item.languagePacks ?? [])
+  const packs = Array.isArray(item.languagePacks) ? item.languagePacks : [];
+  return packs
     .filter((p): p is { code: string; goodsName: string } => !!p.code && !!p.goodsName)
     .map((p) => ({ code: p.code, goodsName: p.goodsName }));
 }

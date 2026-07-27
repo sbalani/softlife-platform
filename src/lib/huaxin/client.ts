@@ -270,6 +270,7 @@ export function languagePackEntries(item: ProductDiyItem): { code: string; goods
 
 export async function listDeviceProducts(cfg: HuaxinConfig, deviceImei: string): Promise<{ diy: ProductDiyItem[]; unify: ProductDiyItem[] }> {
   const data = await call("/machine/cloud/api/device/product", cfg, { device_imei: deviceImei });
+  console.log(`[huaxin] listDeviceProducts ${deviceImei}:`, JSON.stringify(data, null, 2));
   const payload = data.data as { diy?: ProductDiyItem[]; unify?: ProductDiyItem[] } | null;
   return {
     diy: payload?.diy ?? [],

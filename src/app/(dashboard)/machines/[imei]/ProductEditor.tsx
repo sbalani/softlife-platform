@@ -91,15 +91,20 @@ export function ProductEditor({
 
   const push = () => {
     startTransition(async () => {
-      const res = await updateMachineProduct(imei, pos, buildFields(), {
+      const fields = buildFields();
+      console.log("[push] fields for position", pos, ":", JSON.stringify(fields, null, 2));
+      console.log("[push] productId:", selectedProductId, "machineId:", machineId);
+      const res = await updateMachineProduct(imei, pos, fields, {
         productId: selectedProductId,
         machineId,
       });
       if (res.ok) {
+        console.log("[push] success. Full Huaxin payload:", JSON.stringify(res.sentPayload, null, 2));
         setResult("Updated & synced.");
         setPushed(true);
         setEditing(false);
       } else {
+        console.log("[push] FAILED:", res.error, "Payload:", JSON.stringify(res.sentPayload, null, 2));
         setResult(res.error ?? "Failed");
       }
     });

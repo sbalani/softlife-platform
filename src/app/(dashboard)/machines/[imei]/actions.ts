@@ -355,7 +355,7 @@ export async function removeDeviceMediaAction(
   }
 }
 
-export type ProductUpdateResult = { ok: boolean; error?: string };
+export type ProductUpdateResult = { ok: boolean; error?: string; sentPayload?: unknown };
 export type BrandingResult = { ok: boolean; error?: string };
 
 export async function updateMachineProduct(
@@ -420,9 +420,9 @@ export async function updateMachineProduct(
         }
       }
 
-      return { ok: true };
+      return { ok: true, sentPayload: items };
     }
-    return { ok: false, error: result.msg ?? "Update rejected" };
+    return { ok: false, error: result.msg ?? "Update rejected", sentPayload: items };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

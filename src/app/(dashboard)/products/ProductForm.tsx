@@ -110,7 +110,7 @@ export function ProductForm({ allergens, product }: { allergens: Allergen[]; pro
           <Field labelText="Name — English (US)"><input name="name_US" defaultValue={product?.name_translations?.US ?? ""} placeholder="Oreo Crumb" className={`w-full ${input}`} /></Field>
           <Field labelText="Name — 中文 (CN)"><input name="name_CN" defaultValue={product?.name_translations?.CN ?? ""} placeholder="奥利奥碎" className={`w-full ${input}`} /></Field>
           <Field labelText="Name — ខ្មែរ (KH)"><input name="name_KH" defaultValue={product?.name_translations?.KH ?? ""} placeholder="" className={`w-full ${input}`} /></Field>
-          <Field labelText="Name — Français (FR)"><input name="name_FR" defaultValue={product?.name_translations?.FR ?? ""} placeholder="Crème" className={`w-full ${input}`} /></Field>
+          <Field labelText="Name — Français (fr)"><input name="name_fr" defaultValue={product?.name_translations?.fr ?? ""} placeholder="Crème" className={`w-full ${input}`} /></Field>
           <Field labelText="Brand"><input name="brand" defaultValue={ex?.brand ?? product?.brand ?? ""} placeholder="Brand" className={`w-full ${input}`} /></Field>
           <Field labelText="Type">
             <select name="type" defaultValue={ex?.type ?? product?.type ?? "topping"} className={`w-full ${input}`}>

@@ -31,7 +31,6 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
         display_name: String(fd.get("display_name") ?? "").trim() || null,
         nayax_id: String(fd.get("nayax_id") ?? "").trim() || null,
         last_full_clean_date: lastClean ? new Date(lastClean).toISOString() : null,
-        customer_id: String(fd.get("customer_id") ?? "") || null,
         payment_model: String(fd.get("payment_model") ?? "automatic"),
         location_override: String(fd.get("location_override") ?? "").trim() || null,
         // Address may have changed — clear the geocode cache marker so the
@@ -308,13 +307,22 @@ export async function sendMachineCommand(
     return { ok: false, error: "Command not allowed." };
   }
   const service = await createServiceClient();
-  let machineQuery = service.from("machines").select("id").eq("device_imei", imei);
+  const { data: machine } = await service.from("machines").select("id").eq("device_imei", imei).maybeSingle();
+  if (!machine) return { ok: false, error: "Machine not found or not assigned to you." };
   if (session.role === "franchisee") {
     if (!session.tenant_id) return { ok: false, error: "No franchisee account assigned." };
-    machineQuery = machineQuery.eq("customer_id", session.tenant_id);
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: assignment } = await service
+      .from("machine_franchisee_assignments")
+      .select("id")
+      .eq("machine_id", machine.id)
+      .eq("tenant_id", session.tenant_id)
+      .lte("start_date", today)
+      .or(`end_date.is.null,end_date.gte.${today}`)
+      .limit(1)
+      .maybeSingle();
+    if (!assignment) return { ok: false, error: "Machine not found or not assigned to you." };
   }
-  const { data: machine } = await machineQuery.maybeSingle();
-  if (!machine) return { ok: false, error: "Machine not found or not assigned to you." };
 
   const cfg = getConfigFromEnv();
   if (!cfg) return { ok: false, error: "Huaxin not configured." };

@@ -8,6 +8,7 @@ import { getTenants } from "@/lib/data/franchisees";
 import { getProducts } from "@/lib/data/products";
 import { getMachines } from "@/lib/data/machines";
 import { getPendingMenuDraft } from "@/lib/data/menu-drafts";
+import { getFranchiseeAssignments } from "@/lib/data/franchisee-profit";
 import { formatDateTime, formatDate } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { MachineConfigForm } from "./MachineConfigForm";
@@ -25,6 +26,7 @@ import { ComboEditor, type HopperIngredientOption } from "./ComboEditor";
 import { CopyMenuButton } from "./CopyMenuButton";
 import { DeviceSettingsPanel } from "./DeviceSettingsPanel";
 import { LogLotForm } from "./LogLotForm";
+import { FranchiseeAssignmentForm } from "./FranchiseeAssignmentForm";
 import { AreaChart } from "@/components/charts";
 import { MachineMap } from "@/components/maps";
 import { translateLocation } from "@/lib/i18n/huaxin";
@@ -52,6 +54,7 @@ export default async function MachineDetailPage({
   const baseProduct = config?.baseProductId ? ingredients.find((p) => p.id === config.baseProductId) ?? null : null;
   const otherMachines = allMachines.filter((m) => m.device_imei !== imei).map((m) => ({ id: m.id, name: m.name }));
   const pendingDraft = config?.machineId ? await getPendingMenuDraft(config.machineId) : null;
+  const franchiseeAssignments = config?.machineId ? await getFranchiseeAssignments(config.machineId) : [];
   const draftByPosition = new Map((pendingDraft?.items ?? []).map((it) => [it.position, it]));
 
   // Map Huaxin lane numbers to config positions for ingredient linking
@@ -123,7 +126,13 @@ export default async function MachineDetailPage({
         <h2 className="mb-4 font-display text-lg font-bold text-cocoa">Configuration &amp; control</h2>
         {config ? (
           <>
-            <MachineConfigForm config={config} imei={imei} tenants={tenants} />
+            <MachineConfigForm config={config} imei={imei} />
+            {config.machineId && (
+              <div className="mt-5 border-t border-line pt-4">
+                <h3 className="mb-3 text-[11px] uppercase tracking-wide text-taupe">Franchisee assignment &amp; profit share</h3>
+                <FranchiseeAssignmentForm machineId={config.machineId} imei={imei} tenants={tenants} assignments={franchiseeAssignments} />
+              </div>
+            )}
             <div className="mt-5 space-y-4 border-t border-line pt-4">
               <MachinePushButton imei={imei} />
               <div>

@@ -14,16 +14,28 @@ export async function getAccessibleMachines(): Promise<AccessibleMachine[]> {
   if (!session || session.role === "operator") return [];
 
   const service = await createServiceClient();
+  let assignedMachineIds: string[] | null = null;
+  if (session.role === "franchisee") {
+    if (!session.tenant_id) return [];
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: assignments, error } = await service
+      .from("machine_franchisee_assignments")
+      .select("machine_id")
+      .eq("tenant_id", session.tenant_id)
+      .lte("start_date", today)
+      .or(`end_date.is.null,end_date.gte.${today}`);
+    if (error) return [];
+    assignedMachineIds = [...new Set(((assignments as { machine_id: string }[]) ?? []).map((row) => row.machine_id))];
+    if (!assignedMachineIds.length) return [];
+  }
+
   let query = service
     .from("machines")
     .select("id,name,display_name,device_imei,is_online")
     .not("device_imei", "is", null)
     .order("display_name", { ascending: true, nullsFirst: false });
 
-  if (session.role === "franchisee") {
-    if (!session.tenant_id) return [];
-    query = query.eq("customer_id", session.tenant_id);
-  }
+  if (assignedMachineIds) query = query.in("id", assignedMachineIds);
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);

@@ -6,6 +6,8 @@ import { ApiKeyManager } from "./ApiKeyManager";
 import { listApiKeys } from "./api-key-actions";
 import { formatDateTime, tzAbbrev } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
+import { getVatRates } from "@/lib/data/franchisee-profit";
+import { VatRateManager } from "./VatRateManager";
 
 export const dynamic = "force-dynamic";
 
@@ -32,12 +34,13 @@ function Stat({ label, v }: { label: string; v: number | null }) {
 export default async function SettingsPage() {
   const cfg = getConfigFromEnv();
   const tz = await getDisplayTimezone();
-  const [machines, temps, orders, faults, apiKeys] = await Promise.all([
+  const [machines, temps, orders, faults, apiKeys, vatRates] = await Promise.all([
     count("machines"),
     count("huaxin_temperatures"),
     count("huaxin_orders"),
     count("huaxin_faults"),
     listApiKeys(),
+    getVatRates(),
   ]);
 
   let lastSync: string | null = null;
@@ -81,6 +84,12 @@ export default async function SettingsPage() {
           All dates and times across the dashboard are shown in this timezone. Currently {tzAbbrev(tz)}.
         </p>
         <TimezoneSelector current={tz} />
+      </section>
+
+      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+        <h2 className="font-display text-lg font-bold text-cocoa">VAT schedule</h2>
+        <p className="mt-1 mb-4 max-w-2xl text-sm text-taupe">VAT is removed from VAT-inclusive sales before calculating franchisee profit share.</p>
+        <VatRateManager rates={vatRates} />
       </section>
 
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">

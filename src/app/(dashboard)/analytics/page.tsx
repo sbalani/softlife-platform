@@ -5,6 +5,8 @@ import { HBarChart, KpiCard, VBarChart } from "@/components/charts";
 import { ymd } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { getAliasMap, resolveProductName } from "@/lib/data/products";
+import { getSessionProfile } from "@/lib/auth/session";
+import { calculateFranchiseePayouts } from "@/lib/data/franchisee-profit";
 
 export const dynamic = "force-dynamic";
 
@@ -13,16 +15,22 @@ function dayKey(iso: string, tz: string): string {
 }
 
 export default async function AnalyticsPage() {
-  const [{ orders, source }, { machines }, tz, aliasMap] = await Promise.all([
+  const [{ orders, source }, { machines }, tz, aliasMap, session] = await Promise.all([
     getOrders(),
     getMachines(),
     getDisplayTimezone(),
     getAliasMap(),
+    getSessionProfile(),
   ]);
   const completed = orders.filter((o) => o.order_state === "COMPLETE" && !o.is_admin_override);
   const totalRevenue = completed.reduce((s, o) => s + o.price, 0);
   const totalUnits = completed.reduce((s, o) => s + o.nums, 0);
   const avgOrderValue = completed.length ? totalRevenue / completed.length : 0;
+  const payoutRows = session?.role === "admin" ? await calculateFranchiseePayouts(completed) : [];
+  const payoutGroups = [...new Set(payoutRows.map((row) => row.tenantId))].map((tenantId) => {
+    const rows = payoutRows.filter((row) => row.tenantId === tenantId);
+    return { tenantId, tenantName: rows[0]?.tenantName ?? "Franchisee", rows, payout: rows.reduce((sum, row) => sum + row.payout, 0) };
+  });
 
   // Revenue per day (all available days)
   const revenueByDay = new Map<string, number>();
@@ -114,6 +122,30 @@ export default async function AnalyticsPage() {
         <KpiCard label="Units sold" value={`${totalUnits}`} hint="total dispenses" accent="#d47e54" />
         <KpiCard label="Machines active" value={`${machines.filter((m) => m.net_online).length}`} hint={`of ${machines.length} total`} accent="#6fa98c" />
       </div>
+
+      {session?.role === "admin" && (
+        <section className="mt-6 rounded-2xl border border-line bg-white p-5">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h2 className="font-display text-lg font-bold text-cocoa">Franchisee profit share</h2>
+              <p className="text-xs text-taupe">Internal payout estimate. VAT is removed first, then the assignment share is applied.</p>
+            </div>
+            <div className="font-display text-2xl font-bold text-terracotta">€{payoutGroups.reduce((sum, group) => sum + group.payout, 0).toFixed(2)}</div>
+          </div>
+          {payoutGroups.length ? (
+            <div className="space-y-5">
+              {payoutGroups.map((group) => (
+                <div key={group.tenantId} className="rounded-xl border border-line p-4">
+                  <div className="mb-3 flex items-center justify-between"><h3 className="font-bold text-cocoa">{group.tenantName}</h3><span className="font-bold text-sage">Payout €{group.payout.toFixed(2)}</span></div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[760px] text-xs"><thead className="text-left uppercase text-taupe"><tr><th className="py-2">Machine</th><th>Period</th><th className="text-right">Share</th><th className="text-right">Orders</th><th className="text-right">Gross</th><th className="text-right">VAT</th><th className="text-right">Net</th><th className="text-right">Payout</th></tr></thead><tbody className="divide-y divide-line">{group.rows.map((row) => <tr key={row.assignmentId}><td className="py-2 font-semibold text-cocoa">{row.machineName}</td><td>{row.period}</td><td className="text-right">{row.sharePercent}%</td><td className="text-right">{row.orders}</td><td className="text-right">€{row.gross.toFixed(2)}</td><td className="text-right">€{row.vat.toFixed(2)}</td><td className="text-right">€{row.net.toFixed(2)}</td><td className="text-right font-bold text-sage">€{row.payout.toFixed(2)}</td></tr>)}</tbody></table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : <p className="text-sm text-taupe">No completed sales fall within a franchisee assignment period.</p>}
+        </section>
+      )}
 
       {/* Revenue trend */}
       <section className="mt-6 rounded-2xl border border-line bg-white p-5">

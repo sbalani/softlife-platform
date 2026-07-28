@@ -1,10 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getSessionProfile, type SessionProfile } from "@/lib/auth/session";
 
-export type UserResult = { ok: boolean; error?: string };
+export type UserResult = { ok: boolean; error?: string; message?: string };
 
 async function requireAdmin(): Promise<{ session: SessionProfile | null; denied: UserResult | null }> {
   const session = await getSessionProfile();
@@ -21,23 +22,30 @@ export async function createUser(_prev: UserResult | null, fd: FormData): Promis
 
   const email = String(fd.get("email") ?? "").trim();
   const password = String(fd.get("password") ?? "");
+  const creationMode = String(fd.get("creation_mode") ?? "password");
   const fullName = String(fd.get("full_name") ?? "").trim() || null;
   const role = String(fd.get("role") ?? "operator") === "admin" ? "admin" : "operator";
 
   if (!email) return { ok: false, error: "Email is required." };
-  if (password.length < 8) return { ok: false, error: "Password must be at least 8 characters." };
+  if (creationMode === "password" && password.length < 8) {
+    return { ok: false, error: "Password must be at least 8 characters." };
+  }
 
   try {
     const s = await createServiceClient();
-    const { error } = await s.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { full_name: fullName, role },
-    });
+    const metadata = { full_name: fullName, role };
+    const requestHeaders = await headers();
+    const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
+    const origin = requestHeaders.get("origin") ?? `${requestHeaders.get("x-forwarded-proto") ?? "https"}://${host}`;
+    const { error } = creationMode === "invite"
+      ? await s.auth.admin.inviteUserByEmail(email, {
+          data: metadata,
+          redirectTo: `${origin}/auth/callback?next=/set-password`,
+        })
+      : await s.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: metadata });
     if (error) return { ok: false, error: error.message };
     revalidatePath("/users");
-    return { ok: true };
+    return { ok: true, message: creationMode === "invite" ? "Invitation sent." : "User created." };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

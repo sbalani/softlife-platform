@@ -25,7 +25,7 @@ const num = (v: FormDataEntryValue | null) => {
 
 function buildTranslations(fd: FormData): Record<string, string> | null {
   const out: Record<string, string> = {};
-  for (const field of ["name_es", "name_US", "name_CN", "name_KH"]) {
+  for (const field of ["name_es", "name_US", "name_CN", "name_KH", "name_FR"]) {
     const v = str(fd.get(field));
     if (v) out[field.replace("name_", "")] = v;
   }

@@ -1,5 +1,6 @@
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import type { Order } from "./orders";
+import { ymd } from "@/lib/dates";
 
 export type FranchiseeAssignment = {
   id: string;
@@ -85,7 +86,9 @@ export async function calculateFranchiseePayouts(orders: Order[]): Promise<Payou
 
   for (const order of orders) {
     if (order.order_state !== "COMPLETE" || order.is_admin_override || !order.device_imei) continue;
-    const orderDate = order.order_time.slice(0, 10);
+    const rawTimestamp = order.create_time_utc ?? order.order_time;
+    const parsedTimestamp = new Date(rawTimestamp.includes("T") ? rawTimestamp : rawTimestamp.replace(" ", "T"));
+    const orderDate = Number.isNaN(parsedTimestamp.getTime()) ? order.order_time.slice(0, 10) : ymd(parsedTimestamp, "Europe/Madrid");
     const assignment = assignments
       .filter((a) => a.device_imei === order.device_imei && a.start_date <= orderDate && (!a.end_date || a.end_date >= orderDate))
       .sort((a, b) => b.start_date.localeCompare(a.start_date))[0];

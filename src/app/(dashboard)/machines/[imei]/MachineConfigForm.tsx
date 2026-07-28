@@ -4,9 +4,8 @@ import { useState } from "react";
 import { useActionState } from "react";
 import { saveMachineConfig, type SaveResult } from "./actions";
 import type { MachineConfig } from "@/lib/data/machine-config";
-import type { Tenant } from "@/lib/data/franchisees";
 
-export function MachineConfigForm({ config, imei, tenants }: { config: MachineConfig; imei: string; tenants: Tenant[] }) {
+export function MachineConfigForm({ config, imei }: { config: MachineConfig; imei: string }) {
   const [profile, setProfile] = useState(config.profile ?? "");
   const [res, action, pending] = useActionState<SaveResult | null, FormData>(saveMachineConfig, null);
 
@@ -46,15 +45,6 @@ export function MachineConfigForm({ config, imei, tenants }: { config: MachineCo
         <label className="block">
           <span className={labelClass}>Nayax terminal ID</span>
           <input type="text" name="nayax_id" defaultValue={config.nayaxId ?? ""} placeholder="e.g. 123456" className={selectClass} />
-        </label>
-        <label className="block">
-          <span className={labelClass}>Franchisee / customer</span>
-          <select name="customer_id" defaultValue={config.customerId ?? ""} className={selectClass}>
-            <option value="">— Unassigned —</option>
-            {tenants.map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </select>
         </label>
         <label className="block">
           <span className={labelClass}>Location (override)</span>

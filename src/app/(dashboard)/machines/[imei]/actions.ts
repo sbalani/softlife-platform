@@ -5,6 +5,7 @@ import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server
 import { getConfigFromEnv, editDeviceMedia, listDeviceProducts, pushDeviceSetting, pushProductDiy, refreshProduct, refreshResource, removeDeviceMedia, sendCommand, updateDeviceInfo } from "@/lib/huaxin/client";
 import type { DiyPushItem } from "@/lib/huaxin/client";
 import { generateAllergenComposite } from "@/lib/allergens/composite";
+import { getSessionProfile } from "@/lib/auth/session";
 
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
@@ -293,6 +294,28 @@ export async function sendMachineCommand(
   imei: string,
   command: string,
 ): Promise<{ ok: boolean; error?: string; huaxinCode?: string; huaxinMsg?: string }> {
+  const remoteCommands = new Set([
+    "operate_make",
+    "operate_onsale",
+    "operate_sellout",
+    "operate_openrefrigeration",
+    "operate_closerefrigeration",
+  ]);
+  const session = await getSessionProfile();
+  if (!session || session.role === "operator") return { ok: false, error: "Access denied." };
+  const adminCommands = new Set([...remoteCommands, "operate_clearwarn", "operate_status"]);
+  if (!(session.role === "admin" ? adminCommands : remoteCommands).has(command)) {
+    return { ok: false, error: "Command not allowed." };
+  }
+  const service = await createServiceClient();
+  let machineQuery = service.from("machines").select("id").eq("device_imei", imei);
+  if (session.role === "franchisee") {
+    if (!session.tenant_id) return { ok: false, error: "No franchisee account assigned." };
+    machineQuery = machineQuery.eq("customer_id", session.tenant_id);
+  }
+  const { data: machine } = await machineQuery.maybeSingle();
+  if (!machine) return { ok: false, error: "Machine not found or not assigned to you." };
+
   const cfg = getConfigFromEnv();
   if (!cfg) return { ok: false, error: "Huaxin not configured." };
   try {

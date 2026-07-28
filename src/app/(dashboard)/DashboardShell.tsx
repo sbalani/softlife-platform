@@ -4,7 +4,11 @@ import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { SignOutButton } from "./SignOutButton";
 
-const NAV: { label: string; href?: string; soon?: boolean; adminOnly?: boolean; icon: ReactNode }[] = [
+type Role = "admin" | "operator" | "franchisee";
+// Other franchisee pages stay hidden until their server data loaders are tenant-scoped.
+const FRANCHISEE_NAV = new Set(["/remote-control"]);
+
+const NAV: { label: string; href?: string; soon?: boolean; adminOnly?: boolean; mobileOnly?: boolean; icon: ReactNode }[] = [
   { label: "Dashboard", href: "/dashboard", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM14 8h6V4h-6zM4 20h6v-3H4z"/></svg> },
   { label: "Machines", href: "/machines", icon: <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M9 16h6"/></svg> },
   { label: "Refills", href: "/refills", icon: <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.8"><path d="M12 2v13M8 6l4-4 4 4"/><path d="M4 14a8 8 0 0016 0"/></svg> },
@@ -12,6 +16,7 @@ const NAV: { label: string; href?: string; soon?: boolean; adminOnly?: boolean; 
   { label: "Analytics", href: "/analytics", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg> },
   { label: "Alerts", href: "/alerts", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 3l9 16H3z"/><path d="M12 10v4"/></svg> },
   { label: "Temperatures", href: "/temperatures", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M14 14V5a2 2 0 10-4 0v9a4 4 0 104 0z"/></svg> },
+  { label: "Remote control", href: "/remote-control", mobileOnly: true, icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M8 5a7 7 0 108 0"/><path d="M12 2v8"/></svg> },
   { label: "Ingredients", href: "/products", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/></svg> },
   { label: "Allergens", href: "/allergens", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 2L2 22h20L12 2z"/><path d="M12 9v5"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg> },
   { label: "Inventory", href: "/inventory", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 7h16v13H4z"/><path d="M9 7V4h6v3"/></svg> },
@@ -25,7 +30,7 @@ const NAV: { label: string; href?: string; soon?: boolean; adminOnly?: boolean; 
   { label: "Settings", href: "/settings", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 00-1.7-1L14.5 2h-5l-.3 2.5a7 7 0 00-1.7 1l-2.4-1-2 3.4 2 1.6a7 7 0 000 2l-2 1.6 2 3.4 2.4-1a7 7 0 001.7 1l.3 2.5h5l.3-2.5a7 7 0 001.7-1l2.4 1 2-3.4-2-1.6a7 7 0 00.1-1z"/></svg> },
 ];
 
-type Profile = { role: "admin" | "operator"; email: string | null; fullName: string | null };
+type Profile = { role: Role; email: string | null; fullName: string | null };
 
 function TopBar({ onMenuClick, profile }: { onMenuClick: () => void; profile: Profile }) {
   const displayName = profile.fullName || profile.email || "Signed in";
@@ -62,8 +67,9 @@ function TopBar({ onMenuClick, profile }: { onMenuClick: () => void; profile: Pr
   );
 }
 
-function SidebarContent({ onNavigate, role }: { onNavigate: () => void; role: "admin" | "operator" }) {
-  const visibleNav = role === "admin" ? NAV : NAV.filter((item) => item.href === "/refills");
+function SidebarContent({ onNavigate, role, mobile }: { onNavigate: () => void; role: Role; mobile: boolean }) {
+  const roleNav = role === "admin" ? NAV : role === "franchisee" ? NAV.filter((item) => item.href && FRANCHISEE_NAV.has(item.href)) : NAV.filter((item) => item.href === "/refills");
+  const visibleNav = roleNav.filter((item) => mobile || !item.mobileOnly);
   return (
     <>
       <div className="flex items-center gap-3 px-6 py-5">
@@ -115,7 +121,7 @@ export function DashboardShell({ children, profile }: { children: ReactNode; pro
     <div className="flex min-h-screen">
       {/* Desktop sidebar */}
       <aside className="hidden w-64 shrink-0 flex-col border-r border-line bg-sand/60 md:flex">
-        <SidebarContent onNavigate={() => {}} role={profile.role} />
+        <SidebarContent onNavigate={() => {}} role={profile.role} mobile={false} />
       </aside>
 
       {/* Mobile drawer */}
@@ -127,7 +133,7 @@ export function DashboardShell({ children, profile }: { children: ReactNode; pro
             aria-hidden="true"
           />
           <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[80vw] flex-col bg-sand shadow-xl">
-            <SidebarContent onNavigate={() => setNavOpen(false)} role={profile.role} />
+            <SidebarContent onNavigate={() => setNavOpen(false)} role={profile.role} mobile />
           </aside>
         </div>
       )}

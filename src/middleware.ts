@@ -48,10 +48,13 @@ export async function middleware(request: NextRequest) {
 
   if (user && !isPublicPath(path)) {
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-    const isAdmin = profile?.role === "admin";
-    if (!isAdmin && !path.startsWith("/refills")) {
+    const role = profile?.role;
+    // Expand only after each page's service-role queries are tenant-scoped.
+    const franchiseePaths = ["/remote-control"];
+    const allowed = role === "admin" || (role === "operator" && path.startsWith("/refills")) || (role === "franchisee" && franchiseePaths.some((prefix) => path.startsWith(prefix)));
+    if (!allowed) {
       const url = request.nextUrl.clone();
-      url.pathname = "/refills";
+      url.pathname = role === "franchisee" ? "/remote-control" : "/refills";
       url.search = "";
       return NextResponse.redirect(url);
     }

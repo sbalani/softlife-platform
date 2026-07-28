@@ -167,9 +167,13 @@ export default async function AnalyticsPage() {
         {/* Revenue by hour */}
         <section className="rounded-2xl border border-line bg-white p-5">
           <h2 className="mb-1 font-display text-lg font-bold text-cocoa">Revenue by hour</h2>
-          <p className="mb-3 text-xs text-taupe">Peak sales hours</p>
+          <p className="mb-3 text-xs text-taupe">Peak sales hours · scroll horizontally to see all hours</p>
           {hourData.length > 0 ? (
-            <VBarChart data={hourData} color="#6fa98c" formatValue={(v) => `€${v.toFixed(0)}`} />
+            <div className="overflow-x-auto pb-2">
+              <div style={{ minWidth: Math.max(560, hourData.length * 64) }}>
+                <VBarChart data={hourData} color="#6fa98c" formatValue={(v) => `€${v.toFixed(0)}`} />
+              </div>
+            </div>
           ) : <p className="flex h-52 items-center justify-center text-sm text-taupe">No data.</p>}
         </section>
       </div>

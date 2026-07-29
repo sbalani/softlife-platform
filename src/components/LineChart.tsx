@@ -30,13 +30,14 @@ export function LineChart({
   const chartW = W - padL - padR;
   const chartH = H - padT - padB;
 
-  const max = Math.max(...data.map((d) => d.value), 1);
-  const niceMax = Math.ceil(max * 1.15) || 1;
+  const min = Math.min(0, Math.floor(Math.min(...data.map((d) => d.value))));
+  const max = Math.max(0, Math.ceil(Math.max(...data.map((d) => d.value)) * 1.15));
+  const range = Math.max(max - min, 1);
   const step = chartW / Math.max(data.length - 1, 1);
 
   const pts = data.map((d, i) => ({
     x: padL + i * step,
-    y: padT + chartH - (d.value / niceMax) * chartH,
+    y: padT + chartH - ((d.value - min) / range) * chartH,
     label: d.label,
     value: d.value,
   }));
@@ -46,7 +47,7 @@ export function LineChart({
 
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => ({
     y: padT + chartH - f * chartH,
-    val: f * niceMax,
+    val: min + f * range,
   }));
 
   const xStride = Math.ceil(data.length / 8);
@@ -65,7 +66,7 @@ export function LineChart({
           <g key={i}>
             <line x1={padL} y1={t.y} x2={W - padR} y2={t.y} stroke="#e6e0da" strokeWidth={1} />
             <text x={padL - 6} y={t.y + 3} textAnchor="end" fontSize={10} fill="#927c6c">
-              {unit === "€" ? `€${t.val.toFixed(0)}` : t.val.toFixed(0)}
+              {unit === "€" ? `€${t.val.toFixed(0)}` : `${t.val.toFixed(0)}${unit}`}
             </text>
           </g>
         ))}

@@ -27,7 +27,6 @@ import { CopyMenuButton } from "./CopyMenuButton";
 import { DeviceSettingsPanel } from "./DeviceSettingsPanel";
 import { LogLotForm } from "./LogLotForm";
 import { FranchiseeAssignmentForm } from "./FranchiseeAssignmentForm";
-import { AreaChart } from "@/components/charts";
 import { LineChart } from "@/components/LineChart";
 import { MachineMap } from "@/components/maps";
 import { translateLocation } from "@/lib/i18n/huaxin";
@@ -36,15 +35,31 @@ export const dynamic = "force-dynamic";
 
 export default async function MachineDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ imei: string }>;
+  searchParams: Promise<{ dateFrom?: string; dateTo?: string }>;
 }) {
-  const { imei } = await params;
-  const [tz, config, tenants, telemetry, menu, status, media, lotHistory, ingredients, { machines: allMachines }] = await Promise.all([
-    getDisplayTimezone(),
+  const [{ imei }, sp, tz] = await Promise.all([params, searchParams, getDisplayTimezone()]);
+  const today = new Date();
+  const defaultTo = ymd(today, tz);
+  const defaultFrom = ymd(new Date(today.getTime() - 6 * 86_400_000), tz);
+  const validDate = (value?: string) => {
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const parsed = new Date(`${value}T00:00:00Z`);
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  };
+  let dateFrom = validDate(sp.dateFrom) ? sp.dateFrom! : defaultFrom;
+  const dateTo = validDate(sp.dateTo) && sp.dateTo! <= defaultTo ? sp.dateTo! : defaultTo;
+  if (dateFrom > dateTo) {
+    dateFrom = ymd(new Date(Date.parse(`${dateTo}T00:00:00Z`) - 6 * 86_400_000), "UTC");
+  } else if (Date.parse(`${dateTo}T00:00:00Z`) - Date.parse(`${dateFrom}T00:00:00Z`) > 365 * 86_400_000) {
+    dateFrom = ymd(new Date(Date.parse(`${dateTo}T00:00:00Z`) - 365 * 86_400_000), "UTC");
+  }
+  const [config, tenants, telemetry, menu, status, media, lotHistory, ingredients, { machines: allMachines }] = await Promise.all([
     getMachineConfig(imei),
     getTenants(),
-    getMachineDetail(imei),
+    getMachineDetail(imei, { from: dateFrom, to: dateTo }),
     getMachineMenu(imei),
     getMachineStatus(imei),
     getMachineMedia(imei),
@@ -99,11 +114,13 @@ export default async function MachineDetailPage({
       salesByDay.set(day, (salesByDay.get(day) ?? 0) + order.price);
     }
   }
-  const today = new Date();
-  const salesData = Array.from({ length: 7 }, (_, i) => {
-    const day = ymd(new Date(today.getTime() - (6 - i) * 86_400_000), tz);
+  const dayCount = Math.round((Date.parse(`${dateTo}T00:00:00Z`) - Date.parse(`${dateFrom}T00:00:00Z`)) / 86_400_000) + 1;
+  const salesData = Array.from({ length: dayCount }, (_, i) => {
+    const day = new Date(Date.parse(`${dateFrom}T00:00:00Z`) + i * 86_400_000).toISOString().slice(0, 10);
     return { label: day.slice(5), value: salesByDay.get(day) ?? 0 };
   });
+  const completedSales = (telemetry?.orders ?? []).filter((order) => order.order_state === "COMPLETE" && !order.is_admin_override);
+  const salesRevenue = completedSales.reduce((sum, order) => sum + order.price, 0);
 
   return (
     <div>
@@ -345,7 +362,7 @@ export default async function MachineDetailPage({
         </div>
         {telemetry && telemetry.temperatures.length ? (
           <div className="mt-3">
-            <AreaChart data={telemetry.temperatures.map((t) => ({ label: t.time ?? "", value: t.value }))} />
+            <LineChart data={telemetry.temperatures.map((t) => ({ label: t.time ?? "", value: t.value }))} color="#6fa98c" height={180} unit="°C" />
           </div>
         ) : (
           <p className="mt-3 text-sm text-taupe">No temperature readings in the last 24 hours.</p>
@@ -353,14 +370,22 @@ export default async function MachineDetailPage({
       </section>
 
       {/* Orders */}
-      <section className="rounded-2xl border border-line bg-white p-5">
-        <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Recent orders</h2>
+      <section id="sales" className="scroll-mt-4 rounded-2xl border border-line bg-white p-5">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div><h2 className="font-display text-lg font-bold text-cocoa">Sales &amp; orders</h2><p className="mt-1 text-xs text-taupe">{completedSales.length} completed sales · €{salesRevenue.toFixed(2)}</p></div>
+          <form action={`/machines/${imei}#sales`} className="flex flex-wrap items-end gap-2">
+            <label><span className="mb-1 block text-[10px] uppercase text-taupe">From</span><input type="date" name="dateFrom" defaultValue={dateFrom} max={dateTo} className="rounded-lg border border-line px-2 py-1.5 text-sm text-cocoa" /></label>
+            <label><span className="mb-1 block text-[10px] uppercase text-taupe">To</span><input type="date" name="dateTo" defaultValue={dateTo} min={dateFrom} max={defaultTo} className="rounded-lg border border-line px-2 py-1.5 text-sm text-cocoa" /></label>
+            <button className="rounded-lg bg-cocoa px-3 py-2 text-xs font-bold text-white">Apply</button>
+          </form>
+        </div>
+        <div className="mb-5 overflow-x-auto border-b border-line pb-5">
+          <div style={{ minWidth: Math.max(600, salesData.length * 32) }}>
+            <LineChart data={salesData} height={200} />
+          </div>
+        </div>
+        <h3 className="mb-2 text-[11px] uppercase tracking-wide text-taupe">Latest 20 orders in selected range</h3>
         {telemetry && telemetry.orders.length ? (
-          <>
-            <div className="mb-5 border-b border-line pb-5">
-              <p className="mb-2 text-xs text-taupe">Completed sales · last 7 days</p>
-              <LineChart data={salesData} height={180} />
-            </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[560px] text-sm">
                 <thead className="text-left text-[11px] uppercase tracking-wide text-taupe">
@@ -379,9 +404,8 @@ export default async function MachineDetailPage({
                 </tbody>
               </table>
             </div>
-          </>
         ) : (
-          <p className="text-sm text-taupe">No orders in the last 7 days.</p>
+          <p className="text-sm text-taupe">No orders in the selected date range.</p>
         )}
       </section>
     </div>

@@ -8,6 +8,7 @@ import {
   listAllOrders,
   pullTemperatures,
 } from "@/lib/huaxin/client";
+import { isAdminOverride } from "@/lib/i18n/huaxin";
 
 export type DetailTemp = { time: string; value: number };
 export type DetailOrder = {
@@ -16,6 +17,7 @@ export type DetailOrder = {
   order_state: string;
   price: number;
   product_name: string;
+  is_admin_override: boolean;
 };
 export type MachineDetail = {
   name: string;
@@ -80,6 +82,7 @@ export async function getMachineDetail(imei: string): Promise<MachineDetail | nu
       order_state: STATE[String(o.status)] ?? String(o.status ?? ""),
       price: Number(o.price ?? 0),
       product_name: o.products?.[0]?.goodsName ?? o.goodsName ?? "",
+      is_admin_override: isAdminOverride(o.payType ?? null),
     }));
   } catch {
     /* non-fatal */

@@ -3,6 +3,7 @@ import { getConfigFromEnv, listDevices, listAllOrders, type HuaxinOrder } from "
 import { translatePayType, isServerModeOrder, isAdminOverride } from "@/lib/i18n/huaxin";
 import { huaxinLocalTimeToUtc, huaxinOrderTime } from "@/lib/huaxin/order-time";
 import type { Source } from "./machines";
+import { ymd as localYmd } from "@/lib/dates";
 
 export type OrderProduct = { goodsName: string; price: string; position: number };
 
@@ -45,6 +46,10 @@ const REFUND_MAP: Record<string, string> = { "0": "None", "1": "Refunded" };
 
 function ymd(d: Date) {
   return d.toISOString().slice(0, 10);
+}
+
+function shiftDay(value: string, days: number): string {
+  return new Date(Date.parse(`${value}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 }
 
 function mapHuaxinOrder(o: HuaxinOrder, machineName: string, deviceImei: string): Order {
@@ -130,12 +135,13 @@ function orderFromSupabaseRow(row: Record<string, unknown>): Order {
   };
 }
 
-async function getOrdersLive(): Promise<Order[]> {
+async function getOrdersLive(range?: { from: string; to: string; timeZone: string }): Promise<{ orders: Order[]; failedMachines: string[] }> {
   const cfg = getConfigFromEnv();
-  if (!cfg) return [];
+  if (!cfg) return { orders: [], failedMachines: [] };
   const devices = await listDevices(cfg);
-  const began = ymd(new Date(Date.now() - 30 * 86_400_000)) + " 00:00:00";
-  const end = ymd(new Date()) + " 23:59:59";
+  const began = `${range ? shiftDay(range.from, -1) : ymd(new Date(Date.now() - 30 * 86_400_000))} 00:00:00`;
+  const end = `${range ? shiftDay(range.to, 1) : ymd(new Date())} 23:59:59`;
+  const failedMachines: string[] = [];
 
   const results = await Promise.all(
     devices.filter((d) => d.deviceImei).map(async (d) => {
@@ -145,12 +151,18 @@ async function getOrdersLive(): Promise<Order[]> {
         return ords.map((o) => mapHuaxinOrder(o, machineName, d.deviceImei!));
       } catch (e) {
         console.error(`[orders] Failed for device ${d.deviceImei}:`, e);
+        failedMachines.push(d.deviceImei!);
         return [];
       }
     }),
   );
 
-  return results.flat().sort((a, b) => +new Date(b.order_time) - +new Date(a.order_time));
+  let orders = results.flat();
+  if (range) orders = orders.filter((order) => {
+    const day = localYmd(new Date(order.order_time), range.timeZone);
+    return day >= range.from && day <= range.to;
+  });
+  return { orders: orders.sort((a, b) => +new Date(b.order_time) - +new Date(a.order_time)), failedMachines };
 }
 
 export async function getOrders(filters?: {
@@ -160,17 +172,26 @@ export async function getOrders(filters?: {
   couponOnly?: boolean;
   refundedOnly?: boolean;
   serverModeOnly?: boolean;
-}): Promise<{ orders: Order[]; source: Source }> {
+  dateFrom?: string;
+  dateTo?: string;
+  timeZone?: string;
+}): Promise<{ orders: Order[]; source: Source; fetchedAt: string; failedMachines: string[] }> {
   // Live Huaxin is the primary source: the Supabase cache only holds orders
   // whose webhook events happened to arrive, so preferring it hid entire
   // machines' orders. Cache rows the live pull doesn't return (webhook-only
   // events, or a flaky live call for one device) still merge in by order_code.
   let orders: Order[] = [];
   let source: Source = "sample";
+  let failedMachines: string[] = [];
+  const range = filters?.dateFrom && filters.dateTo && filters.timeZone
+    ? { from: filters.dateFrom, to: filters.dateTo, timeZone: filters.timeZone }
+    : undefined;
 
   if (getConfigFromEnv()) {
     try {
-      orders = await getOrdersLive();
+      const live = await getOrdersLive(range);
+      orders = live.orders;
+      failedMachines = live.failedMachines;
       source = "huaxin";
     } catch (e) {
       console.error("[orders] Huaxin live failed:", e);
@@ -193,7 +214,7 @@ export async function getOrders(filters?: {
   }
 
   if (source === "sample" && !orders.length) {
-    return { orders: SAMPLE, source: "sample" };
+    return { orders: SAMPLE, source: "sample", fetchedAt: new Date().toISOString(), failedMachines };
   }
 
   // Apply filters
@@ -207,6 +228,10 @@ export async function getOrders(filters?: {
   if (filters?.couponOnly) filtered = filtered.filter((o) => o.coupon_used);
   if (filters?.refundedOnly) filtered = filtered.filter((o) => o.refund_status === "Refunded");
   if (filters?.serverModeOnly) filtered = filtered.filter((o) => o.is_server_mode);
+  if (range) filtered = filtered.filter((order) => {
+    const day = localYmd(new Date(order.order_time), range.timeZone);
+    return day >= range.from && day <= range.to;
+  });
 
-  return { orders: filtered, source };
+  return { orders: filtered, source, fetchedAt: new Date().toISOString(), failedMachines };
 }

@@ -9,7 +9,7 @@ import { getProducts } from "@/lib/data/products";
 import { getMachines } from "@/lib/data/machines";
 import { getPendingMenuDraft } from "@/lib/data/menu-drafts";
 import { getFranchiseeAssignments } from "@/lib/data/franchisee-profit";
-import { formatDateTime, formatDate } from "@/lib/dates";
+import { formatDateTime, formatDate, ymd } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { MachineConfigForm } from "./MachineConfigForm";
 import { DraftBulkActions } from "./DraftBulkActions";
@@ -28,6 +28,7 @@ import { DeviceSettingsPanel } from "./DeviceSettingsPanel";
 import { LogLotForm } from "./LogLotForm";
 import { FranchiseeAssignmentForm } from "./FranchiseeAssignmentForm";
 import { AreaChart } from "@/components/charts";
+import { LineChart } from "@/components/LineChart";
 import { MachineMap } from "@/components/maps";
 import { translateLocation } from "@/lib/i18n/huaxin";
 
@@ -91,6 +92,18 @@ export default async function MachineDetailPage({
   // is the raw Huaxin value and still needs translating.
   const location = config?.location ?? translateLocation(telemetry?.location) ?? null;
   const online = telemetry?.online ?? false;
+  const salesByDay = new Map<string, number>();
+  for (const order of telemetry?.orders ?? []) {
+    if (order.order_state === "COMPLETE" && !order.is_admin_override) {
+      const day = ymd(new Date(order.order_time), tz);
+      salesByDay.set(day, (salesByDay.get(day) ?? 0) + order.price);
+    }
+  }
+  const today = new Date();
+  const salesData = Array.from({ length: 7 }, (_, i) => {
+    const day = ymd(new Date(today.getTime() - (6 - i) * 86_400_000), tz);
+    return { label: day.slice(5), value: salesByDay.get(day) ?? 0 };
+  });
 
   return (
     <div>
@@ -343,24 +356,30 @@ export default async function MachineDetailPage({
       <section className="rounded-2xl border border-line bg-white p-5">
         <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Recent orders</h2>
         {telemetry && telemetry.orders.length ? (
-          <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-sm">
-            <thead className="text-left text-[11px] uppercase tracking-wide text-taupe">
-              <tr><th className="py-2">Time</th><th className="py-2">Order #</th><th className="py-2">Product</th><th className="py-2 text-right">Price</th><th className="py-2 text-right">State</th></tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {telemetry.orders.slice(0, 20).map((o) => (
-                <tr key={o.order_code}>
-                  <td className="py-2 text-cocoa">{formatDateTime(o.order_time, tz)}</td>
-                  <td className="py-2 font-mono text-xs text-taupe">{o.order_code}</td>
-                  <td className="py-2 text-cocoa">{o.product_name || "—"}</td>
-                  <td className="py-2 text-right text-cocoa">€{o.price.toFixed(2)}</td>
-                  <td className="py-2 text-right text-cocoa">{o.order_state}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
+          <>
+            <div className="mb-5 border-b border-line pb-5">
+              <p className="mb-2 text-xs text-taupe">Completed sales · last 7 days</p>
+              <LineChart data={salesData} height={180} />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px] text-sm">
+                <thead className="text-left text-[11px] uppercase tracking-wide text-taupe">
+                  <tr><th className="py-2">Time</th><th className="py-2">Order #</th><th className="py-2">Product</th><th className="py-2 text-right">Price</th><th className="py-2 text-right">State</th></tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {telemetry.orders.slice(0, 20).map((o) => (
+                    <tr key={o.order_code}>
+                      <td className="py-2 text-cocoa">{formatDateTime(o.order_time, tz)}</td>
+                      <td className="py-2 font-mono text-xs text-taupe">{o.order_code}</td>
+                      <td className="py-2 text-cocoa">{o.product_name || "—"}</td>
+                      <td className="py-2 text-right text-cocoa">€{o.price.toFixed(2)}</td>
+                      <td className="py-2 text-right text-cocoa">{o.order_state}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         ) : (
           <p className="text-sm text-taupe">No orders in the last 7 days.</p>
         )}

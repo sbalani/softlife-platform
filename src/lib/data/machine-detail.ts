@@ -9,6 +9,8 @@ import {
   pullTemperatures,
 } from "@/lib/huaxin/client";
 import { isAdminOverride } from "@/lib/i18n/huaxin";
+import { huaxinOrderTime } from "@/lib/huaxin/order-time";
+import { ymd as localYmd } from "@/lib/dates";
 
 export type DetailTemp = { time: string; value: number };
 export type DetailOrder = {
@@ -40,15 +42,13 @@ const STATE: Record<string, string> = {
 function ymd(d: Date) {
   return d.toISOString().slice(0, 10);
 }
-function toIso(s?: string): string | null {
-  if (!s) return null;
-  const d = new Date(s.replace(" ", "T"));
-  return isNaN(d.getTime()) ? null : d.toISOString();
+function shiftDay(value: string, days: number): string {
+  return new Date(Date.parse(`${value}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 }
 
 export async function getMachineDetail(
   imei: string,
-  orderRange?: { from: string; to: string },
+  orderRange?: { from: string; to: string; timeZone: string },
 ): Promise<MachineDetail | null> {
   const cfg = getConfigFromEnv();
   if (!cfg) return null;
@@ -57,8 +57,8 @@ export async function getMachineDetail(
   const d = devices.find((x) => x.deviceImei === imei);
   if (!d) return null;
 
-  const began = `${orderRange?.from ?? ymd(new Date(Date.now() - 6 * 86_400_000))} 00:00:00`;
-  const end = `${orderRange?.to ?? ymd(new Date())} 23:59:59`;
+  const began = `${orderRange ? shiftDay(orderRange.from, -1) : ymd(new Date(Date.now() - 6 * 86_400_000))} 00:00:00`;
+  const end = `${orderRange ? shiftDay(orderRange.to, 1) : ymd(new Date())} 23:59:59`;
   // Huaxin's temperature endpoint returns empty for long windows — the
   // /temperatures page always worked because it asks for 24h. Same here.
   const tempBegan = ymd(new Date(Date.now() - 86_400_000)) + " 00:00:00";
@@ -80,13 +80,17 @@ export async function getMachineDetail(
   try {
     const ords = await listAllOrders(cfg, imei, began, end);
     orders = ords.map((o) => ({
-      order_time: toIso(o.createTime) ?? new Date().toISOString(),
+      order_time: huaxinOrderTime(o) ?? new Date().toISOString(),
       order_code: o.orderCode ?? "",
       order_state: STATE[String(o.status)] ?? String(o.status ?? ""),
       price: Number(o.price ?? 0),
       product_name: o.products?.[0]?.goodsName ?? o.goodsName ?? "",
       is_admin_override: isAdminOverride(o.payType ?? null),
-    }));
+    })).filter((order) => {
+      if (!orderRange) return true;
+      const day = localYmd(new Date(order.order_time), orderRange.timeZone);
+      return day >= orderRange.from && day <= orderRange.to;
+    });
   } catch {
     /* non-fatal */
   }

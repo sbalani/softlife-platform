@@ -9,18 +9,13 @@ import {
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { geocodeAddress } from "@/lib/geocode";
 import { translateLocation } from "@/lib/i18n/huaxin";
+import { huaxinOrderTime } from "@/lib/huaxin/order-time";
 
 export type SyncResult = { ok: boolean; summary: string };
 
 function ymd(d: Date) {
   return d.toISOString().slice(0, 10);
 }
-function toIso(s?: string): string | null {
-  if (!s) return null;
-  const d = new Date(s.replace(" ", "T"));
-  return isNaN(d.getTime()) ? null : d.toISOString();
-}
-
 /** Full Huaxin → Supabase ingestion: machines, temperatures (7d), orders (7d). */
 export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<SyncResult> {
   const cfg = getConfigFromEnv();
@@ -93,7 +88,7 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
           order_code: o.orderCode!,
           out_trade_no: o.outTradeNo ?? null,
           order_state: String(o.status ?? ""),
-          order_time: toIso(o.createTime),
+          order_time: huaxinOrderTime(o),
           price: Number(o.price ?? 0),
           amount: Number(o.amount ?? 0),
           product_name: o.products?.[0]?.goodsName ?? o.goodsName ?? null,

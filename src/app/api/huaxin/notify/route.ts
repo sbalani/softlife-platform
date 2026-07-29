@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isFaultWebhook, isOrderWebhook } from "@/lib/huaxin/client";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { huaxinOrderTime } from "@/lib/huaxin/order-time";
 
 export const runtime = "nodejs";
 
@@ -29,12 +30,18 @@ export async function POST(req: Request) {
     if (isOrderWebhook(body)) {
       const d = (body as { data?: Record<string, unknown> }).data ?? {};
       if (supabase) {
+        const orderTime = huaxinOrderTime({
+          createTimeUtc: (d.createTimeUtc as string) ?? undefined,
+          createTime: (d.createTime as string) ?? (d.orderTime as string) ?? undefined,
+          localPayTime: (d.localPayTime as string) ?? undefined,
+          payTime: (d.payTime as string) ?? undefined,
+        });
         await supabase.from("huaxin_orders").upsert(
           {
             order_code: (d.orderCode as string) ?? "",
             device_imei: (d.deviceImei as string) ?? null,
             order_state: ((d.orderState as string) ?? "").toUpperCase(),
-            order_time: d.orderTime ? new Date(d.orderTime as string).toISOString() : new Date().toISOString(),
+            order_time: orderTime ?? new Date().toISOString(),
             price: Number(d.price ?? 0),
             amount: Number(d.amount ?? 0),
             product_name: (d.productName as string) ?? "",

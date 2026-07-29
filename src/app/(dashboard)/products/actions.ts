@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { generateAllergenComposite } from "@/lib/allergens/composite";
+import { getSessionProfile } from "@/lib/auth/session";
+import { recordProductChange } from "@/lib/data/change-log";
 
 export type ProductResult = { ok: boolean; error?: string };
 
@@ -135,6 +137,9 @@ export async function createProduct(_prev: ProductResult | null, fd: FormData): 
       }
     }
 
+    const { data: product } = await s.from("products").select("*").eq("id", productId).single();
+    await recordProductChange(s, null, product as Record<string, unknown>, await getSessionProfile());
+
     revalidatePath("/products");
     return { ok: true };
   } catch (e) {
@@ -157,6 +162,7 @@ export async function updateProduct(_prev: ProductResult | null, fd: FormData): 
 
   try {
     const s = await createServiceClient();
+    const { data: before } = await s.from("products").select("*").eq("id", id).maybeSingle();
     const vals: Record<string, unknown> = {
       name,
       name_translations: buildTranslations(fd),
@@ -211,6 +217,9 @@ export async function updateProduct(_prev: ProductResult | null, fd: FormData): 
       }
     }
 
+    const { data: after } = await s.from("products").select("*").eq("id", id).single();
+    await recordProductChange(s, (before as Record<string, unknown>) ?? null, after as Record<string, unknown>, await getSessionProfile());
+
     revalidatePath("/products");
     return { ok: true };
   } catch (e) {
@@ -227,11 +236,14 @@ export async function linkProductToOdoo(_prev: ProductResult | null, fd: FormDat
 
   try {
     const s = await createServiceClient();
+    const { data: before } = await s.from("products").select("*").eq("id", productId).maybeSingle();
     const { error } = await s.from("products").update({ odoo_id: odooId }).eq("id", productId);
     if (error) {
       const msg = error.code === "23505" ? "That Odoo SKU is already linked to a different ingredient." : error.message;
       return { ok: false, error: msg };
     }
+    const { data: after } = await s.from("products").select("*").eq("id", productId).single();
+    await recordProductChange(s, (before as Record<string, unknown>) ?? null, after as Record<string, unknown>, await getSessionProfile());
     revalidatePath("/products");
     revalidatePath("/odoo");
     return { ok: true };

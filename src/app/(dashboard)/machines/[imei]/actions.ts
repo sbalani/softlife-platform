@@ -6,6 +6,7 @@ import { getConfigFromEnv, editDeviceMedia, listDeviceProducts, pushDeviceSettin
 import type { DiyPushItem } from "@/lib/huaxin/client";
 import { generateAllergenComposite } from "@/lib/allergens/composite";
 import { getSessionProfile } from "@/lib/auth/session";
+import { recordMachinePush, recordProductChange } from "@/lib/data/change-log";
 
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
@@ -68,6 +69,20 @@ const HUAXIN_LANE_TO_CONFIG: Record<string, { position: string; product_type: st
 
 type DiyItem = { position: string; code: string; value: string };
 type ServiceClient = Awaited<ReturnType<typeof createServiceClient>>;
+
+async function pushProductDiyWithLog(
+  cfg: NonNullable<ReturnType<typeof getConfigFromEnv>>,
+  imei: string,
+  items: DiyPushItem[],
+) {
+  const result = await pushProductDiy(cfg, imei, items);
+  if (String(result.code) === "200" && isSupabaseConfigured()) {
+    const s = await createServiceClient();
+    const { data: machine } = await s.from("machines").select("id,name,device_imei").eq("device_imei", imei).maybeSingle();
+    if (machine?.id) await recordMachinePush(s, machine as { id: string; name: string | null; device_imei: string }, items, await getSessionProfile());
+  }
+  return result;
+}
 
 /** Unions contains/may_contain allergens across a set of ingredients into one
  * composite image ("contains" always wins over "may_contain" for the same
@@ -154,7 +169,7 @@ export async function pushSolidToppings(_prev: PushResult | null, fd: FormData):
     const { items, count } = await buildSolidToppingItems(s, m.id as string);
     if (!items.length) return { ok: false, error: "No solid toppings configured. Assign them in the configuration above first." };
 
-    await pushProductDiy(cfg, imei, items);
+    await pushProductDiyWithLog(cfg, imei, items);
     try {
       await refreshProduct(cfg, imei);
     } catch {
@@ -187,7 +202,7 @@ export async function updateBaseHopper(
   if (!items.length) return { ok: false, error: "Nothing to update." };
 
   try {
-    const result = await pushProductDiy(cfg, imei, items);
+    const result = await pushProductDiyWithLog(cfg, imei, items);
     if (String(result.code) !== "200") {
       return { ok: false, error: result.msg ?? "Update rejected" };
     }
@@ -277,7 +292,7 @@ export async function pushMachineProducts(_prev: PushResult | null, fd: FormData
 
     if (!items.length) return { ok: false, error: "No hoppers configured. Assign products in the configuration above first." };
 
-    await pushProductDiy(cfg, imei, items);
+    await pushProductDiyWithLog(cfg, imei, items);
     try {
       await refreshProduct(cfg, imei);
     } catch {
@@ -425,7 +440,7 @@ export async function updateMachineProduct(
 
   if (!items.length) return { ok: false, error: "Nothing to update." };
   try {
-    const result = await pushProductDiy(cfg, imei, items);
+    const result = await pushProductDiyWithLog(cfg, imei, items);
     if (String(result.code) === "200") {
       try { await refreshProduct(cfg, imei); } catch { /* best-effort */ }
 
@@ -523,7 +538,7 @@ export async function pushComboToMachine(
     if (imagePath) items.push({ position, code: "imagePath", value: imagePath });
     if (resolved.compositeUrl) items.push({ position, code: "allergyPath", value: resolved.compositeUrl });
 
-    const result = await pushProductDiy(cfg, imei, items);
+    const result = await pushProductDiyWithLog(cfg, imei, items);
     if (String(result.code) === "200") {
       try { await refreshProduct(cfg, imei); } catch { /* best-effort */ }
       return { ok: true };
@@ -751,7 +766,7 @@ export async function pushMenuDraft(imei: string, draftId: string): Promise<Push
     }
     if (!items.length) return { ok: false, error: "Draft has nothing to push." };
 
-    await pushProductDiy(cfg, imei, items);
+    await pushProductDiyWithLog(cfg, imei, items);
     try { await refreshProduct(cfg, imei); } catch { /* best-effort */ }
 
     await s.from("machine_menu_drafts").update({ applied_at: new Date().toISOString() }).eq("id", draftId);
@@ -795,7 +810,7 @@ export async function pushDraftItemAt(imei: string, draftId: string, position: s
     if (it.allergyPath) items.push({ position: it.position, code: "allergyPath", value: it.allergyPath });
     if (!items.length) return { ok: false, error: "Nothing to push." };
 
-    await pushProductDiy(cfg, imei, items);
+    await pushProductDiyWithLog(cfg, imei, items);
     try { await refreshProduct(cfg, imei); } catch { /* best-effort */ }
 
     await removeDraftItemAt(s, draftId, position);
@@ -841,6 +856,7 @@ export async function saveProductVariant(
   if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
   try {
     const s = await createServiceClient();
+    const { data: before } = await s.from("products").select("*").eq("id", productId).maybeSingle();
     const { error } = await s.from("products").update({
       name: fields.name,
       price: parseFloat(fields.price) || 0,
@@ -848,6 +864,8 @@ export async function saveProductVariant(
       allergen_url: fields.allergen_url || null,
     }).eq("id", productId);
     if (error) return { ok: false, error: error.message };
+    const { data: after } = await s.from("products").select("*").eq("id", productId).single();
+    await recordProductChange(s, (before as Record<string, unknown>) ?? null, after as Record<string, unknown>, await getSessionProfile());
     return { ok: true, productId };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
@@ -869,8 +887,9 @@ export async function saveNewIngredient(
       image_url: fields.image_url || null,
       allergen_url: fields.allergen_url || null,
       type: productType,
-    }).select("id").single();
+    }).select("*").single();
     if (error) return { ok: false, error: error.message };
+    await recordProductChange(s, null, data as Record<string, unknown>, await getSessionProfile());
 
     if (machineId && data) {
       const productId = (data as { id: string }).id;

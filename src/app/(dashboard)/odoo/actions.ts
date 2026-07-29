@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { getSessionProfile } from "@/lib/auth/session";
+import { recordProductChange } from "@/lib/data/change-log";
 
 export type OdooActionResult = { ok: boolean; error?: string };
 
@@ -23,16 +25,17 @@ export async function createIngredientFromOdoo(
       .single();
     if (fetchError || !sku) return { ok: false, error: "Odoo SKU not found — try re-syncing." };
 
-    const { error } = await s.from("products").insert({
+    const { data: product, error } = await s.from("products").insert({
       name: sku.name,
       sku: sku.sku,
       type: "topping",
       odoo_id: sku.odoo_id,
-    });
+    }).select("*").single();
     if (error) {
       const msg = error.code === "23505" ? "That Odoo SKU is already linked to an ingredient." : error.message;
       return { ok: false, error: msg };
     }
+    await recordProductChange(s, null, product as Record<string, unknown>, await getSessionProfile(), "odoo");
 
     revalidatePath("/odoo");
     revalidatePath("/products");

@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { getConfigFromEnv, listDevices, listDeviceProducts } from "@/lib/huaxin/client";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { getSessionProfile, type SessionProfile } from "@/lib/auth/session";
+import { recordMachineSync } from "@/lib/data/change-log";
 
 export type SyncResult = { ok: boolean; synced?: number; error?: string };
 
@@ -49,6 +51,7 @@ export async function syncOneMachine(imei: string): Promise<SyncResult> {
     if (!d) return { ok: false, error: "Device not found in Huaxin." };
     const isOnline = (d.onlineStatus as string) === "online";
     const s = await createServiceClient();
+    const actor = await getSessionProfile();
     await s.from("machines").upsert({
       device_imei: imei,
       device_id_huaxin: d.deviceId ?? null,
@@ -59,14 +62,9 @@ export async function syncOneMachine(imei: string): Promise<SyncResult> {
       huaxin_last_sync: new Date().toISOString(),
     }, { onConflict: "device_imei" });
 
-    // Pull live product menu and sync into machine_ingredients
-    try {
-      const { data: machine } = await s.from("machines").select("id").eq("device_imei", imei).maybeSingle();
-      if (machine?.id) {
-        await syncProductsToIngredients(s, cfg, imei, machine.id);
-      }
-    } catch {
-      /* product sync is best-effort — device status already succeeded */
+    const { data: machine } = await s.from("machines").select("id,name").eq("device_imei", imei).maybeSingle();
+    if (machine?.id) {
+      await syncProductsToIngredients(s, cfg, imei, machine.id, machine.name as string | null, actor);
     }
 
     revalidatePath(`/machines/${imei}`);
@@ -91,9 +89,13 @@ async function syncProductsToIngredients(
   cfg: ReturnType<typeof getConfigFromEnv>,
   imei: string,
   machineId: string,
+  machineName: string | null,
+  actor: SessionProfile | null,
 ): Promise<void> {
   if (!cfg) return;
-  const { diy } = await listDeviceProducts(cfg, imei);
+  const menu = await listDeviceProducts(cfg, imei);
+  await recordMachineSync(s, { id: machineId, device_imei: imei, name: machineName }, menu, actor);
+  const { diy } = menu;
   const { data: allProducts } = await s.from("products").select("id,name,type,image_url");
   const products = (allProducts as { id: string; name: string; type: string; image_url: string | null }[]) ?? [];
   const findMatch = (name: string) =>

@@ -1,6 +1,7 @@
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getConfigFromEnv, listDevices, listAllOrders, type HuaxinOrder } from "@/lib/huaxin/client";
 import { translatePayType, isServerModeOrder, isAdminOverride } from "@/lib/i18n/huaxin";
+import { huaxinLocalTimeToUtc, huaxinOrderTime } from "@/lib/huaxin/order-time";
 import type { Source } from "./machines";
 
 export type OrderProduct = { goodsName: string; price: string; position: number };
@@ -52,9 +53,10 @@ function mapHuaxinOrder(o: HuaxinOrder, machineName: string, deviceImei: string)
   const serverMode = isServerModeOrder(payTypeRaw);
   const adminOverride = isAdminOverride(payTypeRaw);
   const price = Number(o.price ?? 0);
+  const orderTime = huaxinOrderTime(o) ?? new Date().toISOString();
   return {
     id: o.orderCode ?? `${deviceImei}-${Math.random()}`,
-    order_time: o.createTime ?? o.localPayTime ?? new Date().toISOString(),
+    order_time: orderTime,
     machine_name: machineName,
     device_imei: deviceImei,
     order_code: o.orderCode ?? "",
@@ -75,8 +77,8 @@ function mapHuaxinOrder(o: HuaxinOrder, machineName: string, deviceImei: string)
     is_admin_override: adminOverride,
     machine_collected: adminOverride || serverMode ? 0 : price,
     franchisee_owed: serverMode ? price : 0,
-    pay_time: (o.localPayTime as string) ?? (o.payTime as string) ?? null,
-    create_time_utc: (o.createTimeUtc as string) ?? null,
+    pay_time: huaxinLocalTimeToUtc(o.localPayTime ?? o.payTime),
+    create_time_utc: orderTime,
     refund_status: REFUND_MAP[String(o.refundStatus ?? "0")] ?? String(o.refundStatus ?? ""),
     refund_out_no: (o.refundOutNo as string) ?? null,
     coupon_used: ((o.coupon as { result?: boolean })?.result) === true,

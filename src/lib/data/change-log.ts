@@ -79,6 +79,7 @@ function baseRow(machine: { id: string; device_imei: string; name?: string | nul
     machine_name: machine.name ?? null,
     actor_id: actor?.id ?? null,
     actor_email: actor?.email ?? null,
+    metadata: {},
   };
 }
 

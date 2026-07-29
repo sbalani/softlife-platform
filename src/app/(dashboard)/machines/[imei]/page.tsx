@@ -59,7 +59,7 @@ export default async function MachineDetailPage({
   const [config, tenants, telemetry, menu, status, media, lotHistory, ingredients, { machines: allMachines }] = await Promise.all([
     getMachineConfig(imei),
     getTenants(),
-    getMachineDetail(imei, { from: dateFrom, to: dateTo }),
+    getMachineDetail(imei, { from: dateFrom, to: dateTo, timeZone: tz }),
     getMachineMenu(imei),
     getMachineStatus(imei),
     getMachineMedia(imei),

@@ -1,13 +1,8 @@
 import { getConfigFromEnv, listAllOrders, listDevices } from "@/lib/huaxin/client";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { huaxinOrderTime } from "@/lib/huaxin/order-time";
 
 export type OrderSyncResult = { ok: boolean; orders: number; machines: number; error?: string };
-
-function toIso(s?: string): string | null {
-  if (!s) return null;
-  const d = new Date(s.replace(" ", "T"));
-  return isNaN(d.getTime()) ? null : d.toISOString();
-}
 
 /** Pulls every order (all pages) for every device in [from, to] and upserts
  *  into huaxin_orders, keyed by order_code. Shared by the Settings full sync
@@ -43,7 +38,7 @@ export async function ingestOrders(from: string, to: string): Promise<OrderSyncR
           order_code: o.orderCode!,
           out_trade_no: o.outTradeNo ?? null,
           order_state: String(o.status ?? ""),
-          order_time: toIso(o.createTime),
+          order_time: huaxinOrderTime(o),
           price: Number(o.price ?? 0),
           amount: Number(o.amount ?? 0),
           product_name: o.products?.[0]?.goodsName ?? o.goodsName ?? null,

@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:change-log": "node --experimental-strip-types --test src/lib/data/change-log.test.ts"
+    "test:change-log": "node --experimental-strip-types --test src/lib/data/change-log.test.ts",
+    "test:order-time": "node --experimental-strip-types --test src/lib/huaxin/order-time.test.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.5",

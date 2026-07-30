@@ -1,10 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getConfigFromEnv, listDevices, listDeviceProducts } from "@/lib/huaxin/client";
+import { getConfigFromEnv, getDeviceStatus, listDevices, listDeviceProducts } from "@/lib/huaxin/client";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getSessionProfile, type SessionProfile } from "@/lib/auth/session";
-import { recordMachineSync } from "@/lib/data/change-log";
+import { recordMachineStatuses, recordMachineSync } from "@/lib/data/change-log";
 
 export type SyncResult = { ok: boolean; synced?: number; error?: string };
 
@@ -20,14 +20,12 @@ export async function syncMachineStatuses(): Promise<SyncResult> {
     let count = 0;
     for (const d of devices) {
       if (!d.deviceImei) continue;
-      const isOnline = (d.onlineStatus as string) === "online";
       await s.from("machines").upsert({
         device_imei: d.deviceImei,
         device_id_huaxin: d.deviceId ?? null,
         name: (d.deviceLabel as string) || d.deviceName || d.deviceImei,
         location: (d.deviceLocation as string) ?? null,
-        state: isOnline ? "active" : "stored",
-        is_online: isOnline,
+        is_online: (d.onlineStatus as string) === "online",
         huaxin_last_sync: new Date().toISOString(),
       }, { onConflict: "device_imei" });
       count++;
@@ -49,7 +47,6 @@ export async function syncOneMachine(imei: string): Promise<SyncResult> {
     const devices = await listDevices(cfg, { force: true });
     const d = devices.find((x) => x.deviceImei === imei);
     if (!d) return { ok: false, error: "Device not found in Huaxin." };
-    const isOnline = (d.onlineStatus as string) === "online";
     const s = await createServiceClient();
     const actor = await getSessionProfile();
     await s.from("machines").upsert({
@@ -57,13 +54,13 @@ export async function syncOneMachine(imei: string): Promise<SyncResult> {
       device_id_huaxin: d.deviceId ?? null,
       name: (d.deviceLabel as string) || d.deviceName || imei,
       location: (d.deviceLocation as string) ?? null,
-      state: isOnline ? "active" : "stored",
-      is_online: isOnline,
+      is_online: (d.onlineStatus as string) === "online",
       huaxin_last_sync: new Date().toISOString(),
     }, { onConflict: "device_imei" });
 
     const { data: machine } = await s.from("machines").select("id,name").eq("device_imei", imei).maybeSingle();
     if (machine?.id) {
+      await recordMachineStatuses(s, { id: machine.id, device_imei: imei, name: machine.name as string | null }, await getDeviceStatus(cfg, imei));
       await syncProductsToIngredients(s, cfg, imei, machine.id, machine.name as string | null, actor);
     }
 

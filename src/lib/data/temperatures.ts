@@ -26,7 +26,7 @@ function ymd(d: Date) {
  *  source instead of at every call site. `anchorDate` (YYYY-MM-DD) is used
  *  when the label has no date component — it's the date the reading batch
  *  was queried for, the best available anchor for a bare time-of-day. */
-function normalizeHuaxinTimestamp(raw: string | undefined, anchorDate: string): string {
+export function normalizeHuaxinTimestamp(raw: string | undefined, anchorDate: string): string {
   if (!raw) return new Date().toISOString();
   if (raw.includes("T")) return raw;
   if (/^\d{1,2}:\d{2}:\d{2}$/.test(raw)) return `${anchorDate}T${raw}`;

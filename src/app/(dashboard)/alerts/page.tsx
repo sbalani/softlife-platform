@@ -4,6 +4,7 @@ import { formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { getChangeAlertRules } from "@/lib/data/change-alert-rules";
 import { getMachines } from "@/lib/data/machines";
+import { getProducts } from "@/lib/data/products";
 import { AlertRuleManager } from "./AlertRuleManager";
 import { ResolveAlertButton } from "./ResolveAlertButton";
 
@@ -16,7 +17,7 @@ const SEV: Record<string, { ring: string; dot: string; label: string }> = {
 };
 
 export default async function AlertsPage() {
-  const [{ alerts, source }, tz, rules, { machines }] = await Promise.all([getAlerts(), getDisplayTimezone(), getChangeAlertRules(), getMachines()]);
+  const [{ alerts, source }, tz, rules, { machines }, products] = await Promise.all([getAlerts(), getDisplayTimezone(), getChangeAlertRules(), getMachines(), getProducts()]);
   return (
     <div>
       <header className="mb-8">
@@ -24,7 +25,7 @@ export default async function AlertsPage() {
         <p className="mt-1 text-sm text-taupe">{alerts.length} active alert{alerts.length === 1 ? "" : "s"}</p>
       </header>
 
-      <AlertRuleManager rules={rules} machines={machines} />
+      <AlertRuleManager rules={rules} machines={machines} products={products.map(({ id, name }) => ({ id, name }))} />
 
       <div className="space-y-3">
         {alerts.map((a) => {
@@ -44,6 +45,7 @@ export default async function AlertsPage() {
                     {a.machine_name && (
                       <span className="text-xs text-taupe">· {a.machine_name}</span>
                     )}
+                    {a.product_name && <span className="text-xs text-taupe">· {a.product_name}</span>}
                   </div>
                   <p className="mt-1.5 font-semibold text-cocoa">{a.message}</p>
                   <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-taupe"><span>{formatDateTime(a.created_at, tz)}</span>{a.change_log_id && <Link href={`/change-log?${new URLSearchParams({ ...(a.device_imei ? { machine: a.device_imei } : {}), ...(a.change_field ? { field: a.change_field } : {}) })}`} className="font-semibold text-terracotta">View change</Link>}<ResolveAlertButton id={a.id} /></div>

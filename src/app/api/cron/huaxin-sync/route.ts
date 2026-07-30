@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { getConfigFromEnv, listDevices } from "@/lib/huaxin/client";
+import { getConfigFromEnv, getDeviceStatus, listDeviceProducts, listDevices, pullTemperatures } from "@/lib/huaxin/client";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { recordMachineStatuses, recordMachineSync } from "@/lib/data/change-log";
+import { normalizeHuaxinTimestamp } from "@/lib/data/temperatures";
 
 export const runtime = "nodejs";
 
@@ -25,19 +27,62 @@ export async function GET(req: Request) {
 
   const supabase = await createServiceClient();
   let synced = 0;
+  let statuses = 0;
+  let menus = 0;
+  let temperatures = 0;
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
   for (const d of devices) {
     if (!d.deviceImei) continue;
-    const { error } = await supabase.from("machines").upsert(
+    const { data: machine, error } = await supabase.from("machines").upsert(
       {
         device_imei: d.deviceImei,
         device_id_huaxin: d.deviceId ?? null,
         name: (d.deviceLabel as string) || d.deviceName || d.deviceImei,
+        is_online: (d.onlineStatus as string) === "online",
         huaxin_last_sync: new Date().toISOString(),
       },
       { onConflict: "device_imei" },
-    );
-    if (!error) synced++;
+    ).select("id,name,device_imei").single();
+    if (error || !machine) continue;
+    synced++;
+    try {
+      await recordMachineStatuses(supabase, machine, await getDeviceStatus(cfg, d.deviceImei));
+      statuses++;
+    } catch (statusError) {
+      console.error(`[cron] Status monitoring failed for ${d.deviceImei}:`, statusError);
+    }
+    try {
+      await recordMachineSync(supabase, machine, await listDeviceProducts(cfg, d.deviceImei), null);
+      menus++;
+    } catch (menuError) {
+      console.error(`[cron] Menu monitoring failed for ${d.deviceImei}:`, menuError);
+    }
+    try {
+      const readings = await pullTemperatures(cfg, d.deviceImei, yesterday, today);
+      const rows = (readings.dataset ?? []).flatMap((series) => {
+        const index = (series.data?.length ?? 0) - 1;
+        const value = Number(series.data?.[index]?.value);
+        if (index < 0 || !Number.isFinite(value)) return [];
+        return [{
+          machine_id: machine.id,
+          reading_time: normalizeHuaxinTimestamp(readings.category?.[index]?.label, today),
+          series_name: series.seriesname ?? "temperature",
+          value,
+        }];
+      });
+      if (rows.length) {
+        const { error: tempError } = await supabase.from("huaxin_temperatures").upsert(rows, {
+          onConflict: "machine_id,reading_time,series_name",
+          ignoreDuplicates: true,
+        });
+        if (tempError) throw tempError;
+        temperatures += rows.length;
+      }
+    } catch (temperatureError) {
+      console.error(`[cron] Temperature monitoring failed for ${d.deviceImei}:`, temperatureError);
+    }
   }
 
-  return NextResponse.json({ synced, devicesSeen: devices.length, stored: true });
+  return NextResponse.json({ synced, statuses, menus, temperatures, devicesSeen: devices.length, stored: true });
 }

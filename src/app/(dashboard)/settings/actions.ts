@@ -10,6 +10,7 @@ import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server
 import { geocodeAddress } from "@/lib/geocode";
 import { translateLocation } from "@/lib/i18n/huaxin";
 import { huaxinOrderTime } from "@/lib/huaxin/order-time";
+import { normalizeHuaxinTimestamp } from "@/lib/data/temperatures";
 
 export type SyncResult = { ok: boolean; summary: string };
 
@@ -18,6 +19,8 @@ function ymd(d: Date) {
 }
 /** Full Huaxin → Supabase ingestion: machines, temperatures (7d), orders (7d). */
 export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<SyncResult> {
+  void _prev;
+  void _fd;
   const cfg = getConfigFromEnv();
   if (!cfg) return { ok: false, summary: "Huaxin not configured." };
   if (!isSupabaseConfigured()) return { ok: false, summary: "Supabase not configured." };
@@ -66,14 +69,17 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
           for (let i = 0; i < sdata.length; i++) {
             rows.push({
               machine_id: machineId,
-              reading_time: category[i]?.label ? `${ymd(new Date())} ${category[i].label}` : new Date().toISOString(),
+              reading_time: normalizeHuaxinTimestamp(category[i]?.label, ymd(new Date())),
               series_name: sname,
               value: Number(sdata[i]?.value ?? 0),
             });
           }
         }
         if (rows.length) {
-          const { error } = await supabase.from("huaxin_temperatures").insert(rows);
+          const { error } = await supabase.from("huaxin_temperatures").upsert(rows, {
+            onConflict: "machine_id,reading_time,series_name",
+            ignoreDuplicates: true,
+          });
           if (!error) temps += rows.length;
         }
       } catch {

@@ -4,6 +4,7 @@ import { translatePayType, isServerModeOrder, isAdminOverride } from "@/lib/i18n
 import { huaxinLocalTimeToUtc, huaxinOrderTime } from "@/lib/huaxin/order-time";
 import type { Source } from "./machines";
 import { ymd as localYmd } from "@/lib/dates";
+import { storedOrderFromRow } from "@/lib/data/order-persistence";
 
 export type OrderProduct = { goodsName: string; price: string; position: number };
 
@@ -92,47 +93,8 @@ function mapHuaxinOrder(o: HuaxinOrder, machineName: string, deviceImei: string)
   };
 }
 
-/** v_orders only carries what the webhook receiver actually stores per order
- *  (order_code, price, product_name, state, timestamps) — not the richer
- *  product/coupon/refund breakdown the live Huaxin list API returns. Map
- *  honestly instead of casting the row straight to Order, which crashed on
- *  any field the view doesn't have (e.g. `products`). */
-function orderFromSupabaseRow(row: Record<string, unknown>): Order {
-  const price = Number(row.price ?? 0);
-  // The webhook stores raw numeric status codes ("3"), not names — normalize
-  // so state filters/revenue math treat cached rows the same as live ones.
-  const rawState = String(row.order_state ?? "");
-  return {
-    id: row.id as string,
-    order_time: (row.order_time as string) ?? new Date().toISOString(),
-    machine_name: (row.machine_name as string) ?? null,
-    device_imei: (row.device_imei as string) ?? null,
-    order_code: (row.order_code as string) ?? "",
-    out_trade_no: null,
-    order_state: STATE_MAP[rawState] ?? rawState,
-    status_code: "",
-    price,
-    market_price: null,
-    discount_price: null,
-    re_price: null,
-    product_name: (row.product_name as string) ?? "",
-    products: [],
-    nums: 1,
-    amount: Number(row.amount ?? 1),
-    pay_type_raw: null,
-    pay_type: null,
-    is_server_mode: false,
-    is_admin_override: false,
-    machine_collected: price,
-    franchisee_owed: 0,
-    pay_time: null,
-    create_time_utc: null,
-    refund_status: null,
-    refund_out_no: null,
-    coupon_used: false,
-    activity_name: null,
-    device_label: null,
-  };
+export function orderFromSupabaseRow(row: Record<string, unknown>): Order {
+  return storedOrderFromRow(row) as Order;
 }
 
 async function getOrdersLive(range?: { from: string; to: string; timeZone: string }): Promise<{ orders: Order[]; failedMachines: string[] }> {

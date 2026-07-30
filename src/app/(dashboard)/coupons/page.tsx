@@ -6,14 +6,15 @@ import { getMachines } from "@/lib/data/machines";
 export const dynamic = "force-dynamic";
 
 export default async function CouponsPage() {
-  const [coupons, { machines }] = await Promise.all([getCoupons(), getMachines()]);
+  const { machines } = await getMachines();
+  const { coupons, error } = await getCoupons(machines.flatMap((machine) => machine.device_imei ? [machine.device_imei] : []));
 
   return (
     <div>
       <header className="mb-8">
         <h1 className="font-display text-3xl font-bold text-cocoa">Promotions</h1>
         <p className="mt-1 text-sm text-taupe">
-          {coupons.length} coupon{coupons.length === 1 ? "" : "s"} — discounts, free-product vouchers &amp; multi-use cards
+          {coupons.length} coupon{coupons.length === 1 ? "" : "s"} — discounts and one-cup vouchers
         </p>
       </header>
 
@@ -24,15 +25,17 @@ export default async function CouponsPage() {
         </div>
       </details>
 
+      {error && <p className="mb-4 rounded-xl border border-danger/30 bg-danger/5 p-3 text-sm text-danger">{error}</p>}
+
       <div className="space-y-4">
         {coupons.map((c) => (
           <CouponCard key={c.couponId ?? c.couponName} coupon={c} />
         ))}
       </div>
 
-      {coupons.length === 0 && (
+      {!error && coupons.length === 0 && (
         <p className="rounded-2xl border border-line bg-white p-10 text-center text-taupe">
-          No coupons yet. Create discounts, free-product vouchers or multi-use cards above.
+          No coupons yet. Create a discount or one-cup voucher above.
         </p>
       )}
     </div>

@@ -5,6 +5,7 @@ import type { SessionProfile } from "@/lib/auth/session";
 type Menu = { diy: ProductDiyItem[]; unify: ProductDiyItem[] };
 type Snapshot = Record<string, Record<string, unknown>>;
 type Actor = Pick<SessionProfile, "id" | "email"> | null;
+type Machine = { id: string; device_imei: string; name?: string | null };
 
 export type ChangeLogFilters = {
   dateFrom?: string;
@@ -72,7 +73,7 @@ export function diffSnapshots(before: Snapshot, after: Snapshot) {
   return changes;
 }
 
-function baseRow(machine: { id: string; device_imei: string; name?: string | null }, actor: Actor) {
+function baseRow(machine: Machine, actor: Actor) {
   return {
     machine_id: machine.id,
     device_imei: machine.device_imei,
@@ -83,17 +84,50 @@ function baseRow(machine: { id: string; device_imei: string; name?: string | nul
   };
 }
 
+const LANE_TO_POSITION: Record<string, string> = {
+  "2": "solid_1", "3": "solid_2", "4": "solid_3",
+  "5": "liquid_1", "6": "liquid_2", "7": "liquid_3",
+};
+
+async function machineProductIds(s: SupabaseClient, machineId: string) {
+  const [{ data: machine }, { data: ingredients }] = await Promise.all([
+    s.from("machines").select("base_product_id").eq("id", machineId).maybeSingle(),
+    s.from("machine_ingredients").select("position,product_id").eq("machine_id", machineId),
+  ]);
+  const ids = new Map<string, string>();
+  const baseProductId = (machine as { base_product_id?: string | null } | null)?.base_product_id;
+  if (baseProductId) ids.set("1", baseProductId);
+  const byPosition = new Map(((ingredients as { position: string; product_id: string | null }[]) ?? []).map((row) => [row.position, row.product_id]));
+  for (const [lane, position] of Object.entries(LANE_TO_POSITION)) {
+    const productId = byPosition.get(position);
+    if (productId) ids.set(lane, productId);
+  }
+  return ids;
+}
+
+function productIdForEntity(entityKey: string, productIds: Map<string, string>) {
+  const [kind, position] = entityKey.split(":");
+  return kind === "diy" ? productIds.get(position) ?? null : null;
+}
+
 export async function recordMachineSync(
   s: SupabaseClient,
-  machine: { id: string; device_imei: string; name?: string | null },
+  machine: Machine,
   menu: Menu,
   actor: Actor,
 ) {
   const next = menuSnapshot(menu);
+  const productIds = await machineProductIds(s, machine.id);
   const { data: saved, error: readError } = await s.from("machine_menu_snapshots").select("snapshot").eq("device_imei", machine.device_imei).maybeSingle();
   if (readError) throw new Error(`Could not read machine audit snapshot: ${readError.message}`);
   const previous = (saved?.snapshot as Snapshot | undefined) ?? null;
   const changes = previous ? diffSnapshots(previous, next) : [];
+  const changedFields = new Set(changes.map((change) => `${change.entityKey}:${change.field}`));
+  const observations = Object.entries(next).flatMap(([entityKey, fields]) =>
+    ["price", "marketPrice", "stock"].flatMap((field) =>
+      fields[field] == null || changedFields.has(`${entityKey}:${field}`) ? [] : [{ entityKey, field, value: fields[field] }]
+    )
+  );
   const rows = [
     {
       ...baseRow(machine, actor),
@@ -108,9 +142,21 @@ export async function recordMachineSync(
       action: "pulled_change",
       entity_type: "menu_item",
       entity_key: change.entityKey,
+      product_id: productIdForEntity(change.entityKey, productIds),
       field: change.field,
       old_value: change.oldValue,
       new_value: change.newValue,
+    })),
+    ...observations.map((observation) => ({
+      ...baseRow(machine, actor),
+      source: "machine_sync",
+      action: "observed",
+      entity_type: "menu_item",
+      entity_key: observation.entityKey,
+      product_id: productIdForEntity(observation.entityKey, productIds),
+      field: observation.field,
+      old_value: previous?.[observation.entityKey]?.[observation.field] ?? null,
+      new_value: observation.value,
     })),
   ];
   const { error: logError } = await s.from("machine_change_log").insert(rows);
@@ -121,10 +167,11 @@ export async function recordMachineSync(
 
 export async function recordMachinePush(
   s: SupabaseClient,
-  machine: { id: string; device_imei: string; name?: string | null },
+  machine: Machine,
   items: DiyPushItem[],
   actor: Actor,
 ) {
+  const productIds = await machineProductIds(s, machine.id);
   const { data: saved, error: readError } = await s.from("machine_menu_snapshots").select("snapshot").eq("device_imei", machine.device_imei).maybeSingle();
   if (readError) throw new Error(`Could not read machine audit snapshot: ${readError.message}`);
   const snapshot = ((saved?.snapshot as Snapshot | undefined) ?? {});
@@ -137,7 +184,7 @@ export async function recordMachinePush(
     const newValue = item.code === "language" && typeof item.value === "object" ? item.value.value : item.value;
     const oldValue = snapshot[entityKey]?.[field] ?? null;
     if (JSON.stringify(oldValue) === JSON.stringify(newValue)) continue;
-    rows.push({ ...baseRow(machine, actor), source: "platform", action: "pushed_change", entity_type: "menu_item", entity_key: entityKey, field, old_value: oldValue, new_value: newValue });
+    rows.push({ ...baseRow(machine, actor), source: "platform", action: "pushed_change", entity_type: "menu_item", entity_key: entityKey, product_id: productIdForEntity(entityKey, productIds), field, old_value: oldValue, new_value: newValue });
     snapshot[entityKey] = { ...(snapshot[entityKey] ?? {}), [field]: newValue };
   }
   const { error: logError } = await s.from("machine_change_log").insert(rows);
@@ -163,7 +210,8 @@ export async function recordProductChange(
     source,
     action: before ? "updated" : "created",
     entity_type: "product",
-    entity_key: String(after.id ?? before?.id ?? ""),
+      entity_key: String(after.id ?? before?.id ?? ""),
+      product_id: String(after.id ?? before?.id ?? "") || null,
     field,
     old_value: before?.[field] ?? null,
     new_value: after[field] ?? null,
@@ -173,6 +221,54 @@ export async function recordProductChange(
   }));
   const { error } = await s.from("machine_change_log").insert(rows);
   if (error) throw new Error(`Could not write product change log: ${error.message}`);
+}
+
+export type HuaxinStatusRow = { code?: string; value?: string; desc?: string; data?: string | number };
+
+export function alertStatusSignals(rows: HuaxinStatusRow[]) {
+  const byCode = new Map(rows.map((row) => [row.code, row]));
+  const active = (code: string) => {
+    const row = byCode.get(code);
+    if (!row) return null;
+    if (row.data != null) return String(row.data) !== "0";
+    return !["normal", "0", "false"].includes(String(row.value ?? "").toLowerCase());
+  };
+  const signals: { field: string; value: boolean; raw: HuaxinStatusRow }[] = [];
+  const cup = byCode.get("status_0_cuplack");
+  if (cup) signals.push({ field: "cup_empty", value: active("status_0_cuplack")!, raw: cup });
+  const material = byCode.get("status_0_lackmaterial");
+  if (material) signals.push({ field: "material_empty", value: active("status_0_lackmaterial")!, raw: material });
+  const online = byCode.get("status_0_online_status");
+  if (online) signals.push({ field: "device_online", value: String(online.value).toLowerCase() === "online", raw: online });
+  return signals;
+}
+
+export async function recordMachineStatuses(s: SupabaseClient, machine: Machine, rows: HuaxinStatusRow[]) {
+  const signals = alertStatusSignals(rows);
+  if (!signals.length) return;
+  const { data: saved, error: readError } = await s.from("machine_status_snapshots").select("field,value").eq("machine_id", machine.id);
+  if (readError) throw new Error(`Could not read machine status snapshots: ${readError.message}`);
+  const previous = new Map(((saved as { field: string; value: unknown }[]) ?? []).map((row) => [row.field, row.value]));
+  const { error } = await s.from("machine_change_log").insert(signals.map((signal) => ({
+      ...baseRow(machine, null),
+      source: "machine_sync",
+      action: previous.has(signal.field) && previous.get(signal.field) !== signal.value ? "status_changed" : "observed",
+      entity_type: "machine_status",
+      entity_key: signal.raw.code,
+      field: signal.field,
+      old_value: previous.get(signal.field) ?? null,
+      new_value: signal.value,
+      metadata: { description: signal.raw.desc, raw_value: signal.raw.value, raw_data: signal.raw.data },
+  })));
+  if (error) throw new Error(`Could not write machine status observations: ${error.message}`);
+  const { error: snapshotError } = await s.from("machine_status_snapshots").upsert(signals.map((signal) => ({
+    machine_id: machine.id,
+    field: signal.field,
+    value: signal.value,
+    raw: signal.raw,
+    observed_at: new Date().toISOString(),
+  })));
+  if (snapshotError) throw new Error(`Could not save machine status snapshots: ${snapshotError.message}`);
 }
 
 export async function getChangeLog(s: SupabaseClient, filters: ChangeLogFilters): Promise<ChangeLogRow[]> {

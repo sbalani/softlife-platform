@@ -6,7 +6,9 @@ import { createServiceClient } from "@/lib/supabase/server";
 
 export type AlertRuleResult = { ok: boolean; error?: string };
 
-const ALLOWED_FIELDS = new Set(["price", "marketPrice", "stock"]);
+const NUMERIC_FIELDS = new Set(["price", "marketPrice", "stock", "temperature"]);
+const STATUS_FIELDS = new Set(["cup_empty", "material_empty", "device_online"]);
+const PRODUCT_FIELDS = new Set(["price", "marketPrice", "stock"]);
 
 export async function saveAlertRule(_previous: AlertRuleResult | null, formData: FormData): Promise<AlertRuleResult> {
   const session = await getSessionProfile();
@@ -18,20 +20,37 @@ export async function saveAlertRule(_previous: AlertRuleResult | null, formData:
   const minValue = minRaw === "" ? null : Number(minRaw);
   const maxValue = maxRaw === "" ? null : Number(maxRaw);
   const severity = String(formData.get("severity") ?? "warning");
+  const machineId = String(formData.get("machine_id") ?? "") || null;
+  const productId = String(formData.get("product_id") ?? "") || null;
+  const ruleType = STATUS_FIELDS.has(field) ? "status_equals" : "numeric_range";
+  const targetValue = ruleType === "status_equals" ? String(formData.get("target_value") ?? "") : null;
   if (!name) return { ok: false, error: "Rule name is required." };
-  if (!ALLOWED_FIELDS.has(field)) return { ok: false, error: "Unsupported field." };
-  if (minValue === null && maxValue === null) return { ok: false, error: "Set a minimum, maximum, or both." };
-  if ((minValue !== null && !Number.isFinite(minValue)) || (maxValue !== null && !Number.isFinite(maxValue))) return { ok: false, error: "Limits must be numbers." };
-  if (minValue !== null && maxValue !== null && minValue > maxValue) return { ok: false, error: "Minimum cannot exceed maximum." };
+  if (!NUMERIC_FIELDS.has(field) && !STATUS_FIELDS.has(field)) return { ok: false, error: "Unsupported field." };
+  if (ruleType === "numeric_range" && minValue === null && maxValue === null) return { ok: false, error: "Set a minimum, maximum, or both." };
+  if (ruleType === "numeric_range" && ((minValue !== null && !Number.isFinite(minValue)) || (maxValue !== null && !Number.isFinite(maxValue)))) return { ok: false, error: "Limits must be numbers." };
+  if (ruleType === "numeric_range" && minValue !== null && maxValue !== null && minValue > maxValue) return { ok: false, error: "Minimum cannot exceed maximum." };
+  if (ruleType === "status_equals" && !new Set(["true", "false"]).has(targetValue ?? "")) return { ok: false, error: "Select a status." };
+  if (productId && !PRODUCT_FIELDS.has(field)) return { ok: false, error: "Product scope only applies to price and stock fields." };
   if (!new Set(["info", "warning", "critical"]).has(severity)) return { ok: false, error: "Invalid severity." };
 
   const s = await createServiceClient();
+  if (machineId) {
+    const { data } = await s.from("machines").select("id").eq("id", machineId).maybeSingle();
+    if (!data) return { ok: false, error: "Machine not found." };
+  }
+  if (productId) {
+    const { data } = await s.from("products").select("id").eq("id", productId).maybeSingle();
+    if (!data) return { ok: false, error: "Product not found." };
+  }
   const { error } = await s.from("change_alert_rules").insert({
     name,
     field,
-    machine_id: String(formData.get("machine_id") ?? "") || null,
-    min_value: minValue,
-    max_value: maxValue,
+    machine_id: machineId,
+    product_id: productId,
+    rule_type: ruleType,
+    min_value: ruleType === "numeric_range" ? minValue : null,
+    max_value: ruleType === "numeric_range" ? maxValue : null,
+    target_value: targetValue,
     severity,
     created_by: session.id,
   });

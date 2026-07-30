@@ -314,7 +314,7 @@ export async function refreshResource(cfg: HuaxinConfig, deviceImei: string) {
 
 export async function getDeviceStatus(cfg: HuaxinConfig, deviceImei: string) {
   const data = await call("/machine/cloud/api/device/configure/status/detail", cfg, { device_imei: deviceImei });
-  return (data.data as { code?: string; value?: string; desc?: string }[]) ?? [];
+  return (data.data as { code?: string; value?: string; desc?: string; data?: string | number }[]) ?? [];
 }
 
 export async function listDeviceMedia(cfg: HuaxinConfig, deviceImei: string) {

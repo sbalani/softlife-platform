@@ -1,10 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getConfigFromEnv, listDevices, listDeviceProducts } from "@/lib/huaxin/client";
+import { getConfigFromEnv, getDeviceStatus, listDevices, listDeviceProducts } from "@/lib/huaxin/client";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getSessionProfile, type SessionProfile } from "@/lib/auth/session";
-import { recordMachineSync } from "@/lib/data/change-log";
+import { recordMachineStatuses, recordMachineSync } from "@/lib/data/change-log";
 
 export type SyncResult = { ok: boolean; synced?: number; error?: string };
 
@@ -64,6 +64,7 @@ export async function syncOneMachine(imei: string): Promise<SyncResult> {
 
     const { data: machine } = await s.from("machines").select("id,name").eq("device_imei", imei).maybeSingle();
     if (machine?.id) {
+      await recordMachineStatuses(s, { id: machine.id, device_imei: imei, name: machine.name as string | null }, await getDeviceStatus(cfg, imei));
       await syncProductsToIngredients(s, cfg, imei, machine.id, machine.name as string | null, actor);
     }
 

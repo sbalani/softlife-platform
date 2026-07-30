@@ -14,6 +14,7 @@ function ymd(d: Date) {
 export async function updateOrders(_prev: UpdateOrdersResult | null, fd: FormData): Promise<UpdateOrdersResult> {
   const fromRaw = String(fd.get("from") ?? "").trim();
   const toRaw = String(fd.get("to") ?? "").trim();
+  const deviceImeis = String(fd.get("deviceImeis") ?? "").split(",").map((imei) => imei.trim()).filter(Boolean);
 
   // Default: last 7 days. Advanced: any explicit range (capped so a typo'd
   // year doesn't turn into thousands of paginated Huaxin calls).
@@ -28,8 +29,9 @@ export async function updateOrders(_prev: UpdateOrdersResult | null, fd: FormDat
   if (rangeDays > MAX_RANGE_DAYS) {
     return { ok: false, summary: `Range too large — max ${MAX_RANGE_DAYS} days per update. Run it in chunks.` };
   }
+  if (deviceImeis.some((imei) => !/^\d{10,20}$/.test(imei))) return { ok: false, summary: "Invalid machine selection." };
 
-  const res = await ingestOrders(from, to);
+  const res = await ingestOrders(from, to, deviceImeis);
   if (!res.ok) return { ok: false, summary: res.error ?? "Update failed." };
 
   revalidatePath("/orders");

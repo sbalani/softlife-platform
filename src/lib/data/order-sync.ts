@@ -1,13 +1,15 @@
 import { getConfigFromEnv, listAllOrders, listDevices } from "@/lib/huaxin/client";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { huaxinOrderTime } from "@/lib/huaxin/order-time";
+import { selectOrderDevices } from "@/lib/data/order-sync-selection";
 
 export type OrderSyncResult = { ok: boolean; orders: number; machines: number; error?: string };
 
-/** Pulls every order (all pages) for every device in [from, to] and upserts
+/** Pulls every order (all pages) for selected devices, or every device when
+ *  none are selected, in [from, to] and upserts
  *  into huaxin_orders, keyed by order_code. Shared by the Settings full sync
  *  and the Orders page's on-demand update/backfill. Dates are YYYY-MM-DD. */
-export async function ingestOrders(from: string, to: string): Promise<OrderSyncResult> {
+export async function ingestOrders(from: string, to: string, selectedImeis: string[] = []): Promise<OrderSyncResult> {
   const cfg = getConfigFromEnv();
   if (!cfg) return { ok: false, orders: 0, machines: 0, error: "Huaxin not configured." };
   if (!isSupabaseConfigured()) return { ok: false, orders: 0, machines: 0, error: "Supabase not configured." };
@@ -17,7 +19,8 @@ export async function ingestOrders(from: string, to: string): Promise<OrderSyncR
 
   try {
     const supabase = await createServiceClient();
-    const devices = await listDevices(cfg, { force: true });
+    const { devices, missing } = selectOrderDevices(await listDevices(cfg, { force: true }), selectedImeis);
+    if (missing.length) return { ok: false, orders: 0, machines: 0, error: `Selected machine not found in Huaxin: ${missing.join(", ")}` };
     const { data: machineRows } = await supabase.from("machines").select("id,device_imei");
     const machineIdByImei = new Map(
       ((machineRows as { id: string; device_imei: string | null }[]) ?? [])

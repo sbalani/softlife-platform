@@ -4,6 +4,7 @@ import { UpdateOrdersButton } from "./UpdateOrdersButton";
 import { formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { analyticsRange } from "@/lib/analytics";
+import { getMachines } from "@/lib/data/machines";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ const label = "mb-1 block text-[11px] uppercase tracking-wide text-taupe";
 
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
-  const tz = await getDisplayTimezone();
+  const [tz, { machines }] = await Promise.all([getDisplayTimezone(), getMachines()]);
   const range = analyticsRange(sp, tz);
   const { orders, source } = await getOrders({
     dateFrom: range.from,
@@ -52,7 +53,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             {" "}{couponCount} coupon(s) · {refundedCount} refund(s)
           </p>
         </div>
-        <UpdateOrdersButton />
+        <UpdateOrdersButton machines={machines.flatMap((machine) => machine.device_imei ? [{ id: machine.id, name: machine.name, imei: machine.device_imei }] : [])} />
       </header>
 
       {/* Filters */}

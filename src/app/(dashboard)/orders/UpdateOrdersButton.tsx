@@ -1,12 +1,15 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { updateOrders, type UpdateOrdersResult } from "./actions";
 
 const input = "rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa focus:border-terracotta focus:outline-none";
 
-export function UpdateOrdersButton() {
+type MachineOption = { id: string; name: string; imei: string };
+
+export function UpdateOrdersButton({ machines }: { machines: MachineOption[] }) {
   const [res, action, pending] = useActionState<UpdateOrdersResult | null, FormData>(updateOrders, null);
+  const [selectedImeis, setSelectedImeis] = useState<string[]>([]);
 
   return (
     <form action={action} className="flex flex-col items-end gap-2">
@@ -36,8 +39,18 @@ export function UpdateOrdersButton() {
             <input name="to" type="date" className={input} />
           </label>
         </div>
+        <input type="hidden" name="deviceImeis" value={selectedImeis.join(",")} />
+        <div className="mt-3 rounded-xl border border-line bg-white p-3 text-left">
+          <div className="mb-2 flex items-center justify-between gap-4">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-taupe">Machines ({selectedImeis.length || "all"})</span>
+            <button type="button" onClick={() => setSelectedImeis(selectedImeis.length === machines.length ? [] : machines.map((machine) => machine.imei))} className="text-xs font-semibold text-terracotta">{selectedImeis.length === machines.length ? "Clear" : "Select all"}</button>
+          </div>
+          <div className="grid max-h-48 min-w-72 gap-1 overflow-y-auto sm:grid-cols-2">
+            {machines.map((machine) => <label key={machine.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs text-cocoa hover:bg-cream"><input type="checkbox" checked={selectedImeis.includes(machine.imei)} onChange={(event) => setSelectedImeis((current) => event.target.checked ? [...current, machine.imei] : current.filter((imei) => imei !== machine.imei))} className="accent-terracotta" /><span><span className="font-semibold">{machine.name}</span> <span className="font-mono text-[10px] text-taupe">{machine.imei}</span></span></label>)}
+          </div>
+        </div>
         <p className="mt-1 text-[10px] text-taupe">
-          Default is the last 7 days. Set a range to backfill after a gap (max 92 days per run).
+          Default is the last 7 days and all machines. Select machines to limit the fetch (max 92 days per run).
         </p>
       </details>
     </form>

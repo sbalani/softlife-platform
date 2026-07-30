@@ -1,11 +1,12 @@
 import { getCoupons } from "@/lib/data/coupons";
 import { CouponCreator } from "./CouponCreator";
 import { CouponCard } from "./CouponCard";
+import { getMachines } from "@/lib/data/machines";
 
 export const dynamic = "force-dynamic";
 
 export default async function CouponsPage() {
-  const coupons = await getCoupons();
+  const [coupons, { machines }] = await Promise.all([getCoupons(), getMachines()]);
 
   return (
     <div>
@@ -19,7 +20,7 @@ export default async function CouponsPage() {
       <details className="mb-6 rounded-2xl border border-line bg-white p-5">
         <summary className="cursor-pointer font-display text-lg font-bold text-cocoa">Create coupon</summary>
         <div className="mt-4">
-          <CouponCreator />
+          <CouponCreator machines={machines.filter((machine) => machine.device_imei).map((machine) => ({ id: machine.id, name: machine.name, imei: machine.device_imei! }))} />
         </div>
       </details>
 

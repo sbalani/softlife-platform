@@ -1,6 +1,11 @@
+import Link from "next/link";
 import { getAlerts } from "@/lib/data/alerts";
 import { formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
+import { getChangeAlertRules } from "@/lib/data/change-alert-rules";
+import { getMachines } from "@/lib/data/machines";
+import { AlertRuleManager } from "./AlertRuleManager";
+import { ResolveAlertButton } from "./ResolveAlertButton";
 
 export const dynamic = "force-dynamic";
 
@@ -11,14 +16,15 @@ const SEV: Record<string, { ring: string; dot: string; label: string }> = {
 };
 
 export default async function AlertsPage() {
-  const { alerts, source } = await getAlerts();
-  const tz = await getDisplayTimezone();
+  const [{ alerts, source }, tz, rules, { machines }] = await Promise.all([getAlerts(), getDisplayTimezone(), getChangeAlertRules(), getMachines()]);
   return (
     <div>
       <header className="mb-8">
         <h1 className="font-display text-3xl font-bold text-cocoa">Alerts</h1>
         <p className="mt-1 text-sm text-taupe">{alerts.length} active alert{alerts.length === 1 ? "" : "s"}</p>
       </header>
+
+      <AlertRuleManager rules={rules} machines={machines} />
 
       <div className="space-y-3">
         {alerts.map((a) => {
@@ -40,7 +46,7 @@ export default async function AlertsPage() {
                     )}
                   </div>
                   <p className="mt-1.5 font-semibold text-cocoa">{a.message}</p>
-                  <p className="mt-1 text-xs text-taupe">{formatDateTime(a.created_at, tz)}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-taupe"><span>{formatDateTime(a.created_at, tz)}</span>{a.change_log_id && <Link href={`/change-log?${new URLSearchParams({ ...(a.device_imei ? { machine: a.device_imei } : {}), ...(a.change_field ? { field: a.change_field } : {}) })}`} className="font-semibold text-terracotta">View change</Link>}<ResolveAlertButton id={a.id} /></div>
                 </div>
                 {a.remaining_pct != null && (
                   <div className="text-right">

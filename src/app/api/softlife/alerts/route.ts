@@ -9,6 +9,7 @@ export async function GET() {
     const { data } = await s
       .from("alerts")
       .select("*")
+      .neq("type", "change_out_of_range")
       .order("created_at", { ascending: false })
       .limit(50);
     return Response.json(data ?? []);

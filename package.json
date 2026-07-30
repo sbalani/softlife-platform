@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test:change-log": "node --experimental-strip-types --test src/lib/data/change-log.test.ts",
     "test:order-time": "node --experimental-strip-types --test src/lib/huaxin/order-time.test.ts",
-    "test:analytics": "node --experimental-strip-types --test src/lib/analytics.test.ts"
+    "test:analytics": "node --experimental-strip-types --test src/lib/analytics.test.ts",
+    "test:coupon-dates": "node --experimental-strip-types --test src/lib/coupon-dates.test.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.5",

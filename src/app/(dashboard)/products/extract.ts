@@ -59,7 +59,8 @@ const EMPTY: ExtractResult = {
 
 export async function extractFromSheet(_prev: ExtractResult | null, fd: FormData): Promise<ExtractResult> {
   const file = fd.get("sheet");
-  if (!(file instanceof File) || !file.size) return { ...EMPTY, error: "Please choose an image." };
+  if (!(file instanceof File) || !file.size) return { ...EMPTY, error: "Please choose an image or PDF." };
+  if (file.size > 4 * 1024 * 1024) return { ...EMPTY, error: "The spec sheet must be smaller than 4 MB." };
 
   try {
     const bytes = await file.arrayBuffer();
@@ -85,8 +86,8 @@ export async function extractFromSheet(_prev: ExtractResult | null, fd: FormData
       ],
     });
 
-    let containsIds: string[] = [];
-    let mayContainIds: string[] = [];
+    const containsIds: string[] = [];
+    const mayContainIds: string[] = [];
     const unmatched: string[] = [];
     if (isSupabaseConfigured()) {
       const s = await createServiceClient();

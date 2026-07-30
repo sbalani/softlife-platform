@@ -4,6 +4,7 @@ import { getOdooSkus } from "@/lib/data/odoo";
 import { ProductForm } from "./ProductForm";
 import { LinkOdooControl } from "./LinkOdooControl";
 import { AliasManager } from "./AliasManager";
+import Image from "next/image";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ function AllergenBadges({ list, dim }: { list: { id: string; name: string; logo_
     <>
       {list.map((a) =>
         a.logo_url ? (
-          <img key={a.id} src={a.logo_url} alt={a.name} title={`${dim ? "may contain" : "contains"}: ${a.name}`} className={`h-5 w-5 object-contain ${dim ? "opacity-40" : ""}`} />
+          <Image key={a.id} src={a.logo_url} alt={a.name} title={`${dim ? "may contain" : "contains"}: ${a.name}`} width={20} height={20} className={`h-5 w-5 object-contain ${dim ? "opacity-40" : ""}`} />
         ) : (
           <span key={a.id} title={`${dim ? "may contain" : "contains"}: ${a.name}`} className={`flex h-5 w-5 items-center justify-center rounded-full bg-sand text-[9px] font-bold text-taupe ${dim ? "opacity-40" : ""}`}>{a.name[0]}</span>
         ),
@@ -52,7 +53,7 @@ export default async function IngredientsPage() {
           <article key={p.id} className="rounded-2xl border border-line bg-white p-5">
             <div className="flex gap-4">
               {p.image_url ? (
-                <img src={p.image_url} alt={p.name} className="h-16 w-16 rounded-xl object-cover" />
+                <Image src={p.image_url} alt={p.name} width={64} height={64} className="h-16 w-16 rounded-xl object-cover" />
               ) : (
                 <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-cream text-taupe">—</div>
               )}

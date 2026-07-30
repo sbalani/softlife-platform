@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useActionState } from "react";
+import Image from "next/image";
 import { createProduct, updateProduct, type ProductResult } from "./actions";
 import { extractFromSheet, type ExtractResult } from "./extract";
 import { AllergenCompositeField } from "./AllergenCompositeField";
@@ -49,7 +49,7 @@ function AllergenGroup({
           <label key={a.id} className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-line bg-white px-2 py-1 text-xs text-cocoa">
             <input type="checkbox" name={name} value={a.id} defaultChecked={selected.includes(a.id)} className="accent-terracotta" />
             {a.logo_url ? (
-              <img src={a.logo_url} alt={a.name} className="h-4 w-4 object-contain" />
+              <Image src={a.logo_url} alt={a.name} width={16} height={16} className="h-4 w-4 object-contain" />
             ) : (
               <span className="flex h-4 w-4 items-center justify-center rounded-full bg-sand text-[9px] font-bold text-taupe">{a.name[0]}</span>
             )}
@@ -67,17 +67,9 @@ export function ProductForm({ allergens, product }: { allergens: Allergen[]; pro
     null,
   );
   const [extractRes, extractAction, extractPending] = useActionState<ExtractResult | null, FormData>(extractFromSheet, null);
-  const [ex, setEx] = useState<ExtractResult | null>(null);
-  const [version, setVersion] = useState(0);
+  const ex = extractRes && !extractRes.error ? extractRes : null;
   const containsIds = product?.allergens.contains.map((a) => a.id) ?? [];
   const mayContainIds = product?.allergens.may_contain.map((a) => a.id) ?? [];
-
-  useEffect(() => {
-    if (extractRes && !extractRes.error) {
-      setEx(extractRes);
-      setVersion((v) => v + 1);
-    }
-  }, [extractRes]);
 
   return (
     <div className="space-y-4">
@@ -89,19 +81,19 @@ export function ProductForm({ allergens, product }: { allergens: Allergen[]; pro
             <input name="sheet" type="file" accept="image/*,.pdf,application/pdf" className={`w-64 text-xs ${input}`} />
           </label>
           <button type="submit" disabled={extractPending} className="rounded-lg bg-cocoa px-4 py-2 text-sm font-bold text-white hover:opacity-90 disabled:opacity-60">
-            {extractPending ? "Reading…" : "Extract with AI"}
+            {extractPending ? "Reading…" : "Extract and fill form"}
           </button>
           {extractRes?.error && <span className="text-xs text-danger">{extractRes.error}</span>}
           {ex && !extractRes?.error && (
             <span className="text-xs text-sage">
-              Filled from sheet{ex.unmatched.length ? ` · unmatched allergens: ${ex.unmatched.join(", ")}` : ""} — review &amp; edit.
+              Filled from sheet{ex.unmatched.length ? ` · unmatched allergens: ${ex.unmatched.join(", ")}` : ""}. Not saved yet — review, then click {product ? "Save changes" : "Add ingredient"}.
             </span>
           )}
         </div>
       </form>
 
       {/* Main form (remounts on extract to apply defaults) */}
-      <form key={version} action={createAction} encType="multipart/form-data" className="space-y-4">
+      <form key={ex ? JSON.stringify(ex) : "default"} action={createAction} encType="multipart/form-data" className="space-y-4">
         {product && <input type="hidden" name="id" value={product.id} />}
         <Section title="Identity">
           <Field labelText="SKU / Item ID"><input name="sku" defaultValue={ex?.sku ?? product?.sku ?? ""} placeholder="SKU-001" className={`w-full ${input}`} /></Field>
@@ -149,7 +141,7 @@ export function ProductForm({ allergens, product }: { allergens: Allergen[]; pro
 
       <Section title="Product image">
         <Field labelText="Product image">
-          {product?.image_url && <img src={product.image_url} alt="" className="mb-2 h-12 w-12 rounded-lg object-cover" />}
+          {product?.image_url && <Image src={product.image_url} alt="" width={48} height={48} className="mb-2 h-12 w-12 rounded-lg object-cover" />}
           <input name="image" type="file" accept="image/*" className={`w-full text-xs ${input}`} />
           {product?.image_url && <span className="mt-1 block text-[10px] text-taupe">Leave blank to keep the current image.</span>}
         </Field>

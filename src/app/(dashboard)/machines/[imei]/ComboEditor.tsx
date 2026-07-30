@@ -5,6 +5,7 @@ import { pushComboToMachine, saveComboDraft, pushDraftItemAt, revertDraftItemAt,
 import { localizedGoodsName, languagePackEntries } from "@/lib/huaxin/client";
 import type { ProductDiyItem } from "@/lib/huaxin/client";
 import type { MenuDraftItem } from "@/lib/data/menu-drafts";
+import Image from "next/image";
 
 const input = "w-full rounded border border-line bg-white px-2 py-1.5 text-xs text-cocoa focus:border-terracotta focus:outline-none";
 const lbl = "mb-0.5 block text-[10px] uppercase tracking-wide text-taupe";
@@ -116,7 +117,7 @@ export function ComboEditor({
       {!editing ? (
         <div className="flex items-center gap-3">
           {displayImage ? (
-            <img src={displayImage} alt={displayName} referrerPolicy="no-referrer" className="h-12 w-12 rounded-lg object-cover" />
+            <Image src={displayImage} alt={displayName} width={48} height={48} className="h-12 w-12 rounded-lg object-cover" />
           ) : (
             <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-cream text-taupe">—</div>
           )}
@@ -229,7 +230,7 @@ export function ComboEditor({
             <span className={lbl}>Image</span>
             <div className="flex items-center gap-2">
               {imagePath ? (
-                <img src={imagePath} alt="" referrerPolicy="no-referrer" className="h-9 w-9 shrink-0 rounded object-cover" />
+                <Image src={imagePath} alt="" width={36} height={36} className="h-9 w-9 shrink-0 rounded object-cover" />
               ) : (
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-cream text-taupe">—</div>
               )}

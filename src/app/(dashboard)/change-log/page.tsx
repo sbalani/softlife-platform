@@ -34,7 +34,7 @@ export default async function ChangeLogPage({ searchParams }: { searchParams: Pr
     <div>
       <header className="mb-6">
         <h1 className="font-display text-3xl font-bold text-cocoa">Change Log</h1>
-        <p className="mt-1 text-sm text-taupe">Machine syncs, pulled differences, platform pushes, and ingredient changes. Showing the latest {rows.length} records.</p>
+        <p className="mt-1 text-sm text-taupe">Machine syncs, platform pushes, coupon API exchanges, and ingredient changes. Showing the latest {rows.length} records.</p>
       </header>
 
       <form className="mb-4 flex flex-wrap items-end gap-3">
@@ -50,7 +50,7 @@ export default async function ChangeLogPage({ searchParams }: { searchParams: Pr
       <div className="overflow-x-auto rounded-2xl border border-line bg-white">
         <table className="w-full min-w-[980px] text-sm">
           <thead className="bg-sand/60 text-left text-[11px] uppercase tracking-wide text-taupe">
-            <tr><th className="px-4 py-3">Date</th><th className="px-4 py-3">Machine / item</th><th className="px-4 py-3">Source</th><th className="px-4 py-3">Field</th><th className="px-4 py-3">Before</th><th className="px-4 py-3">After</th><th className="px-4 py-3">By</th></tr>
+            <tr><th className="px-4 py-3">Date</th><th className="px-4 py-3">Machine / item</th><th className="px-4 py-3">Source</th><th className="px-4 py-3">Field</th><th className="px-4 py-3">Before / sent</th><th className="px-4 py-3">After / received</th><th className="px-4 py-3">By</th></tr>
           </thead>
           <tbody className="divide-y divide-line">
             {rows.map((row) => {

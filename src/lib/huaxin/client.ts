@@ -44,13 +44,20 @@ export type HuaxinOrder = {
   [k: string]: unknown;
 };
 
-type Envelope = {
+export type Envelope = {
   code?: number;
   msg?: string;
   data?: unknown;
   jsessionId?: string;
   result?: boolean;
 };
+
+export const COUPON_PATHS = {
+  edit: "/machine/cloud/api/coupon/edit",
+  list: "/machine/cloud/api/coupon/list",
+  generate: "/machine/cloud/api/coupon/generate/records",
+  records: "/machine/cloud/api/coupon/records/list",
+} as const;
 
 const AUTH_TTL_MS = 15 * 60 * 1000;
 const DEVICES_TTL_MS = 60 * 1000; // cache the device list for 60s across pages
@@ -97,21 +104,30 @@ async function request(
   const body = JSON.stringify({ ...commonParams(cfg), ...(extra ?? {}) });
   const reqHeaders = { "Content-Type": "application/json", ...(headers ?? {}) };
 
+  let res: { ok: boolean; status: number; statusText: string; text(): Promise<string> };
   if (cfg.verifySsl === false) {
     // Use undici's own fetch (not the Next.js-patched global) so the dispatcher
     // — which disables TLS verification for the expired UAT cert — is honoured.
     const undici = await import("undici");
-    const res = await undici.fetch(url, {
+    res = await undici.fetch(url, {
       method: "POST",
       headers: reqHeaders,
       body,
       dispatcher: new undici.Agent({ connect: { rejectUnauthorized: false } }),
     });
-    return (await res.json()) as Envelope;
+  } else {
+    res = await fetch(url, { method: "POST", headers: reqHeaders, body });
   }
 
-  const res = await fetch(url, { method: "POST", headers: reqHeaders, body });
-  return (await res.json()) as Envelope;
+  const text = await res.text();
+  let data: Envelope;
+  try {
+    data = JSON.parse(text) as Envelope;
+  } catch {
+    throw new Error(`Huaxin ${path} returned HTTP ${res.status} with a non-JSON response`);
+  }
+  if (!res.ok) throw new Error(`Huaxin ${path} returned HTTP ${res.status}: ${data.msg ?? res.statusText}`);
+  return data;
 }
 
 export async function authorize(cfg: HuaxinConfig) {
@@ -359,34 +375,66 @@ export async function pushDeviceSetting(cfg: HuaxinConfig, deviceImei: string, c
 // ---- Coupons / promotions ----
 
 export type HuaxinCoupon = {
-  couponId?: string;
+  couponId?: string | number;
   couponName?: string;
-  couponType?: string;
+  couponType?: string | number;
   deviceImeis?: string;
-  validDay?: number;
+  validDay?: string | number;
   startTime?: string;
   endTime?: string;
   content?: string;
   localName?: string;
 };
 
-export async function listCoupons(cfg: HuaxinConfig, page = 1) {
-  const data = await call("/machine/cloud/api/coupon/devices", cfg, { page: String(page) });
-  const payload = data.data as { list?: HuaxinCoupon[] } | null;
-  return payload?.list ?? [];
+export function couponApiError(data: Envelope): string | null {
+  const nested = data.data as { result?: boolean; message?: string } | null;
+  if (String(data.code) !== "200" || data.result === false || nested?.result === false) {
+    return nested?.message ?? data.msg ?? "Huaxin rejected the coupon request.";
+  }
+  return null;
+}
+
+export async function listCouponsPage(cfg: HuaxinConfig, deviceImei: string, page = 1) {
+  const data = await call(COUPON_PATHS.list, cfg, { device_imei: deviceImei, page: String(page) });
+  const error = couponApiError(data);
+  if (error) throw new Error(error);
+  if (Array.isArray(data.data)) return { coupons: data.data as HuaxinCoupon[], totalPage: 1 };
+  const payload = data.data as { list?: HuaxinCoupon[]; records?: HuaxinCoupon[]; totalPage?: number } | null;
+  return { coupons: payload?.list ?? payload?.records ?? [], totalPage: Number(payload?.totalPage ?? 1) || 1 };
+}
+
+export async function listCoupons(cfg: HuaxinConfig, deviceImei: string) {
+  const first = await listCouponsPage(cfg, deviceImei);
+  const coupons = [...first.coupons];
+  for (let page = 2; page <= Math.min(first.totalPage, 20); page++) {
+    const next = await listCouponsPage(cfg, deviceImei, page);
+    coupons.push(...next.coupons);
+  }
+  return coupons;
 }
 
 export async function createCoupon(cfg: HuaxinConfig, params: Record<string, string>) {
-  return call("/machine/cloud/api/coupon/edit", cfg, params);
+  return call(COUPON_PATHS.edit, cfg, params);
 }
 
 export async function generateCouponCodes(cfg: HuaxinConfig, couponId: string, num: number) {
-  return call("/machine/cloud/api/coupon/generate/records", cfg, { couponId, num: String(num) });
+  return call(COUPON_PATHS.generate, cfg, { couponId, num: String(num) });
 }
 
-export async function getCouponRecords(cfg: HuaxinConfig, couponId: string, page = 1) {
-  const data = await call("/machine/cloud/api/coupon/records/list", cfg, { couponId, page: String(page) });
-  return data.data;
+export async function getCouponRecords(cfg: HuaxinConfig, couponId: string, couponCode = "") {
+  const records: unknown[] = [];
+  let page = 1;
+  let totalPage = 1;
+  do {
+    const data = await call(COUPON_PATHS.records, cfg, { couponId, couponCode, page: String(page) });
+    const error = couponApiError(data);
+    if (error) throw new Error(error);
+    const payload = data.data as { list?: unknown[]; totalPage?: number } | null;
+    records.push(...(payload?.list ?? []));
+    totalPage = Math.min(Number(payload?.totalPage ?? 1) || 1, 20);
+    page++;
+  } while (page <= totalPage);
+  return records;
 }
 
 export async function deleteCouponApi(cfg: HuaxinConfig, couponIds: string) {

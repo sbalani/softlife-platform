@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ProductDiyItem, DiyPushItem } from "@/lib/huaxin/client";
+import { COUPON_PATHS, type ProductDiyItem, type DiyPushItem } from "@/lib/huaxin/client";
 import type { SessionProfile } from "@/lib/auth/session";
 
 type Menu = { diy: ProductDiyItem[]; unify: ProductDiyItem[] };
@@ -173,6 +173,29 @@ export async function recordProductChange(
   }));
   const { error } = await s.from("machine_change_log").insert(rows);
   if (error) throw new Error(`Could not write product change log: ${error.message}`);
+}
+
+export async function recordCouponExchange(
+  s: SupabaseClient,
+  operation: string,
+  request: Record<string, unknown>,
+  response: unknown,
+  actor: Actor,
+) {
+  const { error } = await s.from("machine_change_log").insert({
+    device_imei: typeof request.deviceImeis === "string" ? request.deviceImeis : null,
+    source: "platform",
+    action: `coupon_${operation}`,
+    entity_type: "coupon",
+    entity_key: String(request.couponId ?? "0"),
+    field: "api_exchange",
+    old_value: request,
+    new_value: response,
+    actor_id: actor?.id ?? null,
+    actor_email: actor?.email ?? null,
+    metadata: { endpoint: COUPON_PATHS[operation as keyof typeof COUPON_PATHS] ?? operation },
+  });
+  if (error) throw new Error(`Could not write coupon API log: ${error.message}`);
 }
 
 export async function getChangeLog(s: SupabaseClient, filters: ChangeLogFilters): Promise<ChangeLogRow[]> {

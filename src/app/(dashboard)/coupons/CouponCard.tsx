@@ -7,9 +7,8 @@ import type { HuaxinCoupon } from "@/lib/huaxin/client";
 const TYPE_BADGE: Record<string, string> = {
   "0": "bg-terracotta/15 text-terracotta",
   "1": "bg-sage/15 text-sage",
-  "2": "bg-rose/15 text-rose",
 };
-const TYPE_NAME: Record<string, string> = { "0": "Discount", "1": "One-cup", "2": "Secondary" };
+const TYPE_NAME: Record<string, string> = { "0": "Discount", "1": "One-cup" };
 
 type CodeRecord = { code?: string; status?: string; expireTime?: string; createTime?: string };
 const STATUS: Record<string, string> = { "0": "Unused", "1": "Used", "2": "Expired" };
@@ -25,8 +24,14 @@ export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
     const n = parseInt(genCount, 10);
     if (!n) return;
     startTransition(async () => {
-      const res = await generateCodes(coupon.couponId!, n);
+      const res = await generateCodes(String(coupon.couponId), n);
       setMsg(res.ok ? `Generated ${n} code(s).` : res.error ?? "Failed");
+      if (res.ok) {
+        const loaded = await fetchRecords(String(coupon.couponId));
+        setCodes(loaded.records as CodeRecord[]);
+        setExpanded(true);
+        if (loaded.error) setMsg(loaded.error);
+      }
     });
   };
 
@@ -34,14 +39,15 @@ export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
     if (expanded) { setExpanded(false); return; }
     setExpanded(true);
     startTransition(async () => {
-      const res = await fetchRecords(coupon.couponId!);
-      setCodes(res.records as CodeRecord[]);
+      const res = await fetchRecords(String(coupon.couponId));
+      if (res.error) setMsg(res.error);
+      else setCodes(res.records as CodeRecord[]);
     });
   };
 
   const remove = () => {
     startTransition(async () => {
-      const res = await deleteCouponAction(coupon.couponId!);
+      const res = await deleteCouponAction(String(coupon.couponId));
       setMsg(res.ok ? "Deleted." : res.error ?? "Failed");
     });
   };

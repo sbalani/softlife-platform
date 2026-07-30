@@ -7,8 +7,12 @@ import {
   generateCouponCodes,
   getCouponRecords,
   deleteCouponApi,
+  couponApiError,
 } from "@/lib/huaxin/client";
 import { couponDaysBetween } from "@/lib/coupon-dates";
+import { createServiceClient } from "@/lib/supabase/server";
+import { getSessionProfile } from "@/lib/auth/session";
+import { recordCouponExchange } from "@/lib/data/change-log";
 
 export type CouponResult = { ok: boolean; error?: string };
 
@@ -22,7 +26,7 @@ export async function createCouponAction(_prev: CouponResult | null, fd: FormDat
   const validDay = Number(fd.get("validDay") ?? 0);
   const totalCount = Number(fd.get("totalCount") ?? 0);
   const deviceImeis = String(fd.get("deviceImeis") ?? "").split(",").map((imei) => imei.trim()).filter(Boolean);
-  if (!new Set(["0", "1", "2"]).has(couponType)) return { ok: false, error: "Invalid coupon type." };
+  if (!new Set(["0", "1"]).has(couponType)) return { ok: false, error: "Invalid coupon type." };
   if (!couponName) return { ok: false, error: "Coupon name is required." };
   if (!startTime || !endTime) return { ok: false, error: "Start and end dates are required." };
   if (endTime < startTime) return { ok: false, error: "End date cannot be before start date." };
@@ -30,16 +34,19 @@ export async function createCouponAction(_prev: CouponResult | null, fd: FormDat
   if (!Number.isInteger(totalCount) || totalCount < 0 || totalCount > 100) return { ok: false, error: "Serial code count must be between 0 and 100." };
   if (couponDaysBetween(startTime, endTime) !== validDay) return { ok: false, error: "End date and valid days do not match." };
   if (deviceImeis.some((imei) => !/^\d{10,20}$/.test(imei))) return { ok: false, error: "Invalid machine selection." };
+  if (!deviceImeis.length) return { ok: false, error: "Select at least one machine." };
+  const localName = String(fd.get("localName") ?? "").trim();
+  if (!localName) return { ok: false, error: "Location label is required." };
   const params: Record<string, string> = {
     couponId: "0",
     couponType,
     couponName,
-    startTime,
-    endTime,
+    startTime: `${startTime} 00:00:00`,
+    endTime: `${endTime} 23:59:59`,
     validDay: String(validDay),
     totalCount: String(totalCount),
     deviceImeis: deviceImeis.join(","),
-    localName: String(fd.get("localName") ?? ""),
+    localName,
   };
   if (couponType === "0") {
     const money = Number(fd.get("money") ?? 0);
@@ -55,32 +62,42 @@ export async function createCouponAction(_prev: CouponResult | null, fd: FormDat
       productPosition,
       productName,
     });
-  } else {
-    const secondary = Number(fd.get("secondary") ?? 0);
-    if (!Number.isInteger(secondary) || secondary < 1) return { ok: false, error: "Uses per card must be at least 1." };
-    params.content = JSON.stringify({ secondary: String(secondary) });
   }
 
   try {
     const result = await createCoupon(cfg, params);
-    if (String(result.code) === "200") {
+    await logCouponExchange("edit", params, result);
+    const error = couponApiError(result);
+    if (!error) {
       revalidatePath("/coupons");
       return { ok: true };
     }
-    return { ok: false, error: result.msg ?? "Failed" };
+    return { ok: false, error };
   } catch (e) {
+    await logCouponExchange("edit", params, { error: e instanceof Error ? e.message : String(e) });
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+async function logCouponExchange(operation: string, request: Record<string, unknown>, response: unknown) {
+  try {
+    await recordCouponExchange(await createServiceClient(), operation, request, response, await getSessionProfile());
+  } catch (error) {
+    console.error("[coupons] Could not write API exchange log:", error);
   }
 }
 
 export async function generateCodes(couponId: string, num: number): Promise<CouponResult> {
   const cfg = getConfigFromEnv();
   if (!cfg) return { ok: false, error: "Huaxin not configured." };
+  if (!Number.isInteger(num) || num < 1 || num > 100) return { ok: false, error: "Serial code count must be between 1 and 100." };
   try {
     const result = await generateCouponCodes(cfg, couponId, num);
-    if (String(result.code) === "200") return { ok: true };
-    return { ok: false, error: result.msg ?? "Failed" };
+    await logCouponExchange("generate", { couponId, num }, result);
+    const error = couponApiError(result);
+    return error ? { ok: false, error } : { ok: true };
   } catch (e) {
+    await logCouponExchange("generate", { couponId, num }, { error: e instanceof Error ? e.message : String(e) });
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
@@ -89,9 +106,7 @@ export async function fetchRecords(couponId: string): Promise<{ records: unknown
   const cfg = getConfigFromEnv();
   if (!cfg) return { records: [], error: "Huaxin not configured." };
   try {
-    const data = await getCouponRecords(cfg, couponId);
-    const records = ((data as Record<string, unknown>)?.list as unknown[]) ?? [];
-    return { records };
+    return { records: await getCouponRecords(cfg, couponId, "") };
   } catch (e) {
     return { records: [], error: e instanceof Error ? e.message : String(e) };
   }
@@ -102,12 +117,15 @@ export async function deleteCouponAction(couponId: string): Promise<CouponResult
   if (!cfg) return { ok: false, error: "Huaxin not configured." };
   try {
     const result = await deleteCouponApi(cfg, couponId);
-    if (String(result.code) === "200") {
+    await logCouponExchange("delete", { couponIds: couponId }, result);
+    const error = couponApiError(result);
+    if (!error) {
       revalidatePath("/coupons");
       return { ok: true };
     }
-    return { ok: false, error: result.msg ?? "Failed" };
+    return { ok: false, error };
   } catch (e) {
+    await logCouponExchange("delete", { couponIds: couponId }, { error: e instanceof Error ? e.message : String(e) });
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }

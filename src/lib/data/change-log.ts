@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ProductDiyItem, DiyPushItem } from "@/lib/huaxin/client";
+import { COUPON_PATHS, type ProductDiyItem, type DiyPushItem } from "../huaxin/client.ts";
 import type { SessionProfile } from "@/lib/auth/session";
 
 type Menu = { diy: ProductDiyItem[]; unify: ProductDiyItem[] };
@@ -105,6 +105,19 @@ async function machineProductIds(s: SupabaseClient, machineId: string) {
   return ids;
 }
 
+export function menuProductIdMap(menu: Menu, products: { id: string; name: string }[]) {
+  const byName = new Map(products.map((product) => [product.name.toLowerCase().trim(), product.id]));
+  return new Map(menu.diy.flatMap((item) => {
+    const productId = item.goodsName ? byName.get(item.goodsName.toLowerCase().trim()) : null;
+    return productId && item.position != null ? [[String(item.position), productId] as const] : [];
+  }));
+}
+
+async function menuProductIds(s: SupabaseClient, menu: Menu) {
+  const { data } = await s.from("products").select("id,name");
+  return menuProductIdMap(menu, (data as { id: string; name: string }[]) ?? []);
+}
+
 function productIdForEntity(entityKey: string, productIds: Map<string, string>) {
   const [kind, position] = entityKey.split(":");
   return kind === "diy" ? productIds.get(position) ?? null : null;
@@ -117,7 +130,7 @@ export async function recordMachineSync(
   actor: Actor,
 ) {
   const next = menuSnapshot(menu);
-  const productIds = await machineProductIds(s, machine.id);
+  const productIds = await menuProductIds(s, menu);
   const { data: saved, error: readError } = await s.from("machine_menu_snapshots").select("snapshot").eq("device_imei", machine.device_imei).maybeSingle();
   if (readError) throw new Error(`Could not read machine audit snapshot: ${readError.message}`);
   const previous = (saved?.snapshot as Snapshot | undefined) ?? null;
@@ -210,8 +223,8 @@ export async function recordProductChange(
     source,
     action: before ? "updated" : "created",
     entity_type: "product",
-      entity_key: String(after.id ?? before?.id ?? ""),
-      product_id: String(after.id ?? before?.id ?? "") || null,
+    entity_key: String(after.id ?? before?.id ?? ""),
+    product_id: String(after.id ?? before?.id ?? "") || null,
     field,
     old_value: before?.[field] ?? null,
     new_value: after[field] ?? null,
@@ -269,6 +282,29 @@ export async function recordMachineStatuses(s: SupabaseClient, machine: Machine,
     observed_at: new Date().toISOString(),
   })));
   if (snapshotError) throw new Error(`Could not save machine status snapshots: ${snapshotError.message}`);
+}
+
+export async function recordCouponExchange(
+  s: SupabaseClient,
+  operation: string,
+  request: Record<string, unknown>,
+  response: unknown,
+  actor: Actor,
+) {
+  const { error } = await s.from("machine_change_log").insert({
+    device_imei: typeof request.deviceImeis === "string" ? request.deviceImeis : null,
+    source: "platform",
+    action: `coupon_${operation}`,
+    entity_type: "coupon",
+    entity_key: String(request.couponId ?? "0"),
+    field: "api_exchange",
+    old_value: request,
+    new_value: response,
+    actor_id: actor?.id ?? null,
+    actor_email: actor?.email ?? null,
+    metadata: { endpoint: COUPON_PATHS[operation as keyof typeof COUPON_PATHS] ?? operation },
+  });
+  if (error) throw new Error(`Could not write coupon API log: ${error.message}`);
 }
 
 export async function getChangeLog(s: SupabaseClient, filters: ChangeLogFilters): Promise<ChangeLogRow[]> {

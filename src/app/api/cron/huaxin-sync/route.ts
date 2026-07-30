@@ -34,14 +34,12 @@ export async function GET(req: Request) {
   const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
   for (const d of devices) {
     if (!d.deviceImei) continue;
-    const isOnline = (d.onlineStatus as string) === "online";
     const { data: machine, error } = await supabase.from("machines").upsert(
       {
         device_imei: d.deviceImei,
         device_id_huaxin: d.deviceId ?? null,
         name: (d.deviceLabel as string) || d.deviceName || d.deviceImei,
-        state: isOnline ? "active" : "stored",
-        is_online: isOnline,
+        is_online: (d.onlineStatus as string) === "online",
         huaxin_last_sync: new Date().toISOString(),
       },
       { onConflict: "device_imei" },

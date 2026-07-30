@@ -14,8 +14,10 @@ export function huaxinLocalTimeToUtc(value: string | null | undefined): string |
 }
 
 export function huaxinOrderTime(order: Pick<HuaxinOrder, "createTimeUtc" | "createTime" | "localPayTime" | "payTime">): string | null {
-  return (order.createTimeUtc ? iso(order.createTimeUtc) : null)
+  // Machines can queue offline sales for days. Huaxin then stamps createTimeUtc
+  // with the later cloud-upload time, while localPayTime retains the sale time.
+  return huaxinLocalTimeToUtc(order.localPayTime)
+    ?? (order.createTimeUtc ? iso(order.createTimeUtc) : null)
     ?? huaxinLocalTimeToUtc(order.createTime)
-    ?? huaxinLocalTimeToUtc(order.localPayTime)
     ?? huaxinLocalTimeToUtc(order.payTime);
 }

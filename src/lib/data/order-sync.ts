@@ -45,6 +45,7 @@ export async function ingestOrders(from: string, to: string, selectedImeis: stri
           price: Number(o.price ?? 0),
           amount: Number(o.amount ?? 0),
           product_name: o.products?.[0]?.goodsName ?? o.goodsName ?? null,
+          raw: JSON.stringify(o),
         }));
         if (rows.length) {
           const { error } = await supabase.from("huaxin_orders").upsert(rows, { onConflict: "order_code" });

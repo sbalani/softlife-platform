@@ -3,18 +3,11 @@ import { DataSourceNote } from "@/components/data-source-note";
 import { UpdateOrdersButton } from "./UpdateOrdersButton";
 import { formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
+import { analyticsRange } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = { machine?: string; minPrice?: string; maxPrice?: string; couponOnly?: string; refundedOnly?: string; serverModeOnly?: string };
-
-function qs(sp: SearchParams, overrides: Partial<SearchParams>) {
-  const p = new URLSearchParams();
-  const merged = { ...sp, ...overrides };
-  for (const [k, v] of Object.entries(merged)) if (v) p.set(k, v);
-  const s = p.toString();
-  return s ? `/orders?${s}` : "/orders";
-}
+type SearchParams = { dateFrom?: string; dateTo?: string; machine?: string; minPrice?: string; maxPrice?: string; couponOnly?: string; refundedOnly?: string; serverModeOnly?: string };
 
 const STATE_TONE: Record<string, string> = {
   COMPLETE: "bg-sage/15 text-sage",
@@ -28,7 +21,12 @@ const label = "mb-1 block text-[11px] uppercase tracking-wide text-taupe";
 
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
+  const tz = await getDisplayTimezone();
+  const range = analyticsRange(sp, tz);
   const { orders, source } = await getOrders({
+    dateFrom: range.from,
+    dateTo: range.to,
+    timeZone: tz,
     machine: sp.machine,
     minPrice: sp.minPrice ? Number(sp.minPrice) : undefined,
     maxPrice: sp.maxPrice ? Number(sp.maxPrice) : undefined,
@@ -41,7 +39,6 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const machineRevenue = completed.filter((o) => !o.is_server_mode).reduce((s, o) => s + o.price, 0);
   const franchiseeOwed = completed.filter((o) => o.is_server_mode).reduce((s, o) => s + o.price, 0);
   const couponCount = orders.filter((o) => o.coupon_used).length;
-  const tz = await getDisplayTimezone();
   const refundedCount = orders.filter((o) => o.refund_status === "Refunded").length;
 
   return (
@@ -60,6 +57,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
 
       {/* Filters */}
       <form className="mb-4 flex flex-wrap items-end gap-3">
+        <label className="block"><span className={label}>From</span><input name="dateFrom" type="date" defaultValue={range.from} max={range.to} className={input} /></label>
+        <label className="block"><span className={label}>To</span><input name="dateTo" type="date" defaultValue={range.to} min={range.from} max={range.today} className={input} /></label>
         <label className="block">
           <span className={label}>Machine</span>
           <input name="machine" defaultValue={sp.machine} placeholder="Name or IMEI" className={`w-40 ${input}`} />
@@ -93,7 +92,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           <thead className="bg-sand/60 text-left text-[11px] uppercase tracking-wide text-taupe">
             <tr>
               <th className="px-4 py-3 font-bold">Time</th>
-              <th className="px-4 py-3 font-bold">Machine</th>
+              <th className="px-4 py-3 font-bold">Machine name</th>
+              <th className="px-4 py-3 font-bold">IMEI</th>
               <th className="px-4 py-3 font-bold">Products</th>
               <th className="px-4 py-3 font-bold">Pay Type</th>
               <th className="px-4 py-3 text-right font-bold">List Price</th>
@@ -112,7 +112,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 <td className="px-4 py-3 text-cocoa whitespace-nowrap text-xs">
                   {o.order_time ? formatDateTime(o.order_time, tz) : "—"}
                 </td>
-                <td className="px-4 py-3 font-semibold text-cocoa whitespace-nowrap text-xs">{o.machine_name ?? o.device_imei ?? "—"}</td>
+                <td className="px-4 py-3 font-semibold text-cocoa whitespace-nowrap text-xs">{o.machine_name ?? "—"}</td>
+                <td className="px-4 py-3 font-mono text-xs text-taupe whitespace-nowrap">{o.device_imei ?? "—"}</td>
                 <td className="px-4 py-3 text-cocoa">
                   {o.products.length > 0 ? (
                     <div className="space-y-0.5">
@@ -172,7 +173,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             ))}
             {orders.length === 0 && (
               <tr>
-                <td colSpan={12} className="px-4 py-10 text-center text-taupe">No orders match your filters.</td>
+                <td colSpan={13} className="px-4 py-10 text-center text-taupe">No orders match your filters.</td>
               </tr>
             )}
           </tbody>

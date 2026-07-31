@@ -2,7 +2,7 @@ import Link from "next/link";
 import { getMachines } from "@/lib/data/machines";
 import { SyncStatusesButton } from "./SyncStatusesButton";
 import { FleetMap } from "@/components/maps";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +37,7 @@ export default async function MachinesPage({
   const pageSize = 10;
   const tz = await getDisplayTimezone();
 
-  const { machines, source } = await getMachines();
+  const { machines, lastSyncedAt, staleMachines, readError } = await getMachines();
   const mapMarkers = machines
     .filter((m) => m.latitude != null && m.longitude != null)
     .map((m) => ({ name: m.name, location: m.location, lat: m.latitude!, lng: m.longitude!, online: m.net_online }));
@@ -62,20 +62,6 @@ export default async function MachinesPage({
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const rows = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
-
-  const Chip = ({ value, label }: { value: string; label: string }) => {
-    const active = status === value;
-    return (
-      <Link
-        href={chipHref(value, sp.q ?? "")}
-        className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${
-          active ? "bg-terracotta text-white" : "bg-white text-cocoa hover:bg-cream"
-        }`}
-      >
-        {label}
-      </Link>
-    );
-  };
 
   return (
     <div>
@@ -102,10 +88,16 @@ export default async function MachinesPage({
         </form>
       </header>
 
+      <p className={`mb-4 text-xs ${readError ? "font-semibold text-danger" : staleMachines ? "font-semibold text-warning" : "text-taupe"}`}>
+        {readError ? `Supabase machine read failed: ${readError}` : `Supabase snapshot · Latest metadata sync ${lastSyncedAt ? formatDateTime(lastSyncedAt, tz) : "never"}${staleMachines ? ` · ${staleMachines} machine(s) have stale or missing metadata` : ""}`}
+      </p>
+
       <div className="mb-4 flex items-center gap-2">
-        <Chip value="all" label={`All (${counts.all})`} />
-        <Chip value="active" label={`Active (${counts.active})`} />
-        <Chip value="inactive" label={`Inactive (${counts.inactive})`} />
+        {(["all", "active", "inactive"] as const).map((value) => (
+          <Link key={value} href={chipHref(value, sp.q ?? "")} className={`rounded-full px-3 py-1.5 text-sm font-semibold capitalize transition ${status === value ? "bg-terracotta text-white" : "bg-white text-cocoa hover:bg-cream"}`}>
+            {value} ({counts[value]})
+          </Link>
+        ))}
         <div className="ml-auto flex items-center gap-3">
           <SyncStatusesButton />
           <button className="rounded-lg bg-terracotta px-4 py-2 text-sm font-bold text-white hover:bg-terracotta-dark">
@@ -233,9 +225,6 @@ export default async function MachinesPage({
         </section>
       )}
 
-      {source === "sample" && (
-        <p className="mt-4 text-xs text-taupe">Sample data — connect Supabase to see live machines.</p>
-      )}
     </div>
   );
 }

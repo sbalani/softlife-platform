@@ -1,6 +1,6 @@
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { getConfigFromEnv, listDevices, type HuaxinDevice } from "@/lib/huaxin/client";
 import { translateLocation } from "@/lib/i18n/huaxin";
+import { fleetFreshness } from "@/lib/data/fleet-freshness";
 
 export type Machine = {
   id: string;
@@ -8,6 +8,7 @@ export type Machine = {
   ref: string | null;
   device_imei: string | null;
   location: string | null;
+  location_override?: string | null;
   latitude: number | null;
   longitude: number | null;
   customer: string | null;
@@ -19,70 +20,38 @@ export type Machine = {
   latest_temp: number | null;
   created_at: string | null;
   net_online: boolean;
+  huaxin_last_sync: string | null;
 };
 
 export type Source = "supabase" | "huaxin" | "sample";
 
-const SAMPLE: Machine[] = [
-  { id: "101", name: "B84MAX-001", ref: "SL-001", device_imei: "867395075018172", location: "Calle Mayor 12, Madrid", latitude: 40.4167, longitude: -3.7033, customer: "Cafetería Centro", warehouse: "Madrid Central", state: "active", base_product: "Base Vainilla", last_full_clean_date: "2026-06-18T08:00:00Z", ingredient_count: 3, latest_temp: -4.2, created_at: "2026-01-15T09:00:00Z", net_online: true },
-  { id: "102", name: "B84MAX-002", ref: "SL-002", device_imei: "867395075018173", location: "Calle Mayor 12, Madrid", latitude: 40.4167, longitude: -3.7033, customer: "Cafetería Centro", warehouse: "Madrid Central", state: "active", base_product: "Base Yoghurt", last_full_clean_date: "2026-06-21T07:30:00Z", ingredient_count: 2, latest_temp: -3.8, created_at: "2026-02-02T09:00:00Z", net_online: true },
-  { id: "103", name: "B84MAX-003", ref: "SL-003", device_imei: "867395075018174", location: "Paseo Marítimo 4, Málaga", latitude: 36.7213, longitude: -4.4214, customer: "Hotel Mar", warehouse: "Costa Depot", state: "active", base_product: "Base Vainilla", last_full_clean_date: "2026-06-10T09:15:00Z", ingredient_count: 3, latest_temp: null, created_at: "2026-03-21T09:00:00Z", net_online: false },
-];
-
-function fromDevice(d: HuaxinDevice): Machine {
-  const label = (d.deviceLabel as string) || d.deviceName || d.deviceImei || "Machine";
-  return {
-    id: d.deviceId ?? d.deviceImei ?? label,
-    name: label,
-    ref: d.deviceId ?? null,
-    device_imei: d.deviceImei ?? null,
-    location: translateLocation(d.deviceLocation as string) ?? null,
-    latitude: null,
-    longitude: null,
-    customer: null,
-    warehouse: null,
-    state: "active",
-    base_product: null,
-    last_full_clean_date: null,
-    ingredient_count: 0,
-    latest_temp: null,
-    created_at: null,
-    net_online: (d.onlineStatus as string) === "online",
-  };
-}
-
-async function getMachinesLive(): Promise<Machine[]> {
-  const cfg = getConfigFromEnv();
-  if (!cfg) return [];
-  const devices = await listDevices(cfg);
-  return devices.map(fromDevice);
-}
-
-export async function getMachines(): Promise<{ machines: Machine[]; source: Source }> {
-  if (isSupabaseConfigured()) {
-    try {
-      const supabase = await createServiceClient();
-      const { data, error } = await supabase.from("v_machines").select("*").order("name");
-      if (!error && data && data.length) {
-        // Effective location: manual override wins; otherwise the Huaxin-
-        // detected address, translated from its Chinese-prefixed form.
-        const machines = (data as (Machine & { location_override?: string | null })[]).map((m) => ({
-          ...m,
-          location: m.location_override || translateLocation(m.location),
-        }));
-        return { machines, source: "supabase" };
-      }
-    } catch {
-      /* fall through */
+export async function getMachines(): Promise<{
+  machines: Machine[];
+  source: "supabase";
+  lastSyncedAt: string | null;
+  staleMachines: number;
+  readError?: string;
+}> {
+  if (!isSupabaseConfigured()) return { machines: [], source: "supabase", lastSyncedAt: null, staleMachines: 0, readError: "Supabase is not configured." };
+  try {
+    const s = await createServiceClient();
+    const rows: Machine[] = [];
+    for (let offset = 0; ; offset += 1000) {
+      const { data, error } = await s.from("v_machines").select("*").order("name").order("id").range(offset, offset + 999);
+      if (error) throw error;
+      rows.push(...((data as Machine[]) ?? []));
+      if (!data || data.length < 1000) break;
     }
+    const machines = rows.map((machine) => ({ ...machine, location: machine.location_override || translateLocation(machine.location) }));
+    const freshness = fleetFreshness(machines.map((machine) => machine.huaxin_last_sync));
+    return {
+      machines,
+      source: "supabase",
+      lastSyncedAt: freshness.latest,
+      staleMachines: freshness.stale,
+    };
+  } catch (error) {
+    console.error("[machines] Supabase read failed:", error);
+    return { machines: [], source: "supabase", lastSyncedAt: null, staleMachines: 0, readError: error instanceof Error ? error.message : String(error) };
   }
-  if (getConfigFromEnv()) {
-    try {
-      return { machines: await getMachinesLive(), source: "huaxin" };
-    } catch (e) {
-      console.error("[machines] Huaxin live failed:", e);
-      return { machines: [], source: "huaxin" };
-    }
-  }
-  return { machines: SAMPLE, source: "sample" };
 }

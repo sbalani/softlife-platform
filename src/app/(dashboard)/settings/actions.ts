@@ -11,6 +11,7 @@ import { translateLocation } from "@/lib/i18n/huaxin";
 import { normalizeHuaxinTimestamp } from "@/lib/data/temperatures";
 import { ingestOrders } from "@/lib/data/order-sync";
 import { revalidatePath } from "next/cache";
+import { syncCouponSnapshots } from "@/lib/data/coupons";
 
 export type SyncResult = { ok: boolean; summary: string };
 
@@ -89,6 +90,7 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
 
     const orderSync = await ingestOrders(began.slice(0, 10), end.slice(0, 10), [], "settings");
     orders = orderSync.orders;
+    const couponSync = await syncCouponSnapshots(supabase, cfg, devices.flatMap((device) => device.deviceImei ? [device.deviceImei] : []));
 
     // Geocode machines whose effective address changed (or was never
     // geocoded) so the map views have coordinates. Nominatim allows 1 req/s.
@@ -115,8 +117,8 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
 
     revalidatePath("/settings");
     return {
-      ok: orderSync.ok,
-      summary: `Synced ${machines} machine(s), ${temps} temperature reading(s), ${orders} order(s) across ${orderSync.succeededMachines} machine(s); ${orderSync.failedMachines.length} order machine(s) failed, geocoded ${geocoded} location(s).`,
+      ok: orderSync.ok && !couponSync.failed.length,
+      summary: `Synced ${machines} machine(s), ${temps} temperature reading(s), ${orders} order(s), and coupons for ${couponSync.synced} machine(s); ${orderSync.failedMachines.length + couponSync.failed.length} order/coupon machine sync(s) failed, geocoded ${geocoded} location(s).`,
     };
   } catch (e) {
     return {

@@ -2,12 +2,13 @@ import { getCoupons } from "@/lib/data/coupons";
 import { CouponCreator } from "./CouponCreator";
 import { CouponCard } from "./CouponCard";
 import { getMachines } from "@/lib/data/machines";
+import { formatDateTime } from "@/lib/dates";
+import { getDisplayTimezone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
 export default async function CouponsPage() {
-  const { machines } = await getMachines();
-  const { coupons, error } = await getCoupons(machines.flatMap((machine) => machine.device_imei ? [machine.device_imei] : []));
+  const [{ machines }, { coupons, latestSyncedAt, staleMachines, readError }, tz] = await Promise.all([getMachines(), getCoupons(), getDisplayTimezone()]);
 
   return (
     <div>
@@ -18,6 +19,10 @@ export default async function CouponsPage() {
         </p>
       </header>
 
+      <p className={`mb-4 text-xs ${readError ? "font-semibold text-danger" : staleMachines ? "font-semibold text-warning" : "text-taupe"}`}>
+        {readError ? `Supabase coupon read failed: ${readError}` : `Supabase snapshot · Latest coupon sync ${latestSyncedAt ? formatDateTime(latestSyncedAt, tz) : "never"}${staleMachines ? ` · ${staleMachines} machine snapshot(s) are stale or missing` : ""}`}
+      </p>
+
       <details className="mb-6 rounded-2xl border border-line bg-white p-5">
         <summary className="cursor-pointer font-display text-lg font-bold text-cocoa">Create coupon</summary>
         <div className="mt-4">
@@ -25,15 +30,13 @@ export default async function CouponsPage() {
         </div>
       </details>
 
-      {error && <p className="mb-4 rounded-xl border border-danger/30 bg-danger/5 p-3 text-sm text-danger">{error}</p>}
-
       <div className="space-y-4">
         {coupons.map((c) => (
           <CouponCard key={c.couponId ?? c.couponName} coupon={c} />
         ))}
       </div>
 
-      {!error && coupons.length === 0 && (
+      {!readError && coupons.length === 0 && (
         <p className="rounded-2xl border border-line bg-white p-10 text-center text-taupe">
           No coupons yet. Create a discount or one-cup voucher above.
         </p>

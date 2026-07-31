@@ -48,7 +48,7 @@ export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
   const remove = () => {
     startTransition(async () => {
       const res = await deleteCouponAction(String(coupon.couponId));
-      setMsg(res.ok ? "Deleted." : res.error ?? "Failed");
+      setMsg(res.ok ? res.warning ?? "Deleted." : res.error ?? "Failed");
     });
   };
 

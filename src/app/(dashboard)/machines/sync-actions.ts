@@ -6,8 +6,9 @@ import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server
 import { getSessionProfile, type SessionProfile } from "@/lib/auth/session";
 import { recordMachineStatuses, recordMachineSync } from "@/lib/data/change-log";
 import { syncMachineMedia } from "@/lib/data/machine-media";
+import { syncCouponSnapshots } from "@/lib/data/coupons";
 
-export type SyncResult = { ok: boolean; synced?: number; error?: string };
+export type SyncResult = { ok: boolean; synced?: number; error?: string; warning?: string };
 
 /** Lightweight sync: just refresh device online statuses + names (no orders/temps). */
 export async function syncMachineStatuses(): Promise<SyncResult> {
@@ -50,6 +51,7 @@ export async function syncOneMachine(imei: string): Promise<SyncResult> {
     if (!d) return { ok: false, error: "Device not found in Huaxin." };
     const s = await createServiceClient();
     const actor = await getSessionProfile();
+    let warning: string | undefined;
     await s.from("machines").upsert({
       device_imei: imei,
       device_id_huaxin: d.deviceId ?? null,
@@ -64,11 +66,14 @@ export async function syncOneMachine(imei: string): Promise<SyncResult> {
       await recordMachineStatuses(s, { id: machine.id, device_imei: imei, name: machine.name as string | null }, await getDeviceStatus(cfg, imei));
       await syncProductsToIngredients(s, cfg, imei, machine.id, machine.name as string | null, actor);
       try { await syncMachineMedia(s, cfg, imei); } catch (error) { console.error(`[machine-sync] Media snapshot failed for ${imei}:`, error); }
+      const couponSync = await syncCouponSnapshots(s, cfg, [imei]);
+      if (couponSync.failed.length) console.error(`[machine-sync] Coupon snapshot failed for ${imei}:`, couponSync.failed[0]);
+      if (couponSync.failed.length) warning = "Machine synced, but its coupon snapshot failed to refresh.";
     }
 
     revalidatePath(`/machines/${imei}`);
     revalidatePath("/machines");
-    return { ok: true, synced: 1 };
+    return { ok: true, synced: 1, warning };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

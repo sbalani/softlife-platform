@@ -10,7 +10,7 @@ export function MachineSyncButton({ imei }: { imei: string }) {
   const sync = () => {
     startTransition(async () => {
       const res = await syncOneMachine(imei);
-      setResult(res.ok ? "Status updated." : res.error ?? "Failed");
+      setResult(res.ok ? res.warning ?? "Status updated." : res.error ?? "Failed");
     });
   };
 

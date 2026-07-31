@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMachineConfig } from "@/lib/data/machine-config";
-import { getMachineDetail, getMachineMedia, getMachineMenu, getMachineSettings, getMachineStatus } from "@/lib/data/machine-detail";
+import { getMachineDetail } from "@/lib/data/machine-detail";
 import { getMachineLotHistory } from "@/lib/data/lot-audit";
 import { translateStatusDesc, translateStatusValue } from "@/lib/i18n/huaxin";
 import { getTenants } from "@/lib/data/franchisees";
@@ -24,7 +24,6 @@ import { BaseHopperCard } from "./BaseHopperCard";
 import { PushSolidToppingsButton } from "./PushSolidToppingsButton";
 import { ComboEditor, type HopperIngredientOption } from "./ComboEditor";
 import { CopyMenuButton } from "./CopyMenuButton";
-import { DeviceSettingsPanel } from "./DeviceSettingsPanel";
 import { LogLotForm } from "./LogLotForm";
 import { FranchiseeAssignmentForm } from "./FranchiseeAssignmentForm";
 import { LineChart } from "@/components/LineChart";
@@ -56,17 +55,17 @@ export default async function MachineDetailPage({
   } else if (Date.parse(`${dateTo}T00:00:00Z`) - Date.parse(`${dateFrom}T00:00:00Z`) > 365 * 86_400_000) {
     dateFrom = ymd(new Date(Date.parse(`${dateTo}T00:00:00Z`) - 365 * 86_400_000), "UTC");
   }
-  const [config, tenants, telemetry, menu, status, media, lotHistory, ingredients, { machines: allMachines }] = await Promise.all([
+  const [config, tenants, telemetry, lotHistory, ingredients, { machines: allMachines }] = await Promise.all([
     getMachineConfig(imei),
     getTenants(),
     getMachineDetail(imei, { from: dateFrom, to: dateTo, timeZone: tz }),
-    getMachineMenu(imei),
-    getMachineStatus(imei),
-    getMachineMedia(imei),
     getMachineLotHistory(imei),
     getProducts(),
     getMachines(),
   ]);
+  const menu = telemetry?.menu ?? { diy: [], unify: [] };
+  const status = telemetry?.status ?? [];
+  const media = telemetry?.media ?? [];
   const baseProduct = config?.baseProductId ? ingredients.find((p) => p.id === config.baseProductId) ?? null : null;
   const otherMachines = allMachines.filter((m) => m.device_imei !== imei).map((m) => ({ id: m.id, name: m.name }));
   const pendingDraft = config?.machineId ? await getPendingMenuDraft(config.machineId) : null;
@@ -107,6 +106,7 @@ export default async function MachineDetailPage({
   // is the raw Huaxin value and still needs translating.
   const location = config?.location ?? translateLocation(telemetry?.location) ?? null;
   const online = telemetry?.online ?? false;
+  const orderCoverageCurrent = telemetry?.orders_fresh_from && telemetry.orders_fresh_from <= dateFrom && telemetry.orders_fresh_through && telemetry.orders_fresh_through >= dateTo;
   const salesByDay = new Map<string, number>();
   for (const order of telemetry?.orders ?? []) {
     if (order.order_state === "COMPLETE" && !order.is_admin_override) {
@@ -141,6 +141,10 @@ export default async function MachineDetailPage({
           <MachineSyncButton imei={imei} />
         </div>
       </header>
+
+      <p className="-mt-6 mb-6 text-xs text-taupe">
+        Supabase snapshot · Machine data synced {telemetry?.machine_synced_at ? formatDateTime(telemetry.machine_synced_at, tz) : "never"}
+      </p>
 
       {/* Location map */}
       {location && (
@@ -235,9 +239,12 @@ export default async function MachineDetailPage({
         <DeviceBrandingForm imei={imei} />
       </section>
 
-      {/* Live status */}
+      {/* Monitored status */}
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">
-        <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Live status</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-display text-lg font-bold text-cocoa">Monitored status</h2>
+          <span className="text-xs text-taupe">Observed {telemetry?.status_observed_at ? formatDateTime(telemetry.status_observed_at, tz) : "never"}</span>
+        </div>
         {status.length ? (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
             {status.map((s, i) => {
@@ -265,14 +272,20 @@ export default async function MachineDetailPage({
 
       {/* Screen media */}
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">
-        <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Screen media (advertising)</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-display text-lg font-bold text-cocoa">Screen media (advertising)</h2>
+          <span className="text-xs text-taupe">Synchronized {telemetry?.media_synced_at ? formatDateTime(telemetry.media_synced_at, tz) : "never"}</span>
+        </div>
         <MediaManager imei={imei} media={media} />
       </section>
 
       {/* Product menu */}
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="font-display text-lg font-bold text-cocoa">Product menu on machine (live, editable)</h2>
+          <div>
+            <h2 className="font-display text-lg font-bold text-cocoa">Synchronized product menu</h2>
+            <p className="text-xs text-taupe">Last synchronized {telemetry?.menu_synced_at ? formatDateTime(telemetry.menu_synced_at, tz) : "never"}</p>
+          </div>
           <div className="flex items-center gap-3">
             <CopyMenuButton sourceImei={imei} machines={otherMachines} />
           </div>
@@ -283,7 +296,7 @@ export default async function MachineDetailPage({
               <div className="flex items-center justify-between rounded-xl border border-terracotta/40 bg-terracotta/5 px-4 py-2.5">
                 <div className="text-xs">
                   <span className="font-bold text-terracotta">{pendingDraft.items.length} draft item(s) pending</span>
-                  <span className="ml-2 text-taupe">— values shown below are draft edits, not live data.</span>
+                  <span className="ml-2 text-taupe">— values shown below are draft edits, not the synchronized snapshot.</span>
                 </div>
                 <div className="flex items-center gap-2">
                   {pendingDraft.items.length > 1 && (
@@ -348,7 +361,7 @@ export default async function MachineDetailPage({
             )}
           </div>
         ) : (
-          <p className="text-sm text-taupe">No product menu reported by the machine.</p>
+          <p className="text-sm text-taupe">No synchronized product menu is available.</p>
         )}
       </section>
 
@@ -356,13 +369,13 @@ export default async function MachineDetailPage({
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-lg font-bold text-cocoa">Cylinder temperature</h2>
-          {telemetry?.last_report && (
-            <span className="text-xs text-taupe">Last report {formatDateTime(telemetry.last_report, tz)}</span>
+          {telemetry?.temperature_observed_at && (
+            <span className="text-xs text-taupe">Observed {formatDateTime(telemetry.temperature_observed_at, tz)}</span>
           )}
         </div>
         {telemetry && telemetry.temperatures.length ? (
           <div className="mt-3">
-            <LineChart data={telemetry.temperatures.map((t) => ({ label: t.time ?? "", value: t.value }))} color="#6fa98c" height={180} unit="°C" />
+            <LineChart data={telemetry.temperatures.map((t) => ({ label: new Date(t.time).toLocaleTimeString("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit" }), value: t.value }))} color="#6fa98c" height={180} unit="°C" />
           </div>
         ) : (
           <p className="mt-3 text-sm text-taupe">No temperature readings in the last 24 hours.</p>
@@ -379,6 +392,11 @@ export default async function MachineDetailPage({
             <button className="rounded-lg bg-cocoa px-3 py-2 text-xs font-bold text-white">Apply</button>
           </form>
         </div>
+        <p className={`mb-4 text-xs ${orderCoverageCurrent && telemetry?.orders_sync_status === "succeeded" ? "text-taupe" : "font-semibold text-warning"}`}>
+          Supabase snapshot · Latest pull {telemetry?.orders_synced_at ? formatDateTime(telemetry.orders_synced_at, tz) : "never"}
+          {orderCoverageCurrent ? ` · coverage ${telemetry?.orders_fresh_from} to ${telemetry?.orders_fresh_through}` : ` · selected range ${dateFrom} to ${dateTo} is not covered by a recorded successful pull`}
+          {telemetry?.orders_sync_status && telemetry.orders_sync_status !== "succeeded" ? ` · latest attempt ${telemetry.orders_sync_status}` : ""}
+        </p>
         <div className="mb-5 overflow-x-auto border-b border-line pb-5">
           <div style={{ minWidth: Math.max(600, salesData.length * 32) }}>
             <LineChart data={salesData} height={200} />

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { alertStatusSignals, diffSnapshots, menuProductIdMap, menuSnapshot } from "./change-log.ts";
+import { alertStatusSignals, diffSnapshots, menuFromSnapshot, menuProductIdMap, menuSnapshot } from "./change-log.ts";
 
 test("machine snapshots report field-level menu changes", () => {
   const before = menuSnapshot({ diy: [{ position: 1, goodsName: "Vanilla", price: "3", imagePath: "old.jpg" }], unify: [] });
@@ -10,6 +10,17 @@ test("machine snapshots report field-level menu changes", () => {
     { entityKey: "diy:1", field: "price", oldValue: "3", newValue: "4" },
     { entityKey: "diy:1", field: "imagePath", oldValue: "old.jpg", newValue: "new.jpg" },
   ]);
+});
+
+test("stored menu snapshots reconstruct editable Huaxin items", () => {
+  const menu = menuFromSnapshot(menuSnapshot({
+    diy: [{ position: 2, goodsName: "Vanilla", price: "4", languagePacks: [{ code: "es", goodsName: "Vainilla", intro: "Suave" }] }],
+    unify: [{ position: 1, goodsName: "Combo" }],
+  }));
+  assert.equal(menu.diy[0].position, 2);
+  assert.equal(menu.diy[0].price, "4");
+  assert.deepEqual(menu.diy[0].languagePacks, [{ code: "es", goodsName: "Vainilla", intro: "Suave" }]);
+  assert.equal(menu.unify[0].goodsName, "Combo");
 });
 
 test("Huaxin status codes become stable alert signals", () => {

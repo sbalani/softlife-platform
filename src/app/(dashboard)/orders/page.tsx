@@ -1,5 +1,5 @@
 import { getOrders } from "@/lib/data/orders";
-import { DataSourceNote } from "@/components/data-source-note";
+import { OrderDataNote } from "@/components/order-data-note";
 import { UpdateOrdersButton } from "./UpdateOrdersButton";
 import { formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
@@ -24,7 +24,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const sp = await searchParams;
   const [tz, { machines }] = await Promise.all([getDisplayTimezone(), getMachines()]);
   const range = analyticsRange(sp, tz);
-  const { orders, source } = await getOrders({
+  const { orders, sync, readError } = await getOrders({
     dateFrom: range.from,
     dateTo: range.to,
     timeZone: tz,
@@ -56,8 +56,10 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         <UpdateOrdersButton machines={machines.flatMap((machine) => machine.device_imei ? [{ id: machine.id, name: machine.name, imei: machine.device_imei }] : [])} />
       </header>
 
+      <OrderDataNote sync={sync} readError={readError} requestedTo={range.to} timeZone={tz} />
+
       {/* Filters */}
-      <form className="mb-4 flex flex-wrap items-end gap-3">
+      <form className="mt-4 mb-4 flex flex-wrap items-end gap-3">
         <label className="block"><span className={label}>From</span><input name="dateFrom" type="date" defaultValue={range.from} max={range.to} className={input} /></label>
         <label className="block"><span className={label}>To</span><input name="dateTo" type="date" defaultValue={range.to} min={range.from} max={range.today} className={input} /></label>
         <label className="block">
@@ -180,7 +182,6 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           </tbody>
         </table>
       </div>
-      <DataSourceNote source={source} />
     </div>
   );
 }

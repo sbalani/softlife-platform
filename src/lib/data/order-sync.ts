@@ -1,10 +1,37 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getConfigFromEnv, listAllOrders, listDevices } from "@/lib/huaxin/client";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { selectOrderDevices } from "@/lib/data/order-sync-selection";
-import { orderRowFromHuaxin, tenantForOrder, type OrderAssignment } from "@/lib/data/order-persistence";
+import { orderPatchFromWebhook, orderRowFromHuaxin, tenantForOrder, type OrderAssignment } from "@/lib/data/order-persistence";
 import { huaxinOrderTime } from "@/lib/huaxin/order-time";
 
 export type OrderSyncResult = { ok: boolean; orders: number; machines: number; error?: string };
+
+async function upsertOrders(supabase: SupabaseClient, rows: Record<string, unknown>[]) {
+  if (!rows.length) return 0;
+  const { error } = await supabase.from("huaxin_orders").upsert(rows, { onConflict: "order_code" });
+  if (error) throw error;
+  return rows.length;
+}
+
+export async function ingestOrderWebhook(supabase: SupabaseClient, body: unknown) {
+  const row = orderPatchFromWebhook(body);
+  if (!row) throw new Error("Huaxin order webhook missing orderCode");
+  const imei = row.device_imei as string | undefined;
+  const { data: machine } = imei
+    ? await supabase.from("machines").select("id,tenant_id").eq("device_imei", imei).maybeSingle()
+    : { data: null };
+  const { data: assignmentRows } = machine
+    ? await supabase.from("machine_franchisee_assignments").select("machine_id,tenant_id,start_date,end_date").eq("machine_id", machine.id)
+    : { data: [] };
+  return upsertOrders(supabase, [{
+    ...row,
+    ...(machine ? {
+      machine_id: machine.id,
+      tenant_id: tenantForOrder((assignmentRows as OrderAssignment[]) ?? [], machine.id, (row.order_time as string) ?? null) ?? machine.tenant_id,
+    } : {}),
+  }]);
+}
 
 /** Pulls every order (all pages) for selected devices, or every device when
  *  none are selected, in [from, to] and upserts
@@ -44,10 +71,7 @@ export async function ingestOrders(from: string, to: string, selectedImeis: stri
           tenantId: tenantForOrder(assignments, machine?.id ?? null, huaxinOrderTime(order)) ?? machine?.tenant_id ?? null,
           imei: d.deviceImei!,
         }));
-        if (rows.length) {
-          const { error } = await supabase.from("huaxin_orders").upsert(rows, { onConflict: "order_code" });
-          if (!error) orders += rows.length;
-        }
+        orders += await upsertOrders(supabase, rows);
       } catch {
         /* per-device errors are non-fatal */
       }

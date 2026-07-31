@@ -64,6 +64,7 @@ export const COUPON_PATHS = {
   list: "/machine/cloud/api/coupon/list",
   generate: "/machine/cloud/api/coupon/generate/records",
   records: "/machine/cloud/api/coupon/records/list",
+  delete: "/machine/cloud/api/coupon/del",
 } as const;
 
 const AUTH_TTL_MS = 15 * 60 * 1000;
@@ -393,6 +394,9 @@ export type HuaxinCoupon = {
   endTime?: string;
   content?: string;
   localName?: string;
+  createTime?: string;
+  updateTime?: string;
+  merchantName?: string;
 };
 
 export function couponApiError(data: Envelope): string | null {
@@ -414,8 +418,9 @@ export async function listCouponsPage(cfg: HuaxinConfig, deviceImei: string, pag
 
 export async function listCoupons(cfg: HuaxinConfig, deviceImei: string) {
   const first = await listCouponsPage(cfg, deviceImei);
+  if (first.totalPage > 20) throw new Error(`Huaxin coupons require ${first.totalPage} pages; limit is 20`);
   const coupons = [...first.coupons];
-  for (let page = 2; page <= Math.min(first.totalPage, 20); page++) {
+  for (let page = 2; page <= first.totalPage; page++) {
     const next = await listCouponsPage(cfg, deviceImei, page);
     coupons.push(...next.coupons);
   }
@@ -447,7 +452,7 @@ export async function getCouponRecords(cfg: HuaxinConfig, couponId: string, coup
 }
 
 export async function deleteCouponApi(cfg: HuaxinConfig, couponIds: string) {
-  return call("/machine/cloud/api/coupon/del", cfg, { couponIds });
+  return call(COUPON_PATHS.delete, cfg, { couponIds });
 }
 
 export function isOrderWebhook(body: unknown): boolean {

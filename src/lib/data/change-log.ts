@@ -330,15 +330,30 @@ export async function recordCouponExchange(
   response: unknown,
   actor: Actor,
 ) {
+  const envelope = response && typeof response === "object" ? response as Record<string, unknown> : {};
+  const data = envelope.data && typeof envelope.data === "object" ? envelope.data as Record<string, unknown> : {};
+  const records = Array.isArray(data.records) ? data.records : Array.isArray(data.list) ? data.list : null;
+  const redactedResponse = {
+    code: envelope.code,
+    result: envelope.result,
+    msg: envelope.msg,
+    error: envelope.error,
+    data: {
+      result: data.result,
+      message: data.message,
+      couponId: data.couponId,
+      recordCount: records?.length,
+    },
+  };
   const { error } = await s.from("machine_change_log").insert({
     device_imei: typeof request.deviceImeis === "string" ? request.deviceImeis : null,
     source: "platform",
     action: `coupon_${operation}`,
     entity_type: "coupon",
-    entity_key: String(request.couponId ?? "0"),
+    entity_key: String(request.couponId ?? request.couponIds ?? data.couponId ?? "0"),
     field: "api_exchange",
     old_value: request,
-    new_value: response,
+    new_value: redactedResponse,
     actor_id: actor?.id ?? null,
     actor_email: actor?.email ?? null,
     metadata: { endpoint: COUPON_PATHS[operation as keyof typeof COUPON_PATHS] ?? operation },

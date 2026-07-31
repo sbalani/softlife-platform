@@ -8,6 +8,7 @@ test("coupon endpoints match the Huaxin contract", () => {
     list: "/machine/cloud/api/coupon/list",
     generate: "/machine/cloud/api/coupon/generate/records",
     records: "/machine/cloud/api/coupon/records/list",
+    delete: "/machine/cloud/api/coupon/del",
   });
 });
 

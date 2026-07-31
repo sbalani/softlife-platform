@@ -5,6 +5,7 @@ import { recordMachineStatuses, recordMachineSync } from "@/lib/data/change-log"
 import { normalizeHuaxinTimestamp } from "@/lib/data/temperatures";
 import { ingestOrders } from "@/lib/data/order-sync";
 import { syncMachineMedia } from "@/lib/data/machine-media";
+import { syncCouponSnapshots } from "@/lib/data/coupons";
 
 export const runtime = "nodejs";
 
@@ -92,6 +93,13 @@ export async function GET(req: Request) {
     }
   }
 
+  let couponSync = { synced: 0, failed: [] as string[] };
+  try {
+    couponSync = await syncCouponSnapshots(supabase, cfg, devices.flatMap((device) => device.deviceImei ? [device.deviceImei] : []));
+  } catch (error) {
+    couponSync.failed.push(error instanceof Error ? error.message : String(error));
+    console.error("[cron] Coupon sync failed:", error);
+  }
   const orderSync = await ingestOrders(yesterday, today, [], "cron");
 
   return NextResponse.json({
@@ -100,6 +108,8 @@ export async function GET(req: Request) {
     menus,
     media,
     temperatures,
+    coupons: couponSync.synced,
+    couponMachinesFailed: couponSync.failed.length,
     orders: orderSync.orders,
     orderRunId: orderSync.runId,
     orderSyncStatus: orderSync.status,

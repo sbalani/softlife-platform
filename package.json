@@ -12,7 +12,7 @@
     "test:order-sync": "node --experimental-strip-types --test src/lib/data/order-sync-selection.test.ts src/lib/data/order-sync-status.test.ts",
     "test:order-persistence": "node --experimental-strip-types --test src/lib/data/order-persistence.test.ts src/lib/data/orders.test.ts",
     "test:analytics": "node --experimental-strip-types --test src/lib/analytics.test.ts",
-    "test:coupon-dates": "node --experimental-strip-types --test src/lib/coupon-dates.test.ts src/lib/huaxin/coupon-api.test.ts",
+    "test:coupon-dates": "node --experimental-strip-types --test src/lib/coupon-dates.test.ts src/lib/huaxin/coupon-api.test.ts src/lib/data/coupons.test.ts",
     "test:fleet": "node --experimental-strip-types --test src/lib/data/fleet-freshness.test.ts"
   },
   "dependencies": {

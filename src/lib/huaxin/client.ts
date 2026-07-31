@@ -29,6 +29,9 @@ export type HuaxinOrder = {
   outTradeNo?: string;
   price?: string | number;
   amount?: string | number;
+  marketPrice?: string | number;
+  discountPrice?: string | number;
+  rePrice?: string | number;
   nums?: string | number;
   status?: string | number;
   payType?: string;
@@ -38,9 +41,13 @@ export type HuaxinOrder = {
   createTimeUtc?: string;
   productName?: string;
   goodsName?: string;
+  refundStatus?: string | number;
+  refundOutNo?: string | null;
+  coupon?: { result?: boolean; [k: string]: unknown };
+  activityName?: string;
+  deviceLabel?: string;
   products?: { goodsName?: string; price?: string; position?: number }[];
   deviceImei?: string;
-  deviceLabel?: string;
   [k: string]: unknown;
 };
 

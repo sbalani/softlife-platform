@@ -1,7 +1,8 @@
 import { getConfigFromEnv, listAllOrders, listDevices } from "@/lib/huaxin/client";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { huaxinOrderTime } from "@/lib/huaxin/order-time";
 import { selectOrderDevices } from "@/lib/data/order-sync-selection";
+import { orderRowFromHuaxin, tenantForOrder, type OrderAssignment } from "@/lib/data/order-persistence";
+import { huaxinOrderTime } from "@/lib/huaxin/order-time";
 
 export type OrderSyncResult = { ok: boolean; orders: number; machines: number; error?: string };
 
@@ -21,11 +22,13 @@ export async function ingestOrders(from: string, to: string, selectedImeis: stri
     const supabase = await createServiceClient();
     const { devices, missing } = selectOrderDevices(await listDevices(cfg, { force: true }), selectedImeis);
     if (missing.length) return { ok: false, orders: 0, machines: 0, error: `Selected machine not found in Huaxin: ${missing.join(", ")}` };
-    const { data: machineRows } = await supabase.from("machines").select("id,device_imei");
-    const machineIdByImei = new Map(
-      ((machineRows as { id: string; device_imei: string | null }[]) ?? [])
+    const { data: machineRows } = await supabase.from("machines").select("id,tenant_id,device_imei");
+    const { data: assignmentRows } = await supabase.from("machine_franchisee_assignments").select("machine_id,tenant_id,start_date,end_date");
+    const assignments = (assignmentRows as OrderAssignment[]) ?? [];
+    const machineByImei = new Map(
+      ((machineRows as { id: string; tenant_id: string | null; device_imei: string | null }[]) ?? [])
         .filter((m) => m.device_imei)
-        .map((m) => [m.device_imei!, m.id]),
+        .map((m) => [m.device_imei!, m]),
     );
 
     let orders = 0;
@@ -35,17 +38,11 @@ export async function ingestOrders(from: string, to: string, selectedImeis: stri
       machines++;
       try {
         const ords = (await listAllOrders(cfg, d.deviceImei, began, end)).filter((o) => o.orderCode);
-        const rows = ords.map((o) => ({
-          machine_id: machineIdByImei.get(d.deviceImei!) ?? null,
-          device_imei: d.deviceImei,
-          order_code: o.orderCode!,
-          out_trade_no: o.outTradeNo ?? null,
-          order_state: String(o.status ?? ""),
-          order_time: huaxinOrderTime(o),
-          price: Number(o.price ?? 0),
-          amount: Number(o.amount ?? 0),
-          product_name: o.products?.[0]?.goodsName ?? o.goodsName ?? null,
-          raw: JSON.stringify(o),
+        const machine = machineByImei.get(d.deviceImei);
+        const rows = ords.map((order) => orderRowFromHuaxin(order, {
+          id: machine?.id ?? null,
+          tenantId: tenantForOrder(assignments, machine?.id ?? null, huaxinOrderTime(order)) ?? machine?.tenant_id ?? null,
+          imei: d.deviceImei!,
         }));
         if (rows.length) {
           const { error } = await supabase.from("huaxin_orders").upsert(rows, { onConflict: "order_code" });

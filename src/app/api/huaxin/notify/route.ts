@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isFaultWebhook, isOrderWebhook } from "@/lib/huaxin/client";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { huaxinOrderTime } from "@/lib/huaxin/order-time";
+import { orderPatchFromWebhook, tenantForOrder, type OrderAssignment } from "@/lib/data/order-persistence";
 
 export const runtime = "nodejs";
 
@@ -28,28 +28,24 @@ export async function POST(req: Request) {
 
   try {
     if (isOrderWebhook(body)) {
-      const d = (body as { data?: Record<string, unknown> }).data ?? {};
       if (supabase) {
-        const orderTime = huaxinOrderTime({
-          createTimeUtc: (d.createTimeUtc as string) ?? undefined,
-          createTime: (d.createTime as string) ?? (d.orderTime as string) ?? undefined,
-          localPayTime: (d.localPayTime as string) ?? undefined,
-          payTime: (d.payTime as string) ?? undefined,
-        });
-        await supabase.from("huaxin_orders").upsert(
-          {
-            order_code: (d.orderCode as string) ?? "",
-            device_imei: (d.deviceImei as string) ?? null,
-            order_state: ((d.orderState as string) ?? "").toUpperCase(),
-            order_time: orderTime ?? new Date().toISOString(),
-            price: Number(d.price ?? 0),
-            amount: Number(d.amount ?? 0),
-            product_name: (d.productName as string) ?? "",
-            detail_raw: (d.detail as string) ?? "",
-            raw: JSON.stringify(body),
-          },
-          { onConflict: "order_code" },
-        );
+        const row = orderPatchFromWebhook(body);
+        if (!row) throw new Error("Huaxin order webhook missing orderCode");
+        const imei = row.device_imei as string | undefined;
+        const { data: machine } = imei
+          ? await supabase.from("machines").select("id,tenant_id").eq("device_imei", imei).maybeSingle()
+          : { data: null };
+        const { data: assignmentRows } = machine
+          ? await supabase.from("machine_franchisee_assignments").select("machine_id,tenant_id,start_date,end_date").eq("machine_id", machine.id)
+          : { data: [] };
+        const { error } = await supabase.from("huaxin_orders").upsert({
+          ...row,
+          ...(machine ? {
+            machine_id: machine.id,
+            tenant_id: tenantForOrder((assignmentRows as OrderAssignment[]) ?? [], machine.id, (row.order_time as string) ?? null) ?? machine.tenant_id,
+          } : {}),
+        }, { onConflict: "order_code" });
+        if (error) throw error;
       }
     } else if (isFaultWebhook(body)) {
       const b = body as { deviceId?: string; subject?: string; htmlBody?: string };

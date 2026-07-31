@@ -3,6 +3,7 @@ import { getConfigFromEnv, getDeviceStatus, listDeviceProducts, listDevices, pul
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { recordMachineStatuses, recordMachineSync } from "@/lib/data/change-log";
 import { normalizeHuaxinTimestamp } from "@/lib/data/temperatures";
+import { ingestOrders } from "@/lib/data/order-sync";
 
 export const runtime = "nodejs";
 
@@ -84,5 +85,16 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json({ synced, statuses, menus, temperatures, devicesSeen: devices.length, stored: true });
+  const orderSync = await ingestOrders(yesterday, today);
+
+  return NextResponse.json({
+    synced,
+    statuses,
+    menus,
+    temperatures,
+    orders: orderSync.orders,
+    orderSyncError: orderSync.error,
+    devicesSeen: devices.length,
+    stored: true,
+  });
 }

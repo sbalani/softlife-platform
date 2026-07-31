@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isFaultWebhook, isOrderWebhook } from "@/lib/huaxin/client";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { orderPatchFromWebhook, tenantForOrder, type OrderAssignment } from "@/lib/data/order-persistence";
+import { ingestOrderWebhook } from "@/lib/data/order-sync";
 
 export const runtime = "nodejs";
 
@@ -28,25 +28,7 @@ export async function POST(req: Request) {
 
   try {
     if (isOrderWebhook(body)) {
-      if (supabase) {
-        const row = orderPatchFromWebhook(body);
-        if (!row) throw new Error("Huaxin order webhook missing orderCode");
-        const imei = row.device_imei as string | undefined;
-        const { data: machine } = imei
-          ? await supabase.from("machines").select("id,tenant_id").eq("device_imei", imei).maybeSingle()
-          : { data: null };
-        const { data: assignmentRows } = machine
-          ? await supabase.from("machine_franchisee_assignments").select("machine_id,tenant_id,start_date,end_date").eq("machine_id", machine.id)
-          : { data: [] };
-        const { error } = await supabase.from("huaxin_orders").upsert({
-          ...row,
-          ...(machine ? {
-            machine_id: machine.id,
-            tenant_id: tenantForOrder((assignmentRows as OrderAssignment[]) ?? [], machine.id, (row.order_time as string) ?? null) ?? machine.tenant_id,
-          } : {}),
-        }, { onConflict: "order_code" });
-        if (error) throw error;
-      }
+      if (supabase) await ingestOrderWebhook(supabase, body);
     } else if (isFaultWebhook(body)) {
       const b = body as { deviceId?: string; subject?: string; htmlBody?: string };
       if (supabase) {

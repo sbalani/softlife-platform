@@ -2,7 +2,6 @@
 
 import {
   getConfigFromEnv,
-  listAllOrders,
   listDevices,
   pullTemperatures,
 } from "@/lib/huaxin/client";
@@ -10,15 +9,14 @@ import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server
 import { geocodeAddress } from "@/lib/geocode";
 import { translateLocation } from "@/lib/i18n/huaxin";
 import { normalizeHuaxinTimestamp } from "@/lib/data/temperatures";
-import { orderRowFromHuaxin, tenantForOrder, type OrderAssignment } from "@/lib/data/order-persistence";
-import { huaxinOrderTime } from "@/lib/huaxin/order-time";
+import { ingestOrders } from "@/lib/data/order-sync";
 
 export type SyncResult = { ok: boolean; summary: string };
 
 function ymd(d: Date) {
   return d.toISOString().slice(0, 10);
 }
-/** Full Huaxin → Supabase ingestion: machines, temperatures (7d), orders (7d). */
+/** Full Huaxin → Supabase ingestion: machines, temperatures, and orders (90d). */
 export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<SyncResult> {
   void _prev;
   void _fd;
@@ -29,8 +27,6 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
   try {
     const supabase = await createServiceClient();
     const devices = await listDevices(cfg, { force: true });
-    const { data: assignmentRows } = await supabase.from("machine_franchisee_assignments").select("machine_id,tenant_id,start_date,end_date");
-    const assignments = (assignmentRows as OrderAssignment[]) ?? [];
     const began = ymd(new Date(Date.now() - 90 * 86_400_000)) + " 00:00:00";
     const end = ymd(new Date()) + " 23:59:59";
 
@@ -56,8 +52,7 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
         .select("id,tenant_id")
         .single();
       machines++;
-      const storedMachine = m as { id?: string; tenant_id?: string | null } | null;
-      const machineId = storedMachine?.id ?? null;
+      const machineId = (m as { id?: string } | null)?.id ?? null;
       try {
         const t = await pullTemperatures(cfg, d.deviceImei, began, end);
         const category = t.category ?? [];
@@ -89,24 +84,10 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
       } catch {
         /* per-device temperature errors are non-fatal */
       }
-
-      try {
-        const ords = (await listAllOrders(cfg, d.deviceImei, began, end)).filter((o) => o.orderCode);
-        const rows = ords.map((order) => orderRowFromHuaxin(order, {
-          id: machineId,
-          tenantId: tenantForOrder(assignments, machineId, huaxinOrderTime(order)) ?? storedMachine?.tenant_id ?? null,
-          imei: d.deviceImei!,
-        }));
-        if (rows.length) {
-          const { error } = await supabase
-            .from("huaxin_orders")
-            .upsert(rows, { onConflict: "order_code" });
-          if (!error) orders += rows.length;
-        }
-      } catch {
-        /* per-device order errors are non-fatal */
-      }
     }
+
+    const orderSync = await ingestOrders(began.slice(0, 10), end.slice(0, 10));
+    orders = orderSync.orders;
 
     // Geocode machines whose effective address changed (or was never
     // geocoded) so the map views have coordinates. Nominatim allows 1 req/s.

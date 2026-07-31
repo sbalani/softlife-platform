@@ -3,12 +3,13 @@ import { getOrders, type Order } from "@/lib/data/orders";
 import { getMachines } from "@/lib/data/machines";
 import { LineChart } from "@/components/LineChart";
 import { HBarChart, KpiCard, VBarChart } from "@/components/charts";
-import { formatDateTime, ymd } from "@/lib/dates";
+import { ymd } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { getAliasMap, resolveProductName } from "@/lib/data/products";
 import { getSessionProfile } from "@/lib/auth/session";
 import { calculateFranchiseePayouts } from "@/lib/data/franchisee-profit";
 import { analyticsRange, datesBetween, filterAnalyticsOrders, ordersInPeriod, type AnalyticsParams } from "@/lib/analytics";
+import { OrderDataNote } from "@/components/order-data-note";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +46,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     getSessionProfile(),
   ]);
   const range = analyticsRange(params, tz);
-  const { orders: loadedOrders, source, fetchedAt, failedMachines } = await getOrders({
+  const { orders: loadedOrders, sync, readError } = await getOrders({
     dateFrom: range.previousFrom,
     dateTo: range.to,
     timeZone: tz,
@@ -151,9 +152,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         <Link href="/analytics" className="text-sm font-semibold text-terracotta">Clear</Link>
       </form>
 
-      <div className="mb-5 flex flex-wrap gap-x-5 gap-y-1 text-xs text-taupe">
-        <span>Updated {formatDateTime(fetchedAt, tz)}</span><span>Source: {source}</span><span>{failedMachines.length ? `${failedMachines.length} machine fetch(es) failed` : "All machine fetches succeeded"}</span>
-      </div>
+      <div className="mb-5"><OrderDataNote sync={sync} readError={readError} requestedTo={range.to} timeZone={tz} /></div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <KpiCard label="Net sales" value={`€${revenue.toFixed(2)}`} hint={percentChange(revenue, previousRevenue)} accent="#d47e54" />

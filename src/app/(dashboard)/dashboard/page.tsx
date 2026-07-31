@@ -7,6 +7,7 @@ import { getAlerts } from "@/lib/data/alerts";
 import { ymd } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { getAliasMap, resolveProductName } from "@/lib/data/products";
+import { OrderDataNote } from "@/components/order-data-note";
 
 export const dynamic = "force-dynamic";
 
@@ -19,19 +20,22 @@ function isSameDay(iso: string, ref: Date, tz: string): boolean {
 }
 
 export default async function DashboardPage() {
-  const [{ orders, source: ordersSource }, { machines }, { alerts, source: alertsSource }, tz, aliasMap] = await Promise.all([
-    getOrders(),
+  const tz = await getDisplayTimezone();
+  const now = new Date();
+  const rangeTo = ymd(now, tz);
+  const rangeFrom = ymd(new Date(+now - 29 * 86_400_000), tz);
+  const [{ orders, sync, readError }, { machines }, { alerts, source: alertsSource }, aliasMap] = await Promise.all([
+    getOrders({ dateFrom: rangeFrom, dateTo: rangeTo, timeZone: tz }),
     getMachines(),
     getAlerts(),
-    getDisplayTimezone(),
     getAliasMap(),
   ]);
   const completed = orders.filter((o) => o.order_state === "COMPLETE" && !o.is_admin_override);
   const totalSales = completed.reduce((s, o) => s + o.price, 0);
   const totalUnits = completed.reduce((s, o) => s + o.nums, 0);
 
-  const today = new Date();
-  const yesterday = new Date(Date.now() - 86_400_000);
+  const today = now;
+  const yesterday = new Date(+today - 86_400_000);
   const ordersToday = orders.filter((o) => isSameDay(o.order_time, today, tz)).length;
   const ordersYesterday = orders.filter((o) => isSameDay(o.order_time, yesterday, tz)).length;
 
@@ -40,11 +44,9 @@ export default async function DashboardPage() {
 
   // Sales line chart: revenue per day (last 14 days with data)
   const revenueByDay = new Map<string, number>();
-  const unitsByDay = new Map<string, number>();
   for (const o of completed) {
     const key = dayKey(o.order_time, tz);
     revenueByDay.set(key, (revenueByDay.get(key) ?? 0) + o.price);
-    unitsByDay.set(key, (unitsByDay.get(key) ?? 0) + o.nums);
   }
   const sortedDays = [...revenueByDay.keys()].sort();
   const recentDays = sortedDays.slice(-14);
@@ -52,11 +54,6 @@ export default async function DashboardPage() {
     label: new Date(d).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: tz }),
     value: Number((revenueByDay.get(d) ?? 0).toFixed(2)),
   }));
-  const unitsLineData = recentDays.map((d) => ({
-    label: new Date(d).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: tz }),
-    value: unitsByDay.get(d) ?? 0,
-  }));
-
   // Topping consumption: count each product sub-item across completed orders
   const productCounts = new Map<string, number>();
   for (const o of completed) {
@@ -105,8 +102,6 @@ export default async function DashboardPage() {
       };
     });
 
-  const isSample = ordersSource === "sample";
-
   return (
     <div>
       <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
@@ -116,8 +111,10 @@ export default async function DashboardPage() {
         </div>
       </header>
 
+      <OrderDataNote sync={sync} readError={readError} requestedTo={rangeTo} timeZone={tz} />
+
       {/* KPI cards */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <KpiCard label="Revenue" value={`€${totalSales.toFixed(2)}`} hint={`${totalUnits} units sold`} accent="#d47e54" />
         <KpiCard label="Machines online" value={`${online}`} hint={`of ${machines.length} machines`} accent="#6fa98c" />
         <KpiCard
@@ -149,7 +146,7 @@ export default async function DashboardPage() {
         {/* Topping consumption */}
         <section className="rounded-2xl border border-line bg-white p-5">
           <h2 className="font-display text-lg font-bold text-cocoa">Topping consumption</h2>
-          <p className="mb-3 text-xs text-taupe">How many times each hopper ingredient was served. Names come from the machine's own hopper labels.</p>
+          <p className="mb-3 text-xs text-taupe">How many times each hopper ingredient was served. Names come from the machine&apos;s own hopper labels.</p>
           {topToppings.length > 0 ? (
             <HBarChart data={topToppings} color="#d47e54" unit="×" />
           ) : (
@@ -174,9 +171,6 @@ export default async function DashboardPage() {
         <MachineChartClient data={topMachines} />
       </section>
 
-      {isSample && (
-        <p className="mt-4 text-xs text-taupe">Sample data — connect Supabase + Huaxin keys in .env.local for live analytics.</p>
-      )}
     </div>
   );
 }

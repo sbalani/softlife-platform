@@ -21,7 +21,8 @@ export async function GET(request: Request) {
   };
   const [timeZone, aliasMap] = await Promise.all([getDisplayTimezone(), getAliasMap()]);
   const range = analyticsRange(params, timeZone);
-  const { orders } = await getOrders({ dateFrom: range.from, dateTo: range.to, timeZone });
+  const { orders, readError } = await getOrders({ dateFrom: range.from, dateTo: range.to, timeZone });
+  if (readError) return new Response(`Supabase order read failed: ${readError}`, { status: 503 });
   const filtered = ordersInPeriod(filterAnalyticsOrders(orders, params, aliasMap), range.from, range.to, timeZone);
   const rows = filtered.map((order) => {
     const product = resolveProductName(order.product_name || order.products.map((item) => item.goodsName).filter(Boolean).join(" + "), aliasMap);

@@ -11,14 +11,18 @@ function tempColor(v: number) {
 }
 
 export default async function TemperaturesPage() {
-  const { temps, source } = await getLatestTemperatures();
+  const { temps, latestReadingAt, staleReadings, readError } = await getLatestTemperatures();
   const tz = await getDisplayTimezone();
   return (
     <div>
       <header className="mb-8">
         <h1 className="font-display text-3xl font-bold text-cocoa">Temperatures</h1>
-        <p className="mt-1 text-sm text-taupe">Latest reading per machine (HACCP)</p>
+        <p className="mt-1 text-sm text-taupe">Latest reading per machine and series (HACCP)</p>
       </header>
+
+      <p className={`mb-4 text-xs ${readError ? "font-semibold text-danger" : staleReadings ? "font-semibold text-warning" : "text-taupe"}`}>
+        {readError ? `Supabase temperature read failed: ${readError}` : `Supabase snapshot · Latest observation ${latestReadingAt ? formatDateTime(latestReadingAt, tz) : "never"}${staleReadings ? ` · ${staleReadings} reading(s) are older than 26 hours` : ""}`}
+      </p>
 
       {temps.length === 0 ? (
         <div className="rounded-2xl border border-line bg-white p-10 text-center text-taupe">
@@ -29,7 +33,7 @@ export default async function TemperaturesPage() {
           {temps.map((t) => {
             const v = t.value;
             return (
-              <article key={t.machine_name} className="rounded-2xl border border-line bg-white p-5">
+              <article key={`${t.machine_id}:${t.series_name}`} className="rounded-2xl border border-line bg-white p-5">
                 <div className="flex items-center justify-between">
                   <h2 className="font-display text-lg font-bold text-cocoa">{t.machine_name}</h2>
                   <span className="text-[11px] uppercase tracking-wide text-taupe">{t.series_name ?? "temp"}</span>
@@ -44,9 +48,6 @@ export default async function TemperaturesPage() {
             );
           })}
         </div>
-      )}
-      {source === "sample" && (
-        <p className="mt-4 text-xs text-taupe">Sample data — connect Supabase + run the Huaxin sync to see live readings.</p>
       )}
     </div>
   );

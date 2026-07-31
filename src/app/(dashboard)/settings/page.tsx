@@ -8,6 +8,7 @@ import { formatDateTime, tzAbbrev } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { getVatRates } from "@/lib/data/franchisee-profit";
 import { VatRateManager } from "./VatRateManager";
+import type { ReactNode } from "react";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,7 @@ async function count(table: string): Promise<number | null> {
   }
 }
 
-function Stat({ label, v }: { label: string; v: number | null }) {
+function Stat({ label, v }: { label: string; v: ReactNode }) {
   return (
     <div className="rounded-xl bg-cream p-3">
       <div className="text-[11px] uppercase tracking-wide text-taupe">{label}</div>
@@ -30,6 +31,22 @@ function Stat({ label, v }: { label: string; v: number | null }) {
     </div>
   );
 }
+
+type LatestOrderRun = {
+  id: string;
+  status: string;
+  trigger_source: string;
+  requested_from: string;
+  requested_to: string;
+  finished_at: string | null;
+  machines_total: number;
+  machines_succeeded: number;
+  machines_failed: number;
+  orders_fetched: number;
+  error: string | null;
+};
+
+type OrderMachineResult = { device_imei: string; machine_name: string | null; error: string | null };
 
 export default async function SettingsPage() {
   const cfg = getConfigFromEnv();
@@ -44,6 +61,8 @@ export default async function SettingsPage() {
   ]);
 
   let lastSync: string | null = null;
+  let latestOrderRun: LatestOrderRun | null = null;
+  let failedOrderMachines: OrderMachineResult[] = [];
   if (isSupabaseConfigured()) {
     try {
       const s = await createServiceClient();
@@ -54,6 +73,21 @@ export default async function SettingsPage() {
         .limit(1)
         .maybeSingle();
       lastSync = (data as { huaxin_last_sync?: string } | null)?.huaxin_last_sync ?? null;
+      const { data: orderRun } = await s
+        .from("order_sync_runs")
+        .select("id,status,trigger_source,requested_from,requested_to,finished_at,machines_total,machines_succeeded,machines_failed,orders_fetched,error")
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      latestOrderRun = orderRun as LatestOrderRun | null;
+      if (latestOrderRun?.machines_failed) {
+        const { data: machineResults } = await s
+          .from("order_sync_machine_results")
+          .select("device_imei,machine_name,error")
+          .eq("run_id", latestOrderRun.id)
+          .eq("status", "failed");
+        failedOrderMachines = (machineResults as OrderMachineResult[]) ?? [];
+      }
     } catch {
       /* ignore */
     }
@@ -74,8 +108,28 @@ export default async function SettingsPage() {
         </p>
         <SyncButton />
         <div className="mt-3 text-xs text-taupe">
-          Last sync: {lastSync ? formatDateTime(lastSync, tz) : "never"}
+          Last machine metadata sync: {lastSync ? formatDateTime(lastSync, tz) : "never"}
         </div>
+      </section>
+
+      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+        <h2 className="font-display text-lg font-bold text-cocoa">Order sync health</h2>
+        <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <Stat label="Status" v={latestOrderRun?.status.toUpperCase() ?? "—"} />
+          <Stat label="Machines succeeded" v={latestOrderRun?.machines_succeeded ?? null} />
+          <Stat label="Machines failed" v={latestOrderRun?.machines_failed ?? null} />
+          <Stat label="Orders fetched" v={latestOrderRun?.orders_fetched ?? null} />
+        </div>
+        <div className="mt-3 text-xs text-taupe">
+          {latestOrderRun ? `${latestOrderRun.status.toUpperCase()} · ${latestOrderRun.trigger_source} · ${latestOrderRun.requested_from} to ${latestOrderRun.requested_to} · finished ${latestOrderRun.finished_at ? formatDateTime(latestOrderRun.finished_at, tz) : "in progress"}` : "No order sync has run yet."}
+        </div>
+        {failedOrderMachines.length > 0 && (
+          <div className="mt-4 rounded-xl bg-cream p-3 text-xs text-danger">
+            {failedOrderMachines.map((machine) => (
+              <div key={machine.device_imei}><span className="font-semibold">{machine.machine_name || machine.device_imei}</span>: {machine.error}</div>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">

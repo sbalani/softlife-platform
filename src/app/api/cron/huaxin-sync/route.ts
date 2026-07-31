@@ -85,7 +85,7 @@ export async function GET(req: Request) {
     }
   }
 
-  const orderSync = await ingestOrders(yesterday, today);
+  const orderSync = await ingestOrders(yesterday, today, [], "cron");
 
   return NextResponse.json({
     synced,
@@ -93,6 +93,10 @@ export async function GET(req: Request) {
     menus,
     temperatures,
     orders: orderSync.orders,
+    orderRunId: orderSync.runId,
+    orderSyncStatus: orderSync.status,
+    orderMachinesSucceeded: orderSync.succeededMachines,
+    orderMachinesFailed: orderSync.failedMachines.length,
     orderSyncError: orderSync.error,
     devicesSeen: devices.length,
     stored: true,

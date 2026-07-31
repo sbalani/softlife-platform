@@ -256,9 +256,11 @@ export async function listAllOrders(
   maxPages = 50,
 ): Promise<HuaxinOrder[]> {
   const first = await listOrdersPage(cfg, deviceImei, began, end, 1);
+  if (first.totalPage > maxPages) {
+    throw new Error(`Huaxin orders require ${first.totalPage} pages; limit is ${maxPages}`);
+  }
   const out = [...first.records];
-  const pages = Math.min(first.totalPage, maxPages);
-  for (let p = 2; p <= pages; p++) {
+  for (let p = 2; p <= first.totalPage; p++) {
     const { records } = await listOrdersPage(cfg, deviceImei, began, end, p);
     if (!records.length) break;
     out.push(...records);

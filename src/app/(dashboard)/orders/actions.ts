@@ -31,9 +31,10 @@ export async function updateOrders(_prev: UpdateOrdersResult | null, fd: FormDat
   }
   if (deviceImeis.some((imei) => !/^\d{10,20}$/.test(imei))) return { ok: false, summary: "Invalid machine selection." };
 
-  const res = await ingestOrders(from, to, deviceImeis);
-  if (!res.ok) return { ok: false, summary: res.error ?? "Update failed." };
+  const res = await ingestOrders(from, to, deviceImeis, "orders_page");
+  if (res.status === "failed") return { ok: false, summary: res.error ?? `Update failed for ${res.failedMachines.length} machine(s).` };
 
   revalidatePath("/orders");
-  return { ok: true, summary: `Fetched ${res.orders} order(s) across ${res.machines} machine(s) (${from} → ${to}).` };
+  const failures = res.failedMachines.length ? `; ${res.failedMachines.length} machine(s) failed` : "";
+  return { ok: res.ok, summary: `Fetched ${res.orders} order(s) across ${res.succeededMachines} machine(s)${failures} (${from} → ${to}).` };
 }

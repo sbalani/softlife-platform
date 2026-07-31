@@ -10,3 +10,13 @@ export function orderReadFreshness(run: { status: string; requestedTo: string } 
   if (run.status !== "succeeded") return "warning" as const;
   return run.requestedTo >= requestedTo ? "current" as const : "stale" as const;
 }
+
+export function coversOrderRange(intervals: { from: string; through: string }[], from: string, to: string) {
+  let cursor = from;
+  for (const interval of [...intervals].sort((a, b) => a.from.localeCompare(b.from))) {
+    if (interval.from > cursor || interval.through < cursor) continue;
+    cursor = new Date(Date.parse(`${interval.through}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+    if (cursor > to) return true;
+  }
+  return false;
+}

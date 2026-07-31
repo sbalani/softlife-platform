@@ -5,6 +5,7 @@ import { getConfigFromEnv, getDeviceStatus, listDevices, listDeviceProducts } fr
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getSessionProfile, type SessionProfile } from "@/lib/auth/session";
 import { recordMachineStatuses, recordMachineSync } from "@/lib/data/change-log";
+import { syncMachineMedia } from "@/lib/data/machine-media";
 
 export type SyncResult = { ok: boolean; synced?: number; error?: string };
 
@@ -62,6 +63,7 @@ export async function syncOneMachine(imei: string): Promise<SyncResult> {
     if (machine?.id) {
       await recordMachineStatuses(s, { id: machine.id, device_imei: imei, name: machine.name as string | null }, await getDeviceStatus(cfg, imei));
       await syncProductsToIngredients(s, cfg, imei, machine.id, machine.name as string | null, actor);
+      try { await syncMachineMedia(s, cfg, imei); } catch (error) { console.error(`[machine-sync] Media snapshot failed for ${imei}:`, error); }
     }
 
     revalidatePath(`/machines/${imei}`);

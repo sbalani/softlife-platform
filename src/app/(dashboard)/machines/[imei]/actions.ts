@@ -7,6 +7,7 @@ import type { DiyPushItem } from "@/lib/huaxin/client";
 import { generateAllergenComposite } from "@/lib/allergens/composite";
 import { getSessionProfile } from "@/lib/auth/session";
 import { recordMachinePush, recordProductChange } from "@/lib/data/change-log";
+import { syncMachineMedia } from "@/lib/data/machine-media";
 
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
@@ -377,6 +378,7 @@ export async function addDeviceMedia(_prev: MediaResult | null, fd: FormData): P
 
     await editDeviceMedia(cfg, imei, { res_type: resType, res_path: resPath, res_intro: intro, res_duration: duration });
     try { await refreshResource(cfg, imei); } catch { /* best-effort sync */ }
+    try { await syncMachineMedia(s, cfg, imei); } catch (error) { console.error(`[media] Snapshot refresh failed for ${imei}:`, error); }
     revalidatePath(`/machines/${imei}`);
     return { ok: true };
   } catch (e) {
@@ -394,6 +396,9 @@ export async function removeDeviceMediaAction(
   try {
     await removeDeviceMedia(cfg, imei, resType, resCode);
     try { await refreshResource(cfg, imei); } catch { /* best-effort */ }
+    if (isSupabaseConfigured()) {
+      try { await syncMachineMedia(await createServiceClient(), cfg, imei); } catch (error) { console.error(`[media] Snapshot refresh failed for ${imei}:`, error); }
+    }
     revalidatePath(`/machines/${imei}`);
     return { ok: true };
   } catch (e) {

@@ -59,6 +59,32 @@ export function menuSnapshot(menu: Menu): Snapshot {
   return snapshot;
 }
 
+export function menuFromSnapshot(snapshot: Snapshot): Menu {
+  const menu: Menu = { diy: [], unify: [] };
+  for (const [entityKey, fields] of Object.entries(snapshot)) {
+    const [kind, position] = entityKey.split(":");
+    if (kind !== "diy" && kind !== "unify") continue;
+    const item: Record<string, unknown> = { position: /^\d+$/.test(position) ? Number(position) : position };
+    const packs = new Map<string, { code: string; goodsName?: string; intro?: string }>();
+    for (const [field, value] of Object.entries(fields)) {
+      const [name, language] = field.split(".");
+      if (language && (name === "goodsName" || name === "intro")) {
+        const pack = packs.get(language) ?? { code: language };
+        pack[name] = String(value ?? "");
+        packs.set(language, pack);
+      } else {
+        item[field] = value;
+      }
+    }
+    item.languagePacks = [...packs.values()];
+    menu[kind].push(item as ProductDiyItem);
+  }
+  for (const kind of ["diy", "unify"] as const) {
+    menu[kind].sort((a, b) => Number(a.position ?? 0) - Number(b.position ?? 0));
+  }
+  return menu;
+}
+
 export function diffSnapshots(before: Snapshot, after: Snapshot) {
   const changes: { entityKey: string; field: string; oldValue: unknown; newValue: unknown }[] = [];
   for (const entityKey of new Set([...Object.keys(before), ...Object.keys(after)])) {
@@ -258,11 +284,12 @@ export function alertStatusSignals(rows: HuaxinStatusRow[]) {
 
 export async function recordMachineStatuses(s: SupabaseClient, machine: Machine, rows: HuaxinStatusRow[]) {
   const signals = alertStatusSignals(rows);
-  if (!signals.length) return;
   const { data: saved, error: readError } = await s.from("machine_status_snapshots").select("field,value").eq("machine_id", machine.id);
   if (readError) throw new Error(`Could not read machine status snapshots: ${readError.message}`);
-  const previous = new Map(((saved as { field: string; value: unknown }[]) ?? []).map((row) => [row.field, row.value]));
-  const { error } = await s.from("machine_change_log").insert(signals.map((signal) => ({
+  const savedRows = (saved as { field: string; value: unknown }[]) ?? [];
+  const previous = new Map(savedRows.map((row) => [row.field, row.value]));
+  if (signals.length) {
+    const { error } = await s.from("machine_change_log").insert(signals.map((signal) => ({
       ...baseRow(machine, null),
       source: "machine_sync",
       action: previous.has(signal.field) && previous.get(signal.field) !== signal.value ? "status_changed" : "observed",
@@ -272,16 +299,28 @@ export async function recordMachineStatuses(s: SupabaseClient, machine: Machine,
       old_value: previous.get(signal.field) ?? null,
       new_value: signal.value,
       metadata: { description: signal.raw.desc, raw_value: signal.raw.value, raw_data: signal.raw.data },
-  })));
-  if (error) throw new Error(`Could not write machine status observations: ${error.message}`);
-  const { error: snapshotError } = await s.from("machine_status_snapshots").upsert(signals.map((signal) => ({
-    machine_id: machine.id,
-    field: signal.field,
-    value: signal.value,
-    raw: signal.raw,
-    observed_at: new Date().toISOString(),
-  })));
-  if (snapshotError) throw new Error(`Could not save machine status snapshots: ${snapshotError.message}`);
+    })));
+    if (error) throw new Error(`Could not write machine status observations: ${error.message}`);
+  }
+  const observedAt = new Date().toISOString();
+  const rawSnapshots = [...new Map(rows.map((row, index) => {
+    const field = `raw:${row.code ?? index}`;
+    return [field, { machine_id: machine.id, field, value: row.value ?? row.data ?? "", raw: row, observed_at: observedAt }];
+  })).values()];
+  const snapshots = [
+    ...signals.map((signal) => ({ machine_id: machine.id, field: signal.field, value: signal.value, raw: signal.raw, observed_at: observedAt })),
+    ...rawSnapshots,
+  ];
+  if (snapshots.length) {
+    const { error: snapshotError } = await s.from("machine_status_snapshots").upsert(snapshots);
+    if (snapshotError) throw new Error(`Could not save machine status snapshots: ${snapshotError.message}`);
+  }
+  const currentRawFields = new Set(rawSnapshots.map((row) => row.field));
+  const staleRawFields = savedRows.filter((row) => row.field.startsWith("raw:") && !currentRawFields.has(row.field)).map((row) => row.field);
+  if (staleRawFields.length) {
+    const { error: deleteError } = await s.from("machine_status_snapshots").delete().eq("machine_id", machine.id).in("field", staleRawFields);
+    if (deleteError) throw new Error(`Could not remove stale machine statuses: ${deleteError.message}`);
+  }
 }
 
 export async function recordCouponExchange(

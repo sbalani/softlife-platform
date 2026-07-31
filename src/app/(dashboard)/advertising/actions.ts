@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getConfigFromEnv, editDeviceMedia, refreshResource } from "@/lib/huaxin/client";
+import { syncMachineMedia } from "@/lib/data/machine-media";
 
 export type UploadResult = { ok: boolean; error?: string };
 export type AssignResult = { ok: boolean; assigned: number; errors: string[] };
@@ -40,12 +41,16 @@ export async function assignToMachines(
 ): Promise<AssignResult> {
   const cfg = getConfigFromEnv();
   if (!cfg) return { ok: false, assigned: 0, errors: ["Huaxin not configured."] };
+  const s = isSupabaseConfigured() ? await createServiceClient() : null;
   let assigned = 0;
   const errors: string[] = [];
   for (const imei of imeis) {
     try {
       await editDeviceMedia(cfg, imei, { res_type: mediaType, res_path: mediaUrl, res_duration: duration });
       try { await refreshResource(cfg, imei); } catch { /* best-effort */ }
+      if (s) {
+        try { await syncMachineMedia(s, cfg, imei); } catch (error) { console.error(`[advertising] Media snapshot failed for ${imei}:`, error); }
+      }
       assigned++;
     } catch (e) {
       errors.push(`${imei}: ${e instanceof Error ? e.message : String(e)}`);

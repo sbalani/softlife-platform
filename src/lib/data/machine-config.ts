@@ -3,6 +3,7 @@ import { translateLocation } from "@/lib/i18n/huaxin";
 import type { Source } from "./machines";
 
 export type ProductOpt = { id: string; name: string; type: string };
+export type OdooWarehouseOpt = { odoo_id: number; name: string; code: string | null };
 
 export type MachineConfig = {
   machineId: string | null;
@@ -18,6 +19,8 @@ export type MachineConfig = {
   customerId: string | null;
   nayaxId: string | null;
   displayName: string | null;
+  odooWarehouseId: number | null;
+  odooWarehouses: OdooWarehouseOpt[];
   ingredients: { position: string; product_id: string | null; product_type: string; current_lot_name: string | null; last_loaded_date: string | null }[];
   bases: ProductOpt[];
   toppings: ProductOpt[];
@@ -36,13 +39,15 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
     const s = await createServiceClient();
     const { data: m } = await s
       .from("machines")
-      .select("id,name,location,location_override,latitude,longitude,base_product_id,profile,last_full_clean_date,payment_model,customer_id,nayax_id,display_name,created_at")
+      .select("id,name,location,location_override,latitude,longitude,base_product_id,profile,last_full_clean_date,payment_model,customer_id,nayax_id,display_name,odoo_warehouse_id,created_at")
       .eq("device_imei", imei)
       .maybeSingle();
     const machine = m as Record<string, unknown> | null;
 
     const { data: prods } = await s.from("products").select("id,name,type").order("name");
     const products = (prods as ProductOpt[]) ?? [];
+    const { data: warehouseRows, error: warehouseError } = await s.from("odoo_warehouses").select("odoo_id,name,code").order("name");
+    if (warehouseError) throw warehouseError;
 
     let ingredients: MachineConfig["ingredients"] = [];
     if (machine?.id) {
@@ -67,6 +72,8 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
       customerId: (machine?.customer_id as string) ?? null,
       nayaxId: (machine?.nayax_id as string) ?? null,
       displayName: (machine?.display_name as string) ?? null,
+      odooWarehouseId: (machine?.odoo_warehouse_id as number) ?? null,
+      odooWarehouses: (warehouseRows as OdooWarehouseOpt[]) ?? [],
       ingredients,
       bases: products.filter((p) => p.type === "base"),
       toppings: products.filter((p) => p.type === "topping"),

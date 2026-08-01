@@ -58,7 +58,7 @@ export default async function RefillsPage() {
                     <span className="font-display text-base font-bold text-cocoa">{r.machine_name ?? "Unknown machine"}</span>
                     <span className="ml-2 text-xs text-taupe">by {r.operator_name ?? "—"}</span>
                   </div>
-                  <span className="text-xs text-taupe">{formatDateTime(r.device_event_time, tz)}</span>
+                  <span className="text-xs text-taupe">{formatDateTime(r.device_event_time, tz)} · Odoo: {r.odoo_sync_status.replace("_", " ")}</span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {r.lines.map((l, i) => (

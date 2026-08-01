@@ -26,7 +26,17 @@ export function LoginForm() {
       setError(error.message === "Invalid login credentials" ? "Incorrect email or password." : error.message);
       return;
     }
-    router.push(searchParams.get("next") || "/dashboard");
+    const next = searchParams.get("next");
+    let destination = "/dashboard";
+    if (next) {
+      try {
+        const resolved = new URL(next, location.origin);
+        if (resolved.origin === location.origin) destination = `${resolved.pathname}${resolved.search}${resolved.hash}`;
+      } catch {
+        destination = "/dashboard";
+      }
+    }
+    router.push(destination);
     router.refresh();
   };
 

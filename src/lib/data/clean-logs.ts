@@ -6,6 +6,9 @@ export type CleanLog = {
   kind: string;
   device_event_time: string;
   operator_name: string | null;
+  cleaning_material_used: boolean | null;
+  water_bucket_count: number | null;
+  odoo_sync_status: string;
 };
 
 export async function recordMachineClean(s: SupabaseClient, values: {
@@ -30,7 +33,7 @@ export async function getMachineCleanHistory(machineId: string): Promise<CleanLo
   if (!isSupabaseConfigured()) return [];
   const s = await createServiceClient();
   const { data, error } = await s.from("clean_logs")
-    .select("id,kind,device_event_time,profiles(full_name,email)")
+    .select("id,kind,device_event_time,cleaning_material_used,water_bucket_count,odoo_sync_status,profiles(full_name,email)")
     .eq("machine_id", machineId)
     .order("device_event_time", { ascending: false })
     .limit(50);
@@ -42,6 +45,9 @@ export async function getMachineCleanHistory(machineId: string): Promise<CleanLo
       kind: row.kind as string,
       device_event_time: row.device_event_time as string,
       operator_name: operator?.full_name ?? operator?.email ?? null,
+      cleaning_material_used: (row.cleaning_material_used as boolean) ?? null,
+      water_bucket_count: (row.water_bucket_count as number) ?? null,
+      odoo_sync_status: (row.odoo_sync_status as string) ?? "pending",
     };
   });
 }

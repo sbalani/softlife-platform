@@ -27,6 +27,9 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
     const s = await createServiceClient();
     const profile = String(fd.get("profile") ?? "");
     const lastClean = String(fd.get("last_full_clean") ?? "");
+    const warehouseValue = String(fd.get("odoo_warehouse_id") ?? "");
+    const odooWarehouseId = warehouseValue ? Number(warehouseValue) : null;
+    if (warehouseValue && (!Number.isInteger(odooWarehouseId) || Number(odooWarehouseId) <= 0)) return { ok: false, error: "Invalid warehouse." };
     if (lastClean && lastClean > ymd(new Date())) return { ok: false, error: "Cleaning date cannot be in the future." };
 
     // base_product_id is NOT touched here — it's set from the Base hopper
@@ -40,6 +43,7 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
         nayax_id: String(fd.get("nayax_id") ?? "").trim() || null,
         payment_model: String(fd.get("payment_model") ?? "automatic"),
         location_override: String(fd.get("location_override") ?? "").trim() || null,
+        odoo_warehouse_id: odooWarehouseId,
         // Address may have changed — clear the geocode cache marker so the
         // next sync re-geocodes coordinates for the map views.
         geocoded_from: null,

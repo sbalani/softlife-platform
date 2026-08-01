@@ -31,6 +31,7 @@ import { MachineMap } from "@/components/maps";
 import { translateLocation } from "@/lib/i18n/huaxin";
 import { getRefillHistory } from "@/lib/data/refills";
 import { getMachineCleanHistory } from "@/lib/data/clean-logs";
+import { MachineServiceQr } from "@/components/MachineServiceQr";
 
 export const dynamic = "force-dynamic";
 
@@ -188,6 +189,8 @@ export default async function MachineDetailPage({
         )}
       </section>
 
+      {config?.machineId && <MachineServiceQr machineId={config.machineId} machineName={name} />}
+
       {/* Cleaning history */}
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -197,8 +200,8 @@ export default async function MachineDetailPage({
         {cleanHistory.length ? (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[520px] text-xs">
-              <thead className="text-left text-[10px] uppercase text-taupe"><tr><th className="py-2">Date</th><th>Type</th><th>Recorded by</th></tr></thead>
-              <tbody className="divide-y divide-line">{cleanHistory.map((clean) => <tr key={clean.id}><td className="py-2 text-cocoa">{formatDateTime(clean.device_event_time, tz)}</td><td className="capitalize text-cocoa">{clean.kind}</td><td className="text-taupe">{clean.operator_name ?? "Imported marker"}</td></tr>)}</tbody>
+              <thead className="text-left text-[10px] uppercase text-taupe"><tr><th className="py-2">Date</th><th>Type</th><th>Material</th><th>Water</th><th>Recorded by</th><th>Odoo</th></tr></thead>
+              <tbody className="divide-y divide-line">{cleanHistory.map((clean) => <tr key={clean.id}><td className="py-2 text-cocoa">{formatDateTime(clean.device_event_time, tz)}</td><td className="capitalize text-cocoa">{clean.kind}</td><td className="text-cocoa">{clean.cleaning_material_used === null ? "—" : clean.cleaning_material_used ? "Used" : "Not used"}</td><td className="text-cocoa">{clean.water_bucket_count === null ? "—" : `${clean.water_bucket_count} bucket${clean.water_bucket_count === 1 ? "" : "s"}`}</td><td className="text-taupe">{clean.operator_name ?? "Imported marker"}</td><td className="capitalize text-taupe">{clean.odoo_sync_status.replace("_", " ")}</td></tr>)}</tbody>
             </table>
           </div>
         ) : <p className="text-sm text-taupe">No cleaning events recorded yet. Setting “Last full clean” above creates the first history entry.</p>}
@@ -258,7 +261,7 @@ export default async function MachineDetailPage({
           <h3 className="mb-2 text-[11px] uppercase tracking-wide text-taupe">Recent refills</h3>
           {refillHistory.length ? <div className="space-y-2">{refillHistory.map((refill) => (
             <div key={refill.id} className="rounded-lg bg-cream/50 px-3 py-2 text-xs">
-              <div className="flex flex-wrap justify-between gap-2"><span className="font-semibold text-cocoa">{formatDateTime(refill.device_event_time, tz)}</span><span className="text-taupe">{refill.operator_name ?? "Unknown operator"} · {refill.status}</span></div>
+              <div className="flex flex-wrap justify-between gap-2"><span className="font-semibold text-cocoa">{formatDateTime(refill.device_event_time, tz)}</span><span className="text-taupe">{refill.operator_name ?? "Unknown operator"} · Odoo: {refill.odoo_sync_status.replace("_", " ")}</span></div>
               <div className="mt-1 text-taupe">{refill.lines.length ? refill.lines.map((line) => `${line.lot_name} · ${line.quantity_used}${line.has_photo ? " · photo" : ""}`).join(" | ") : "No refill lines recorded"}</div>
             </div>
           ))}</div> : <p className="text-sm text-taupe">No refill events recorded for this machine.</p>}

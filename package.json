@@ -14,14 +14,15 @@
     "test:analytics": "node --experimental-strip-types --test src/lib/analytics.test.ts",
     "test:coupon-dates": "node --experimental-strip-types --test src/lib/coupon-dates.test.ts src/lib/huaxin/coupon-api.test.ts src/lib/data/coupons.test.ts",
     "test:fleet": "node --experimental-strip-types --test src/lib/data/fleet-freshness.test.ts",
-    "test:service-history": "node --experimental-strip-types --test src/lib/data/clean-logs.test.ts"
+    "test:service-history": "node --experimental-strip-types --test src/lib/data/clean-logs.test.ts src/lib/data/service-url.test.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.5",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.110.0",
     "ai": "^7.0.11",
-    "next": "16.2.9",
+    "next": "16.2.12",
+    "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "undici": "^8.5.0",
@@ -31,11 +32,16 @@
     "@tailwindcss/postcss": "^4",
     "@types/leaflet": "^1.9.21",
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.9",
+    "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "overrides": {
+    "postcss": "8.5.25",
+    "sharp": "0.35.3"
   }
 }

@@ -51,7 +51,8 @@ export async function middleware(request: NextRequest) {
     const role = profile?.role;
     // Expand only after each page's service-role queries are tenant-scoped.
     const franchiseePaths = ["/remote-control"];
-    const allowed = role === "admin" || (role === "operator" && path.startsWith("/refills")) || (role === "franchisee" && franchiseePaths.some((prefix) => path.startsWith(prefix)));
+    const machineService = path.startsWith("/machine/");
+    const allowed = role === "admin" || machineService || (role === "operator" && path.startsWith("/refills")) || (role === "franchisee" && franchiseePaths.some((prefix) => path.startsWith(prefix)));
     if (!allowed) {
       const url = request.nextUrl.clone();
       url.pathname = role === "franchisee" ? "/remote-control" : "/refills";

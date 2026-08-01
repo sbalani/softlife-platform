@@ -1,6 +1,6 @@
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getApiSession } from "@/lib/auth/api-session";
-import { accessibleMachineIds } from "@/lib/data/service-access";
+import { hasMobileCapability, mobileMachineIds } from "@/lib/auth/mobile-authorization";
 
 export const runtime = "nodejs";
 
@@ -13,6 +13,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ lot: str
   }
   const session = await getApiSession(req);
   if (!session) return Response.json({ error: { message: "Unauthorized" } }, { status: 401 });
+  if (!hasMobileCapability(session, "recall.read")) return Response.json({ error: { message: "Forbidden" } }, { status: 403 });
 
   try {
     const s = await createServiceClient();
@@ -25,7 +26,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ lot: str
     if (error) throw error;
 
     let rows = (data as Record<string, unknown>[]) ?? [];
-    const allowedIds = await accessibleMachineIds(s, { role: session.role, tenant_id: session.tenantId });
+    const allowedIds = await mobileMachineIds(s, session);
     if (allowedIds) rows = rows.filter((row) => allowedIds.includes(row.machine_id as string));
     const latestByMachine = new Map<string, Record<string, unknown>>();
     for (const row of rows) {

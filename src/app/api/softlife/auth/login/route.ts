@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { mobileUserProfile } from "@/lib/auth/mobile-authorization";
 
 export const runtime = "nodejs";
 
@@ -23,19 +24,17 @@ export async function POST(req: Request) {
   }
 
   const service = await createServiceClient();
-  const { data: profile } = await service.from("profiles").select("role,full_name").eq("id", data.user.id).maybeSingle();
+  let user;
+  try {
+    user = await mobileUserProfile(service, data.user);
+  } catch {
+    return NextResponse.json({ error: { message: "User profile not configured" } }, { status: 403 });
+  }
 
   return NextResponse.json({
     token: data.session.access_token,
-    user: {
-      // A real Supabase user id (uuid string) — NOT the old fake numeric uid.
-      // The mobile app's SessionUser.uid/local schema still expect a number;
-      // that side needs updating before this can be wired up end-to-end.
-      uid: data.user.id,
-      name: profile?.full_name ?? data.user.email ?? "User",
-      login: data.user.email ?? login,
-      role: profile?.role === "admin" ? "admin" : "operator",
-      warehouse_id: 1,
-    },
+    refresh_token: data.session.refresh_token,
+    expires_at: data.session.expires_at ?? Math.floor(Date.now() / 1000) + 3600,
+    user,
   });
 }

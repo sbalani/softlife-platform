@@ -6,9 +6,11 @@ import { createUser, type UserResult } from "./actions";
 const input = "w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa focus:border-terracotta focus:outline-none";
 const label = "mb-1 block text-[11px] uppercase tracking-wide text-taupe";
 
-export function CreateUserForm() {
+export function CreateUserForm({ tenants }: { tenants: { id: string; name: string }[] }) {
   const [res, action, pending] = useActionState<UserResult | null, FormData>(createUser, null);
   const [mode, setMode] = useState<"password" | "invite">("invite");
+  const [role, setRole] = useState("operator");
+  const [employerKind, setEmployerKind] = useState("softlife");
 
   return (
     <form action={action} className="grid grid-cols-1 gap-3 sm:grid-cols-4">
@@ -29,11 +31,21 @@ export function CreateUserForm() {
       ) : <div />}
       <label className="block">
         <span className={label}>Role</span>
-        <select name="role" defaultValue="operator" className={input}>
+        <select name="role" value={role} onChange={(event) => setRole(event.target.value)} className={input}>
           <option value="operator">Operator</option>
+          <option value="franchisee">Franchisee</option>
           <option value="admin">Admin</option>
         </select>
       </label>
+      <label className="block">
+        <span className={label}>Employer type</span>
+        <select name="employer_kind" value={employerKind} onChange={(event) => setEmployerKind(event.target.value)} className={input}>
+          <option value="softlife">SoftLife</option>
+          <option value="franchisee">Franchisee</option>
+          <option value="contractor">Contractor</option>
+        </select>
+      </label>
+      {employerKind !== "softlife" && <label className="block"><span className={label}>Employer account *</span><select name="tenant_id" required className={input} defaultValue=""><option value="" disabled>Select account</option>{tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></label>}
       <fieldset className="sm:col-span-4">
         <legend className={label}>Account setup</legend>
         <div className="flex flex-wrap gap-4 text-sm text-cocoa">

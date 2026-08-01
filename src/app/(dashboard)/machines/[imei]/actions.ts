@@ -8,12 +8,17 @@ import { generateAllergenComposite } from "@/lib/allergens/composite";
 import { getSessionProfile } from "@/lib/auth/session";
 import { recordMachinePush, recordProductChange } from "@/lib/data/change-log";
 import { syncMachineMedia } from "@/lib/data/machine-media";
+import { recordMachineClean } from "@/lib/data/clean-logs";
+import { cleanDay } from "@/lib/data/service-history-utils";
+import { ymd } from "@/lib/dates";
 
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
 
 export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData): Promise<SaveResult> {
   if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+  const actor = await getSessionProfile();
+  if (actor?.role !== "admin") return { ok: false, error: "Admin access required." };
   const machineId = String(fd.get("machine_id") ?? "");
   const imei = String(fd.get("imei") ?? "");
   if (!machineId) return { ok: false, error: "Machine isn't in Supabase yet — sync first." };
@@ -22,27 +27,40 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
     const s = await createServiceClient();
     const profile = String(fd.get("profile") ?? "");
     const lastClean = String(fd.get("last_full_clean") ?? "");
+    if (lastClean && lastClean > ymd(new Date())) return { ok: false, error: "Cleaning date cannot be in the future." };
 
     // base_product_id is NOT touched here — it's set from the Base hopper
     // card in the product menu section (updateBaseHopper), which is the one
     // place that both pushes to the machine and keeps this field linked.
-    const { error: mErr } = await s
+    const { data: savedMachine, error: mErr } = await s
       .from("machines")
       .update({
         profile: profile || null,
         display_name: String(fd.get("display_name") ?? "").trim() || null,
         nayax_id: String(fd.get("nayax_id") ?? "").trim() || null,
-        last_full_clean_date: lastClean ? new Date(lastClean).toISOString() : null,
         payment_model: String(fd.get("payment_model") ?? "automatic"),
         location_override: String(fd.get("location_override") ?? "").trim() || null,
         // Address may have changed — clear the geocode cache marker so the
         // next sync re-geocodes coordinates for the map views.
         geocoded_from: null,
       })
-      .eq("id", machineId);
+      .eq("id", machineId)
+      .select("id,last_full_clean_date")
+      .single();
     if (mErr) return { ok: false, error: mErr.message };
 
+    if (lastClean && cleanDay(savedMachine.last_full_clean_date) !== lastClean) {
+      await recordMachineClean(s, {
+        machineId,
+        clientUuid: crypto.randomUUID(),
+        operatorId: actor.id,
+        kind: "full",
+        eventTime: `${lastClean}T12:00:00Z`,
+      });
+    }
+
     revalidatePath(`/machines/${imei}`);
+    revalidatePath("/machines");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };

@@ -4,11 +4,19 @@ import { getRefillHistory } from "@/lib/data/refills";
 import { RefillForm } from "./RefillForm";
 import { formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
+import { getSessionProfile } from "@/lib/auth/session";
+import { createServiceClient } from "@/lib/supabase/server";
+import { accessibleMachineIds } from "@/lib/data/service-access";
 
 export const dynamic = "force-dynamic";
 
 export default async function RefillsPage() {
-  const [{ machines }, lots, history] = await Promise.all([getMachines(), getLots(), getRefillHistory()]);
+  const session = await getSessionProfile();
+  const [{ machines: allMachines }, allLots] = await Promise.all([getMachines(), getLots()]);
+  const allowedIds = session ? await accessibleMachineIds(await createServiceClient(), session) : [];
+  const machines = allowedIds ? allMachines.filter((machine) => allowedIds.includes(machine.id)) : allMachines;
+  const lots = session?.role === "admin" ? allLots : allLots.filter((lot) => lot.tenant_id === session?.tenant_id);
+  const history = await getRefillHistory(allowedIds ?? undefined);
   const tz = await getDisplayTimezone();
 
   // FIFO: oldest released stock first — matches the mobile app's suggestion order.

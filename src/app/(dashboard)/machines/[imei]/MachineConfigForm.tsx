@@ -5,11 +5,9 @@ import { useActionState } from "react";
 import { saveMachineConfig, type SaveResult } from "./actions";
 import type { MachineConfig } from "@/lib/data/machine-config";
 
-export function MachineConfigForm({ config, imei }: { config: MachineConfig; imei: string }) {
+export function MachineConfigForm({ config, imei, today, lastCleanDate }: { config: MachineConfig; imei: string; today: string; lastCleanDate: string }) {
   const [profile, setProfile] = useState(config.profile ?? "");
   const [res, action, pending] = useActionState<SaveResult | null, FormData>(saveMachineConfig, null);
-
-  const lastCleanDate = config.lastFullClean ? config.lastFullClean.slice(0, 10) : "";
 
   const selectClass =
     "rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa focus:border-terracotta focus:outline-none";
@@ -39,8 +37,9 @@ export function MachineConfigForm({ config, imei }: { config: MachineConfig; ime
           <input type="text" name="display_name" defaultValue={config.displayName ?? ""} placeholder="e.g. Málaga Centro" className={selectClass} />
         </label>
         <label className="block">
-          <span className={labelClass}>Last full clean</span>
-          <input type="date" name="last_full_clean" defaultValue={lastCleanDate} className={selectClass} />
+          <span className={labelClass}>Record full clean date</span>
+          <input type="date" name="last_full_clean" defaultValue={lastCleanDate} max={today} className={selectClass} />
+          <span className="mt-1 block text-[10px] text-taupe">Blank does not erase cleaning history.</span>
         </label>
         <label className="block">
           <span className={labelClass}>Nayax terminal ID</span>

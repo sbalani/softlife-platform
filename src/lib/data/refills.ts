@@ -23,16 +23,19 @@ type PayloadLine = {
   batch_photo?: string | null; // mobile app submits base64 under this key
 };
 
-export async function getRefillHistory(): Promise<Refill[]> {
+export async function getRefillHistory(machineIds?: string[]): Promise<Refill[]> {
   if (!isSupabaseConfigured()) return [];
-  try {
-    const s = await createServiceClient();
-    const { data } = await s
-      .from("reposiciones")
-      .select("id, device_event_time, status, payload_json, machines(name), profiles(full_name,email)")
-      .order("device_event_time", { ascending: false })
-      .limit(100);
-    return ((data as Record<string, unknown>[]) ?? []).map((r) => {
+  if (machineIds && !machineIds.length) return [];
+  const s = await createServiceClient();
+  let query = s
+    .from("reposiciones")
+    .select("id, device_event_time, status, payload_json, machines(name), profiles(full_name,email)")
+    .order("device_event_time", { ascending: false })
+    .limit(100);
+  if (machineIds) query = query.in("machine_id", machineIds);
+  const { data, error } = await query;
+  if (error) throw error;
+  return ((data as Record<string, unknown>[]) ?? []).map((r) => {
       const payload = (r.payload_json as { lines?: PayloadLine[] }) ?? {};
       const machine = r.machines as { name?: string } | null;
       const operator = r.profiles as { full_name?: string; email?: string } | null;
@@ -49,8 +52,5 @@ export async function getRefillHistory(): Promise<Refill[]> {
           photo_url: l.photo_url ?? null,
         })),
       };
-    });
-  } catch {
-    return [];
-  }
+  });
 }

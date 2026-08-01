@@ -1,4 +1,6 @@
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { getApiSession } from "@/lib/auth/api-session";
+import { canAccessMachine } from "@/lib/data/service-access";
 
 export const runtime = "nodejs";
 
@@ -6,6 +8,8 @@ export async function POST(req: Request) {
   if (!isSupabaseConfigured()) {
     return Response.json({ accepted: [], rejected: [] });
   }
+  const session = await getApiSession(req);
+  if (!session) return Response.json({ error: { message: "Unauthorized" } }, { status: 401 });
   const body = await req.json();
   const records: Record<string, unknown>[] = body.records ?? [];
 
@@ -16,71 +20,37 @@ export async function POST(req: Request) {
 
     for (const r of records) {
       const clientUuid = String(r.client_uuid ?? "");
-
-      // Idempotency check
-      const { data: existing } = await s
-        .from("reposiciones")
-        .select("client_uuid")
-        .eq("client_uuid", clientUuid)
-        .maybeSingle();
-      if (existing) {
-        accepted.push(clientUuid);
+      const submittedMachineId = String(r.machine_id ?? "");
+      if (!/^[0-9a-f-]{36}$/i.test(clientUuid) || !/^[0-9a-f-]{36}$/i.test(submittedMachineId)) {
+        rejected.push({ client_uuid: clientUuid, reason: "Invalid refill identifiers" });
         continue;
       }
 
-      // Map numeric machine_id → Supabase uuid
-      const machineIdNum = String(r.machine_id ?? "");
       const { data: machine } = await s
         .from("machines")
-        .select("id,name,device_imei")
-        .eq("device_id_huaxin", machineIdNum)
+        .select("id")
+        .eq("id", submittedMachineId)
         .maybeSingle();
-      const machineUuid = (machine as Record<string, unknown> | null)?.id ?? null;
-      const machineName = (machine as Record<string, unknown> | null)?.name ?? null;
-      const deviceImei = (machine as Record<string, unknown> | null)?.device_imei ?? null;
-
-      // Insert reposicion
-      const { error } = await s.from("reposiciones").insert({
-        client_uuid: clientUuid,
-        machine_id: machineUuid,
-        operator_id: String(r.operator_id ?? ""),
-        device_event_time: r.device_event_time ?? new Date().toISOString(),
-        payload_json: r,
-        status: "synced",
-        synced_at: new Date().toISOString(),
+      if (!machine) {
+        rejected.push({ client_uuid: clientUuid, reason: "Machine not found" });
+        continue;
+      }
+      const eventTime = String(r.device_event_time ?? new Date().toISOString());
+      if (!await canAccessMachine(s, { role: session.role, tenant_id: session.tenantId }, submittedMachineId, eventTime)) {
+        rejected.push({ client_uuid: clientUuid, reason: "Machine access denied" });
+        continue;
+      }
+      const { error } = await s.rpc("record_refill", {
+        p_client_uuid: clientUuid,
+        p_machine_id: submittedMachineId,
+        p_operator_id: session.id,
+        p_device_event_time: eventTime,
+        p_payload: { ...r, operator_id: session.id },
       });
       if (error) {
         rejected.push({ client_uuid: clientUuid, reason: error.message });
         continue;
       }
-
-      // Process lines → lot_usages (audit trail) + decrement the lot's on-hand qty.
-      // Lines only carry lot_name, not a real lots.id (the mobile app's numeric
-      // lot_id is a synthetic per-request index, not a stable identifier —
-      // matches how LogLotForm already keys off lot_name elsewhere).
-      const lines = (r.lines as Record<string, unknown>[]) ?? [];
-      for (const line of lines) {
-        const lotName = String(line.lot_name ?? "");
-        const quantity = Number(line.quantity_used ?? 0) || null;
-        const { data: lot } = await s.from("lots").select("id,product_name").eq("name", lotName).maybeSingle();
-        const lotRow = lot as { id?: string; product_name?: string } | null;
-
-        await s.from("lot_usages").insert({
-          machine_id: machineUuid,
-          machine_name: machineName as string,
-          device_imei: deviceImei as string,
-          lot_name: lotName,
-          product_name: lotRow?.product_name ?? null,
-          quantity,
-          device_event_time: (line.device_event_time as string) ?? (r.device_event_time as string) ?? new Date().toISOString(),
-        });
-
-        if (lotRow?.id && quantity) {
-          const { error: decErr } = await s.rpc("decrement_lot_qty", { p_lot_id: lotRow.id, p_amount: quantity });
-          if (decErr) console.error("[reposicion/sync] failed to decrement lot qty for", lotRow.id, decErr);
-        }
-      }
-
       accepted.push(clientUuid);
     }
 

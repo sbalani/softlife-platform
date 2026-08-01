@@ -7,14 +7,6 @@ export const dynamic = "force-dynamic";
 
 type SP = { dateFrom?: string; dateTo?: string; machine?: string; productType?: string; lotName?: string };
 
-function qs(sp: SP, overrides: Partial<SP>) {
-  const p = new URLSearchParams();
-  const merged = { ...sp, ...overrides };
-  for (const [k, v] of Object.entries(merged)) if (v) p.set(k, v);
-  const s = p.toString();
-  return s ? `/lot-audit?${s}` : "/lot-audit";
-}
-
 const TYPE_TONE: Record<string, string> = {
   base: "bg-terracotta/15 text-terracotta",
   topping: "bg-sage/15 text-sage",
@@ -33,7 +25,7 @@ export default async function LotAuditPage({ searchParams }: { searchParams: Pro
     <div>
       <header className="mb-6">
         <h1 className="font-display text-3xl font-bold text-cocoa">Lot Audit</h1>
-        <p className="mt-1 text-sm text-taupe">{usages.length} lot usage record{usages.length === 1 ? "" : "s"}</p>
+        <p className="mt-1 text-sm text-taupe">{usages.length} lot load / usage record{usages.length === 1 ? "" : "s"} from refills and manual hopper updates</p>
       </header>
 
       {/* Filters */}

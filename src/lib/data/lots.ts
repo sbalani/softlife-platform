@@ -9,6 +9,7 @@ export type Lot = {
   disposition: string;
   device_event_time: string | null;
   tenant_name: string | null;
+  tenant_id: string;
 };
 
 export async function getLots(): Promise<Lot[]> {
@@ -29,6 +30,7 @@ export async function getLots(): Promise<Lot[]> {
       disposition: (l.disposition as string) ?? "released",
       device_event_time: (l.device_event_time as string) ?? null,
       tenant_name: l.tenant_id ? (byId.get(l.tenant_id as string) ?? null) : null,
+      tenant_id: l.tenant_id as string,
     }));
   } catch {
     return [];

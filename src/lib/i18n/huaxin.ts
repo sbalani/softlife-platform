@@ -25,8 +25,9 @@ export function isAdminOverride(payType: string | null): boolean {
   return payType === "自动制作" || payType === "Admin override";
 }
 
-export function isServerModeOrder(payType: string | null): boolean {
+export function isServerModeOrder(_payType: string | null): boolean {
   // TODO: add the actual payType string once Huaxin defines the franchisee-card payment type.
+  void _payType;
   return false;
 }
 
@@ -94,6 +95,12 @@ export const STATUS_DESC_MAP: Record<string, string> = {
   "Device Icon": "Icon",
   "Device Location": "Location",
   "Device Coordinate": "Coordinates",
+  "status_0_cuplack": "Cup Shortage Status",
+  "status_0_lackmaterial": "Material Shortage Status",
+  "Cup Shortage Status": "Cup Shortage Status",
+  "Material Shortage Status": "Material Shortage Status",
+  "Falta de Tarrina": "Cup Shortage Status",
+  "Falta de material": "Material Shortage Status",
 };
 
 export function translateStatusDesc(raw: string | null | undefined): string {
@@ -136,6 +143,9 @@ export function translateStatusValue(value: string | null | undefined): string {
     "消毒": "Sterilizing",
     "保养": "Maintenance",
     "保鲜": "Freshness",
+    "Comienza a faltar material": "Material running low",
+    "Starts lacking material": "Material running low",
+    "Liquid level low": "Liquid level low",
   };
   return common[value] ?? value;
 }

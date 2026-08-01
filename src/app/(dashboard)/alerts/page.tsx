@@ -43,7 +43,9 @@ export default async function AlertsPage() {
                       {sev.label}
                     </span>
                     {a.machine_name && (
-                      <span className="text-xs text-taupe">· {a.machine_name}</span>
+                      a.device_imei
+                        ? <Link href={`/machines/${a.device_imei}`} className="text-xs font-semibold text-terracotta hover:underline">· {a.machine_name}</Link>
+                        : <span className="text-xs text-taupe">· {a.machine_name}</span>
                     )}
                     {a.product_name && <span className="text-xs text-taupe">· {a.product_name}</span>}
                   </div>

@@ -13,6 +13,7 @@
     "test:order-persistence": "node --experimental-strip-types --test src/lib/data/order-persistence.test.ts src/lib/data/orders.test.ts",
     "test:analytics": "node --experimental-strip-types --test src/lib/analytics.test.ts",
     "test:coupon-dates": "node --experimental-strip-types --test src/lib/coupon-dates.test.ts src/lib/huaxin/coupon-api.test.ts src/lib/data/coupons.test.ts",
+    "test:coupon-content": "node --experimental-strip-types --test src/lib/coupon-content.test.ts",
     "test:fleet": "node --experimental-strip-types --test src/lib/data/fleet-freshness.test.ts",
     "test:service-history": "node --experimental-strip-types --test src/lib/data/clean-logs.test.ts src/lib/data/service-url.test.ts"
   },

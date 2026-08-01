@@ -12,13 +12,13 @@ type MachineOption = { id: string; name: string; imei: string };
 type Values = {
   couponName: string; couponType: string; totalCount: string; startTime: string; endTime: string;
   validDay: string; localName: string; money: string; amount: string; productPosition: string;
-  productName: string;
+  productName: string; secondary: string;
 };
 
 const INITIAL: Values = {
   couponName: "", couponType: "0", totalCount: "10", startTime: "", endTime: "",
   validDay: "30", localName: "", money: "1.00", amount: "1", productPosition: "1",
-  productName: "",
+  productName: "", secondary: "1",
 };
 
 export function CouponCreator({ machines }: { machines: MachineOption[] }) {
@@ -53,6 +53,7 @@ export function CouponCreator({ machines }: { machines: MachineOption[] }) {
         <span className={label}>Coupon value ({TYPE_LABELS[values.couponType]})</span>
         {values.couponType === "0" && <label className="flex items-center gap-1"><span className="text-sm text-cocoa">€</span><input name="money" type="number" min="0.01" step="0.01" required value={values.money} onChange={(event) => set("money", event.target.value)} className={`w-32 ${input}`} /></label>}
         {values.couponType === "1" && <div className="flex flex-wrap gap-3"><label><span className={label}>Amount</span><input name="amount" type="number" min="1" required value={values.amount} onChange={(event) => set("amount", event.target.value)} className={`w-20 ${input}`} /></label><label><span className={label}>Position</span><input name="productPosition" required value={values.productPosition} onChange={(event) => set("productPosition", event.target.value)} className={`w-20 ${input}`} /></label><label><span className={label}>Product name</span><input name="productName" required value={values.productName} onChange={(event) => set("productName", event.target.value)} className={`w-40 ${input}`} /></label></div>}
+        <label className="mt-3 block"><span className={label}>Uses per code</span><input name="secondary" type="number" min="1" step="1" required value={values.secondary} onChange={(event) => set("secondary", event.target.value)} className={`w-24 ${input}`} /><span className="mt-1 block text-[10px] text-taupe">Huaxin secondary-card count. Use 1 for a single-use code.</span></label>
       </div>
 
       <div className="flex items-center gap-4"><button disabled={pending} className="rounded-lg bg-terracotta px-4 py-2 text-sm font-bold text-white disabled:opacity-60">{pending ? "Creating..." : "Create coupon"}</button>{res && <span className={`text-sm font-semibold ${res.warning ? "text-warning" : res.ok ? "text-sage" : "text-danger"}`}>{res.ok ? res.warning ?? "Created." : res.error}</span>}</div>

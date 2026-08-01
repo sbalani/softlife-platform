@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { generateCodes, fetchRecords, deleteCouponAction } from "./actions";
 import type { HuaxinCoupon } from "@/lib/huaxin/client";
+import { parseCouponSecondary } from "@/lib/coupon-content";
 
 const TYPE_BADGE: Record<string, string> = {
   "0": "bg-terracotta/15 text-terracotta",
@@ -53,6 +54,7 @@ export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
   };
 
   const ct = coupon.couponType ?? "0";
+  const secondary = parseCouponSecondary(coupon.content);
 
   return (
     <div className="rounded-2xl border border-line bg-white p-5">
@@ -70,6 +72,7 @@ export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
           </p>
           {coupon.deviceImeis && <p className="mt-0.5 text-xs text-taupe">Machines: {coupon.deviceImeis}</p>}
           {coupon.content && <p className="mt-0.5 text-xs text-taupe">{coupon.content}</p>}
+          {secondary && <p className="mt-0.5 text-xs font-semibold text-cocoa">Uses per code: {secondary}</p>}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           <button onClick={viewCodes} disabled={pending} className="text-xs font-bold text-terracotta hover:underline disabled:opacity-50">

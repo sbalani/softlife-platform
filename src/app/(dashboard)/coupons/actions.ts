@@ -14,6 +14,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth/session";
 import { recordCouponExchange } from "@/lib/data/change-log";
 import { refreshCouponSnapshots } from "@/lib/data/coupons";
+import { buildCouponContent, parseCouponUseCount } from "@/lib/coupon-content";
 
 export type CouponResult = { ok: boolean; error?: string; warning?: string };
 
@@ -31,6 +32,7 @@ export async function createCouponAction(_prev: CouponResult | null, fd: FormDat
   const endTime = String(fd.get("endTime") ?? "");
   const validDay = Number(fd.get("validDay") ?? 0);
   const totalCount = Number(fd.get("totalCount") ?? 0);
+  const secondary = parseCouponUseCount(String(fd.get("secondary") ?? "1"));
   const deviceImeis = String(fd.get("deviceImeis") ?? "").split(",").map((imei) => imei.trim()).filter(Boolean);
   if (!new Set(["0", "1"]).has(couponType)) return { ok: false, error: "Invalid coupon type." };
   if (!couponName) return { ok: false, error: "Coupon name is required." };
@@ -38,6 +40,7 @@ export async function createCouponAction(_prev: CouponResult | null, fd: FormDat
   if (endTime < startTime) return { ok: false, error: "End date cannot be before start date." };
   if (!Number.isInteger(validDay) || validDay < 1) return { ok: false, error: "Valid days must be at least 1." };
   if (!Number.isInteger(totalCount) || totalCount < 0 || totalCount > 100) return { ok: false, error: "Serial code count must be between 0 and 100." };
+  if (secondary === null) return { ok: false, error: "Uses per code must be a whole number of at least 1." };
   if (couponDaysBetween(startTime, endTime) !== validDay) return { ok: false, error: "End date and valid days do not match." };
   if (deviceImeis.some((imei) => !/^\d{10,20}$/.test(imei))) return { ok: false, error: "Invalid machine selection." };
   if (!deviceImeis.length) return { ok: false, error: "Select at least one machine." };
@@ -68,17 +71,17 @@ export async function createCouponAction(_prev: CouponResult | null, fd: FormDat
   if (couponType === "0") {
     const money = Number(fd.get("money") ?? 0);
     if (!Number.isFinite(money) || money <= 0) return { ok: false, error: "Discount amount must be greater than zero." };
-    params.content = JSON.stringify({ money: String(money) });
+    params.content = buildCouponContent({ money: String(money) }, secondary);
   } else if (couponType === "1") {
     const amount = Number(fd.get("amount") ?? 0);
     const productPosition = String(fd.get("productPosition") ?? "").trim();
     const productName = String(fd.get("productName") ?? "").trim();
     if (!Number.isInteger(amount) || amount < 1 || !productPosition || !productName) return { ok: false, error: "Amount, position, and product name are required." };
-    params.content = JSON.stringify({
+    params.content = buildCouponContent({
       amount: String(amount),
       productPosition,
       productName,
-    });
+    }, secondary);
   }
 
   try {

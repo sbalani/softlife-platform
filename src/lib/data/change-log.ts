@@ -1,6 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { COUPON_PATHS, type ProductDiyItem, type DiyPushItem } from "../huaxin/client.ts";
 import type { SessionProfile } from "@/lib/auth/session";
+import { resourceStatusSignal, type HuaxinStatusRow } from "../huaxin/status-signals.ts";
+
+export type { HuaxinStatusRow } from "../huaxin/status-signals.ts";
 
 type Menu = { diy: ProductDiyItem[]; unify: ProductDiyItem[] };
 type Snapshot = Record<string, Record<string, unknown>>;
@@ -262,21 +265,13 @@ export async function recordProductChange(
   if (error) throw new Error(`Could not write product change log: ${error.message}`);
 }
 
-export type HuaxinStatusRow = { code?: string; value?: string; desc?: string; data?: string | number };
-
 export function alertStatusSignals(rows: HuaxinStatusRow[]) {
   const byCode = new Map(rows.map((row) => [row.code, row]));
-  const active = (code: string) => {
-    const row = byCode.get(code);
-    if (!row) return null;
-    if (row.data != null) return String(row.data) !== "0";
-    return !["normal", "0", "false"].includes(String(row.value ?? "").toLowerCase());
-  };
   const signals: { field: string; value: boolean; raw: HuaxinStatusRow }[] = [];
-  const cup = byCode.get("status_0_cuplack");
-  if (cup) signals.push({ field: "cup_empty", value: active("status_0_cuplack")!, raw: cup });
-  const material = byCode.get("status_0_lackmaterial");
-  if (material) signals.push({ field: "material_empty", value: active("status_0_lackmaterial")!, raw: material });
+  for (const row of byCode.values()) {
+    const resource = resourceStatusSignal(row);
+    if (resource) signals.push({ field: resource.field, value: resource.active, raw: row });
+  }
   const online = byCode.get("status_0_online_status");
   if (online) signals.push({ field: "device_online", value: String(online.value).toLowerCase() === "online", raw: online });
   return signals;

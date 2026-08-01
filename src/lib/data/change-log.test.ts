@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { alertStatusSignals, diffSnapshots, menuFromSnapshot, menuProductIdMap, menuSnapshot } from "./change-log.ts";
+import { resourceStatusSignal } from "../huaxin/status-signals.ts";
 
 test("machine snapshots report field-level menu changes", () => {
   const before = menuSnapshot({ diy: [{ position: 1, goodsName: "Vanilla", price: "3", imagePath: "old.jpg" }], unify: [] });
@@ -33,6 +34,19 @@ test("Huaxin status codes become stable alert signals", () => {
     { field: "material_empty", value: true },
     { field: "device_online", value: true },
   ]);
+});
+
+test("only confirmed cup and material OOS signals become active", () => {
+  assert.equal(resourceStatusSignal({ code: "status_0_cuplack", data: "1" })?.active, true);
+  assert.equal(resourceStatusSignal({ code: "status_0_cuplack", data: "00" })?.active, false);
+  assert.equal(resourceStatusSignal({ code: "status_0_lackmaterial", data: 99, value: "Normal" })?.active, true);
+  assert.equal(resourceStatusSignal({ code: "status_0_lackmaterial", data: "0" })?.active, false);
+  assert.equal(resourceStatusSignal({ code: "status_0_lackmaterial", value: "unknown" })?.active, false);
+  assert.equal(resourceStatusSignal({ code: "other", desc: "Material Level", value: "0" }), null);
+  assert.deepEqual(alertStatusSignals([
+    { code: "status_0_lackmaterial", data: "0" },
+    { code: "status_0_lackmaterial", data: "17" },
+  ]).map(({ field, value }) => ({ field, value })), [{ field: "material_empty", value: true }]);
 });
 
 test("menu events use the currently observed product assignment", () => {

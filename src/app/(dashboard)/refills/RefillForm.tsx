@@ -120,7 +120,7 @@ export function RefillForm({ machines, lots }: { machines: MachineOption[]; lots
           {pending ? "Saving…" : "Save refill"}
         </button>
         {res && !res.ok && <span className="text-xs text-danger">{res.error}</span>}
-        {res && res.ok && <span className="text-sm font-semibold text-sage">Refill logged.</span>}
+        {res && res.ok && <span className={`text-sm font-semibold ${res.warning ? "text-warning" : "text-sage"}`}>{res.warning ?? "Refill logged."}</span>}
       </div>
     </form>
   );

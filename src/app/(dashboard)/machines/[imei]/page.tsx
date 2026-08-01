@@ -29,6 +29,8 @@ import { FranchiseeAssignmentForm } from "./FranchiseeAssignmentForm";
 import { LineChart } from "@/components/LineChart";
 import { MachineMap } from "@/components/maps";
 import { translateLocation } from "@/lib/i18n/huaxin";
+import { getRefillHistory } from "@/lib/data/refills";
+import { getMachineCleanHistory } from "@/lib/data/clean-logs";
 
 export const dynamic = "force-dynamic";
 
@@ -55,11 +57,10 @@ export default async function MachineDetailPage({
   } else if (Date.parse(`${dateTo}T00:00:00Z`) - Date.parse(`${dateFrom}T00:00:00Z`) > 365 * 86_400_000) {
     dateFrom = ymd(new Date(Date.parse(`${dateTo}T00:00:00Z`) - 365 * 86_400_000), "UTC");
   }
-  const [config, tenants, telemetry, lotHistory, ingredients, { machines: allMachines }] = await Promise.all([
+  const [config, tenants, telemetry, ingredients, { machines: allMachines }] = await Promise.all([
     getMachineConfig(imei),
     getTenants(),
     getMachineDetail(imei, { from: dateFrom, to: dateTo, timeZone: tz }),
-    getMachineLotHistory(imei),
     getProducts(),
     getMachines(),
   ]);
@@ -68,8 +69,15 @@ export default async function MachineDetailPage({
   const media = telemetry?.media ?? [];
   const baseProduct = config?.baseProductId ? ingredients.find((p) => p.id === config.baseProductId) ?? null : null;
   const otherMachines = allMachines.filter((m) => m.device_imei !== imei).map((m) => ({ id: m.id, name: m.name }));
-  const pendingDraft = config?.machineId ? await getPendingMenuDraft(config.machineId) : null;
-  const franchiseeAssignments = config?.machineId ? await getFranchiseeAssignments(config.machineId) : [];
+  const [pendingDraft, franchiseeAssignments, lotHistory, refillHistory, cleanHistory] = config?.machineId
+    ? await Promise.all([
+      getPendingMenuDraft(config.machineId),
+      getFranchiseeAssignments(config.machineId),
+      getMachineLotHistory(config.machineId, imei),
+      getRefillHistory([config.machineId]),
+      getMachineCleanHistory(config.machineId),
+    ])
+    : [null, [], [], [], []];
   const draftByPosition = new Map((pendingDraft?.items ?? []).map((it) => [it.position, it]));
 
   // Map Huaxin lane numbers to config positions for ingredient linking
@@ -160,7 +168,7 @@ export default async function MachineDetailPage({
         <h2 className="mb-4 font-display text-lg font-bold text-cocoa">Configuration &amp; control</h2>
         {config ? (
           <>
-            <MachineConfigForm config={config} imei={imei} />
+            <MachineConfigForm config={config} imei={imei} today={defaultTo} lastCleanDate={config.lastFullClean ? ymd(new Date(config.lastFullClean), tz) : ""} />
             {config.machineId && (
               <div className="mt-5 border-t border-line pt-4">
                 <h3 className="mb-3 text-[11px] uppercase tracking-wide text-taupe">Franchisee assignment &amp; profit share</h3>
@@ -178,6 +186,22 @@ export default async function MachineDetailPage({
         ) : (
           <p className="text-sm text-taupe">Sync this machine to Supabase first (Settings → Sync now) to configure and control it.</p>
         )}
+      </section>
+
+      {/* Cleaning history */}
+      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-display text-lg font-bold text-cocoa">Cleaning history</h2>
+          <span className="text-xs font-semibold text-taupe">Last full clean: {config?.lastFullClean ? formatDate(config.lastFullClean, tz) : "never recorded"}</span>
+        </div>
+        {cleanHistory.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[520px] text-xs">
+              <thead className="text-left text-[10px] uppercase text-taupe"><tr><th className="py-2">Date</th><th>Type</th><th>Recorded by</th></tr></thead>
+              <tbody className="divide-y divide-line">{cleanHistory.map((clean) => <tr key={clean.id}><td className="py-2 text-cocoa">{formatDateTime(clean.device_event_time, tz)}</td><td className="capitalize text-cocoa">{clean.kind}</td><td className="text-taupe">{clean.operator_name ?? "Imported marker"}</td></tr>)}</tbody>
+            </table>
+          </div>
+        ) : <p className="text-sm text-taupe">No cleaning events recorded yet. Setting “Last full clean” above creates the first history entry.</p>}
       </section>
 
       {/* Lots & traceability */}
@@ -211,7 +235,7 @@ export default async function MachineDetailPage({
         )}
         {lotHistory.length > 0 && (
           <div className="mt-4 border-t border-line pt-3">
-            <h3 className="mb-2 text-[11px] uppercase tracking-wide text-taupe">Recent lot history</h3>
+            <h3 className="mb-2 text-[11px] uppercase tracking-wide text-taupe">Recent lot loads / usage</h3>
             <div className="overflow-x-auto">
             <table className="w-full min-w-[480px] text-xs">
               <thead className="text-left text-[10px] uppercase text-taupe"><tr><th className="py-1">Date</th><th className="py-1">Position</th><th className="py-1">Product</th><th className="py-1">Lot</th><th className="py-1 text-right">Qty</th></tr></thead>
@@ -230,6 +254,15 @@ export default async function MachineDetailPage({
             </div>
           </div>
         )}
+        <div className="mt-4 border-t border-line pt-3">
+          <h3 className="mb-2 text-[11px] uppercase tracking-wide text-taupe">Recent refills</h3>
+          {refillHistory.length ? <div className="space-y-2">{refillHistory.map((refill) => (
+            <div key={refill.id} className="rounded-lg bg-cream/50 px-3 py-2 text-xs">
+              <div className="flex flex-wrap justify-between gap-2"><span className="font-semibold text-cocoa">{formatDateTime(refill.device_event_time, tz)}</span><span className="text-taupe">{refill.operator_name ?? "Unknown operator"} · {refill.status}</span></div>
+              <div className="mt-1 text-taupe">{refill.lines.length ? refill.lines.map((line) => `${line.lot_name} · ${line.quantity_used}${line.has_photo ? " · photo" : ""}`).join(" | ") : "No refill lines recorded"}</div>
+            </div>
+          ))}</div> : <p className="text-sm text-taupe">No refill events recorded for this machine.</p>}
+        </div>
       </section>
 
       {/* Branding */}

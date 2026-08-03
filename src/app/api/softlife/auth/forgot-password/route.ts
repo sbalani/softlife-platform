@@ -10,7 +10,7 @@ export async function POST(req: Request) {
     const { createClient } = await import("@supabase/supabase-js");
     const auth = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false } });
     await auth.auth.resetPasswordForEmail(email, {
-      redirectTo: `${new URL(req.url).origin}/auth/callback?next=/set-password`,
+      redirectTo: `${new URL(req.url).origin}/set-password`,
     });
   }
   return NextResponse.json({ ok: true });

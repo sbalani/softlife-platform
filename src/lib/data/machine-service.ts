@@ -34,30 +34,37 @@ export async function getMachineService(machineId: string, session: SessionProfi
   const warehouseId = (machine.odoo_warehouse_id as number) ?? null;
   let lots: ServiceLot[] = [];
   if (warehouseId) {
-    const [{ data: lotRows, error: lotError }, { data: pendingRefills, error: refillError }] = await Promise.all([
+    const [{ data: stockRows, error: stockError }, { data: legacyLotRows, error: lotError }, { data: mirrorState, error: stateError }, { data: usageRows, error: usageError }] = await Promise.all([
+      s.from("odoo_lot_stock").select("odoo_lot_id,qty")
+        .eq("odoo_warehouse_id", warehouseId).gt("qty", 0),
       s.from("odoo_lots").select("odoo_id,name,product_name,qty,expiration_date")
-        .eq("odoo_warehouse_id", warehouseId).gt("qty", 0)
-        .order("expiration_date", { ascending: true, nullsFirst: false }).order("name"),
-      s.from("reposiciones").select("id").in("odoo_sync_status", ["pending", "failed"]),
+        .eq("odoo_warehouse_id", warehouseId).gt("qty", 0),
+      s.from("odoo_mirror_state").select("key").eq("key", "lot_stock").maybeSingle(),
+      s.rpc("pending_odoo_lot_usage", { p_warehouse_id: warehouseId }),
     ]);
+    if (stockError) throw stockError;
     if (lotError) throw lotError;
-    if (refillError) throw refillError;
-    const refillIds = ((pendingRefills as { id: string }[]) ?? []).map((row) => row.id);
-    let usageRows: { odoo_lot_id: number; quantity: number }[] = [];
-    if (refillIds.length) {
-      const { data, error } = await s.from("lot_usages").select("odoo_lot_id,quantity").in("reposicion_id", refillIds).not("odoo_lot_id", "is", null);
-      if (error) throw error;
-      usageRows = (data as { odoo_lot_id: number; quantity: number }[]) ?? [];
-    }
+    if (stateError) throw stateError;
+    if (usageError) throw usageError;
     const reserved = new Map<number, number>();
-    for (const usage of usageRows) reserved.set(usage.odoo_lot_id, (reserved.get(usage.odoo_lot_id) ?? 0) + Number(usage.quantity ?? 0));
-    lots = ((lotRows as Record<string, unknown>[]) ?? []).map((lot) => ({
+    for (const usage of (usageRows as { odoo_lot_id: number; quantity: number }[]) ?? []) reserved.set(usage.odoo_lot_id, Number(usage.quantity ?? 0));
+    let lotRows = mirrorState ? [] : (legacyLotRows as Record<string, unknown>[]) ?? [];
+    if (mirrorState && stockRows?.length) {
+      const stock = stockRows as { odoo_lot_id: number; qty: number }[];
+      const { data: masterRows, error: masterError } = await s.from("odoo_lots")
+        .select("odoo_id,name,product_name,expiration_date").in("odoo_id", stock.map((row) => row.odoo_lot_id));
+      if (masterError) throw masterError;
+      const masters = new Map(((masterRows as Record<string, unknown>[]) ?? []).map((row) => [row.odoo_id as number, row]));
+      lotRows = stock.flatMap((row) => masters.has(row.odoo_lot_id) ? [{ ...masters.get(row.odoo_lot_id)!, qty: row.qty }] : []);
+    }
+    lots = lotRows.map((lot) => ({
       odoo_id: lot.odoo_id as number,
       name: lot.name as string,
       product_name: (lot.product_name as string) ?? "Unknown product",
       available: Math.max(0, Number(lot.qty ?? 0) - (reserved.get(lot.odoo_id as number) ?? 0)),
       expiration_date: (lot.expiration_date as string) ?? null,
-    })).filter((lot) => lot.available > 0);
+    })).filter((lot) => lot.available > 0)
+      .sort((a, b) => (a.expiration_date ?? "9999").localeCompare(b.expiration_date ?? "9999") || a.name.localeCompare(b.name));
   }
 
   const warehouse = machine.odoo_warehouses as { name?: string } | null;

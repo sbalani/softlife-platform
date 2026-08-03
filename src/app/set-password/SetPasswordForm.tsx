@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -12,6 +12,34 @@ export function SetPasswordForm() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+  const [recovery, setRecovery] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    const supabase = createClient();
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const query = new URLSearchParams(window.location.search);
+    const accessToken = hash.get("access_token");
+    const refreshToken = hash.get("refresh_token");
+    const linkError = hash.get("error") || hash.get("error_code") || hash.get("error_description") || query.get("error") || query.get("error_code") || query.get("error_description");
+    if (window.location.hash || linkError) window.history.replaceState(window.history.state, "", window.location.pathname);
+    (async () => {
+      if (linkError || (hash.size > 0 && (!accessToken || !refreshToken))) {
+        setError("This password link is invalid or expired.");
+        return;
+      }
+      if (accessToken && refreshToken) {
+        const { error: sessionError } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+        if (sessionError) { setError("This password link is invalid or expired."); return; }
+        setRecovery(hash.get("type") === "recovery");
+      } else {
+        const { data } = await supabase.auth.getSession();
+        if (!data.session) { setError("This password link is invalid or expired."); return; }
+      }
+      setReady(true);
+    })();
+  }, []);
 
   const submit = () => {
     setError(null);
@@ -21,10 +49,18 @@ export function SetPasswordForm() {
       const supabase = createClient();
       const { error: updateError } = await supabase.auth.updateUser({ password });
       if (updateError) return setError(updateError.message);
+      if (recovery) {
+        const { error: signOutError } = await supabase.auth.signOut();
+        if (signOutError) return setError(signOutError.message);
+        setSaved(true);
+        return;
+      }
       router.replace("/dashboard");
       router.refresh();
     });
   };
+
+  if (saved) return <p className="text-sm text-sage">Password updated. You can return to the SoftLife HACCP app and sign in.</p>;
 
   return (
     <div className="space-y-4">
@@ -36,8 +72,8 @@ export function SetPasswordForm() {
         <span className="mb-1 block text-[11px] uppercase tracking-wide text-taupe">Confirm password</span>
         <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} minLength={8} className={input} />
       </label>
-      <button onClick={submit} disabled={pending} className="w-full rounded-lg bg-terracotta px-4 py-2 text-sm font-bold text-white hover:bg-terracotta-dark disabled:opacity-60">
-        {pending ? "Saving…" : "Set password"}
+      <button onClick={submit} disabled={pending || !ready} className="w-full rounded-lg bg-terracotta px-4 py-2 text-sm font-bold text-white hover:bg-terracotta-dark disabled:opacity-60">
+        {!ready && !error ? "Validating link…" : pending ? "Saving…" : "Set password"}
       </button>
       {error && <p className="text-xs text-danger">{error}</p>}
     </div>

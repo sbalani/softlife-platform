@@ -132,6 +132,11 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   const paymentRows = [...paymentStats.entries()].map(([name, values]) => ({ name, ...values })).sort((a, b) => b.revenue - a.revenue);
   const paymentOptions = [...new Set(loadedOrders.map((order) => order.pay_type).filter((value): value is string => !!value))].sort();
   const query = new URLSearchParams(Object.entries({ dateFrom: range.from, dateTo: range.to, machine: params.machine, product: params.product, payType: params.payType }).filter((entry): entry is [string, string] => !!entry[1]));
+  const reportUrl = (report?: "weekly" | "monthly") => {
+    const reportQuery = new URLSearchParams(query);
+    if (report) reportQuery.set("report", report);
+    return `/analytics/export?${reportQuery}`;
+  };
   const input = "rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa focus:border-terracotta focus:outline-none";
   const label = "mb-1 block text-[11px] uppercase tracking-wide text-taupe";
 
@@ -139,7 +144,11 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     <div>
       <header className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div><h1 className="font-display text-3xl font-bold text-cocoa">Analytics</h1><p className="mt-1 text-sm text-taupe">{range.from} to {range.to} · {tz} · Refunded and admin-test orders excluded from net sales</p></div>
-        <Link href={`/analytics/export?${query}`} className="rounded-lg border border-terracotta px-4 py-2 text-sm font-bold text-terracotta hover:bg-terracotta/5">Export CSV</Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href={reportUrl()} className="rounded-lg border border-terracotta px-3 py-2 text-sm font-bold text-terracotta hover:bg-terracotta/5">Order details CSV</Link>
+          <Link href={reportUrl("weekly")} className="rounded-lg border border-terracotta px-3 py-2 text-sm font-bold text-terracotta hover:bg-terracotta/5">Weekly machine sales</Link>
+          <Link href={reportUrl("monthly")} className="rounded-lg border border-terracotta px-3 py-2 text-sm font-bold text-terracotta hover:bg-terracotta/5">Monthly machine sales</Link>
+        </div>
       </header>
 
       <form className="mb-5 flex flex-wrap items-end gap-3 rounded-2xl border border-line bg-white p-4">

@@ -7,10 +7,11 @@ import { getSessionProfile, type SessionProfile } from "@/lib/auth/session";
 import { recordMachineStatuses, recordMachineSync } from "@/lib/data/change-log";
 import { syncMachineMedia } from "@/lib/data/machine-media";
 import { syncCouponSnapshots } from "@/lib/data/coupons";
+import { sendPendingAlertNotifications } from "@/lib/data/alert-notifications";
 
 export type SyncResult = { ok: boolean; synced?: number; error?: string; warning?: string };
 
-/** Lightweight sync: just refresh device online statuses + names (no orders/temps). */
+/** Refresh fleet metadata and detailed status snapshots (no menus/orders/temps). */
 export async function syncMachineStatuses(): Promise<SyncResult> {
   const cfg = getConfigFromEnv();
   if (!cfg) return { ok: false, error: "Huaxin not configured." };
@@ -20,21 +21,30 @@ export async function syncMachineStatuses(): Promise<SyncResult> {
     const devices = await listDevices(cfg, { force: true });
     const s = await createServiceClient();
     let count = 0;
+    let failed = 0;
     for (const d of devices) {
       if (!d.deviceImei) continue;
-      await s.from("machines").upsert({
+      const { data: machine, error } = await s.from("machines").upsert({
         device_imei: d.deviceImei,
         device_id_huaxin: d.deviceId ?? null,
         name: (d.deviceLabel as string) || d.deviceName || d.deviceImei,
         location: (d.deviceLocation as string) ?? null,
         is_online: (d.onlineStatus as string) === "online",
         huaxin_last_sync: new Date().toISOString(),
-      }, { onConflict: "device_imei" });
-      count++;
+      }, { onConflict: "device_imei" }).select("id,name,device_imei").single();
+      if (error || !machine) throw error ?? new Error(`Could not save machine ${d.deviceImei}.`);
+      try {
+        await recordMachineStatuses(s, machine, await getDeviceStatus(cfg, d.deviceImei));
+        count++;
+      } catch (statusError) {
+        failed++;
+        console.error(`[machine-sync] Status monitoring failed for ${d.deviceImei}:`, statusError);
+      }
     }
     revalidatePath("/machines");
     revalidatePath("/dashboard");
-    return { ok: true, synced: count };
+    try { await sendPendingAlertNotifications(s); } catch (error) { console.error("[machine-sync] Alert push failed:", error); }
+    return { ok: true, synced: count, warning: failed ? `${failed} machine status sync(s) failed.` : undefined };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
@@ -52,7 +62,7 @@ export async function syncOneMachine(imei: string): Promise<SyncResult> {
     const s = await createServiceClient();
     const actor = await getSessionProfile();
     let warning: string | undefined;
-    await s.from("machines").upsert({
+    const { error: machineError } = await s.from("machines").upsert({
       device_imei: imei,
       device_id_huaxin: d.deviceId ?? null,
       name: (d.deviceLabel as string) || d.deviceName || imei,
@@ -60,6 +70,7 @@ export async function syncOneMachine(imei: string): Promise<SyncResult> {
       is_online: (d.onlineStatus as string) === "online",
       huaxin_last_sync: new Date().toISOString(),
     }, { onConflict: "device_imei" });
+    if (machineError) throw machineError;
 
     const { data: machine } = await s.from("machines").select("id,name").eq("device_imei", imei).maybeSingle();
     if (machine?.id) {
@@ -73,6 +84,7 @@ export async function syncOneMachine(imei: string): Promise<SyncResult> {
 
     revalidatePath(`/machines/${imei}`);
     revalidatePath("/machines");
+    try { await sendPendingAlertNotifications(s); } catch (error) { console.error("[machine-sync] Alert push failed:", error); }
     return { ok: true, synced: 1, warning };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };

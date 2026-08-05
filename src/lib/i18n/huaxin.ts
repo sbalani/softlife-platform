@@ -97,10 +97,21 @@ export const STATUS_DESC_MAP: Record<string, string> = {
   "Device Coordinate": "Coordinates",
   "status_0_cuplack": "Cup Shortage Status",
   "status_0_lackmaterial": "Material Shortage Status",
+  "status_0_online_status": "App Online Status",
+  "status_0_os": "Ordering System",
+  "status_0_sellcup": "Cups Sold After Material Shortage",
+  "status_0_faultcup": "Foreign Object in Cup Holder",
+  "status_0_cupfault": "Cup Dispenser Blocked",
+  "status_0_cupget": "Cup Pickup Status",
   "Cup Shortage Status": "Cup Shortage Status",
   "Material Shortage Status": "Material Shortage Status",
+  "app online status": "App Online Status",
+  "Limpieza": "Cleaning",
+  "Cuerpos extraños": "Foreign Object in Cup Holder",
   "Falta de Tarrina": "Cup Shortage Status",
   "Falta de material": "Material Shortage Status",
+  "Número de tazas vendidas": "Cups Sold After Material Shortage",
+  "Temperatura medida": "Measured Temperature",
 };
 
 export function translateStatusDesc(raw: string | null | undefined): string {
@@ -146,8 +157,15 @@ export function translateStatusValue(value: string | null | undefined): string {
     "Comienza a faltar material": "Material running low",
     "Starts lacking material": "Material running low",
     "Liquid level low": "Liquid level low",
+    "normal": "Normal",
+    "online": "Online",
+    "offline": "Offline",
+    "Cierre": "Off",
+    "Close": "Off",
+    "Open": "On",
   };
-  return common[value] ?? value;
+  const cups = value.match(/^Normal\[(\d+)]$/i);
+  return cups ? cups[1] : common[value] ?? value;
 }
 
 // ---- Detected device locations (device list .deviceLocation) ----

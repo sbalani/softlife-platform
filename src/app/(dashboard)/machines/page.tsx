@@ -2,8 +2,9 @@ import Link from "next/link";
 import { getMachines } from "@/lib/data/machines";
 import { SyncStatusesButton } from "./SyncStatusesButton";
 import { FleetMap } from "@/components/maps";
-import { formatDate, formatDateTime } from "@/lib/dates";
+import { formatDateTime, ymd } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
+import { getOrders } from "@/lib/data/orders";
 
 export const dynamic = "force-dynamic";
 
@@ -37,16 +38,25 @@ export default async function MachinesPage({
   const pageSize = 10;
   const tz = await getDisplayTimezone();
 
-  const { machines, lastSyncedAt, staleMachines, readError } = await getMachines();
+  const today = ymd(new Date(), tz);
+  const [{ machines, lastSyncedAt, staleMachines, readError }, { orders }] = await Promise.all([
+    getMachines(),
+    getOrders({ dateFrom: today, dateTo: today, timeZone: tz }),
+  ]);
+  const salesByImei = new Map<string, number>();
+  for (const order of orders) {
+    if (!order.device_imei || order.order_state !== "COMPLETE" || order.is_admin_override || order.refund_status === "Refunded") continue;
+    salesByImei.set(order.device_imei, (salesByImei.get(order.device_imei) ?? 0) + order.price);
+  }
   const mapMarkers = machines
     .filter((m) => m.latitude != null && m.longitude != null)
-    .map((m) => ({ name: m.name, location: m.location, lat: m.latitude!, lng: m.longitude!, online: m.net_online }));
+    .map((m) => ({ name: m.display_name || m.name, location: m.location, lat: m.latitude!, lng: m.longitude!, online: m.net_online }));
 
   const isActive = (m: (typeof machines)[number]) => m.state === "active";
   const filtered = machines.filter((m) => {
     const matchesQ =
       !q ||
-      [m.name, m.ref, m.device_imei, m.customer, m.location]
+      [m.display_name, m.name, m.ref, m.device_imei, m.customer, m.location]
         .some((v) => (v ?? "").toLowerCase().includes(q));
     const matchesStatus =
       status === "all" ? true : status === "active" ? isActive(m) : !isActive(m);
@@ -110,73 +120,34 @@ export default async function MachinesPage({
         <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-sand/60 text-left text-[11px] uppercase tracking-wide text-taupe">
             <tr>
-              <th className="px-4 py-3 font-bold">#</th>
-              <th className="px-4 py-3 font-bold">Machine Name</th>
-              <th className="px-4 py-3 font-bold">Machine No</th>
+              <th className="px-4 py-3 font-bold">Machine</th>
+              <th className="px-4 py-3 font-bold">IMEI</th>
               <th className="px-4 py-3 font-bold">Location</th>
-              <th className="px-4 py-3 font-bold">Enrolled</th>
               <th className="px-4 py-3 font-bold">Status</th>
-              <th className="px-4 py-3 text-center font-bold">Trays</th>
-              <th className="px-4 py-3 text-center font-bold">Net</th>
-              <th className="px-4 py-3 text-center font-bold">Actions</th>
+              <th className="px-4 py-3 text-right font-bold">Sales today</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
-            {rows.map((m, i) => {
-              const idx = (safePage - 1) * pageSize + i + 1;
+            {rows.map((m) => {
               return (
                 <tr key={m.id} className="hover:bg-cream/50">
-                  <td className="px-4 py-3 text-taupe">{idx}</td>
-                  <td className="px-4 py-3 font-semibold text-cocoa">{m.name}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-taupe">{m.ref ?? m.device_imei ?? "—"}</td>
+                  <td className="px-4 py-3 font-semibold text-cocoa">{m.device_imei ? <Link href={`/machines/${m.device_imei}`} className="hover:text-terracotta hover:underline">{m.display_name || m.name}</Link> : m.display_name || m.name}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-taupe">{m.device_imei ?? "—"}</td>
                   <td className="px-4 py-3 text-cocoa">{m.location ?? "—"}</td>
-                  <td className="px-4 py-3 text-taupe">
-                    {m.created_at ? formatDate(m.created_at, tz) : "—"}
-                  </td>
                   <td className="px-4 py-3">
-                    <span
-                      className={`rounded-full px-2.5 py-0.5 text-xs font-bold capitalize ${
-                        m.state === "active" ? "bg-sage/15 text-sage" : "bg-taupe/15 text-taupe"
-                      }`}
-                    >
-                      {m.state === "active" ? "Active" : "Inactive"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-center text-cocoa">{m.ingredient_count}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-center gap-1.5">
-                      <span
-                        className={`h-2 w-2 rounded-full ${m.net_online ? "bg-sage" : "bg-taupe/40"}`}
-                      />
-                      <span className="text-xs text-taupe">{m.net_online ? "On" : "Off"}</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${m.oos ? "bg-danger/15 text-danger" : "bg-sage/15 text-sage"}`}>{m.oos ? "OOS" : "OK"}</span>
+                      <span className={`text-xs font-semibold ${m.net_online ? "text-sage" : "text-danger"}`}>{m.net_online ? "Online" : "Offline"}</span>
+                      {m.active_alert_count > 0 && <span title={`${m.active_alert_count} other active alert(s)`} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-warning text-xs font-black text-white">!</span>}
                     </div>
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-center gap-1 text-taupe">
-                      {m.device_imei ? (
-                        <Link
-                          title="View"
-                          href={`/machines/${m.device_imei}`}
-                          className="rounded p-1.5 hover:bg-cream"
-                        >
-                          👁
-                        </Link>
-                      ) : (
-                        <button title="View" disabled className="rounded p-1.5 opacity-40">
-                          👁
-                        </button>
-                      )}
-                      <button title="Edit" className="rounded p-1.5 hover:bg-cream">✎</button>
-                      <button title="Delete" className="rounded p-1.5 hover:bg-cream">🗑</button>
-                      <button title="Settings" className="rounded p-1.5 hover:bg-cream">⚙</button>
-                    </div>
-                  </td>
+                  <td className="px-4 py-3 text-right font-semibold text-cocoa">€{(salesByImei.get(m.device_imei ?? "") ?? 0).toFixed(2)}</td>
                 </tr>
               );
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-10 text-center text-taupe">
+                <td colSpan={5} className="px-4 py-10 text-center text-taupe">
                   No machines match your search.
                 </td>
               </tr>

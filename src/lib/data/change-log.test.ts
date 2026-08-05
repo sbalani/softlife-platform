@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { alertStatusSignals, diffSnapshots, menuFromSnapshot, menuProductIdMap, menuSnapshot } from "./change-log.ts";
-import { resourceStatusSignal } from "../huaxin/status-signals.ts";
+import { faultStatusSignal, resourceStatusSignal, statusDisplayRank } from "../huaxin/status-signals.ts";
 
 test("machine snapshots report field-level menu changes", () => {
   const before = menuSnapshot({ diy: [{ position: 1, goodsName: "Vanilla", price: "3", imagePath: "old.jpg" }], unify: [] });
@@ -47,6 +47,16 @@ test("only confirmed cup and material OOS signals become active", () => {
     { code: "status_0_lackmaterial", data: "0" },
     { code: "status_0_lackmaterial", data: "17" },
   ]).map(({ field, value }) => ({ field, value })), [{ field: "material_empty", value: true }]);
+});
+
+test("fault statuses and display order use Huaxin codes", () => {
+  assert.equal(faultStatusSignal({ code: "status_0_faultcup", value: "Normal" })?.active, false);
+  assert.equal(faultStatusSignal({ code: "status_0_os", value: "Cierre" })?.active, false);
+  assert.equal(faultStatusSignal({ code: "status_0_os", value: "正常" })?.active, false);
+  assert.equal(faultStatusSignal({ code: "status_0_faultcup", value: "Foreign object" })?.active, true);
+  assert.ok(statusDisplayRank({ code: "status_0_lackmaterial" }) < statusDisplayRank({ code: "status_0_online_status" }));
+  assert.ok(statusDisplayRank({ code: "status_0_online_status" }) < statusDisplayRank({ code: "status_0_os" }));
+  assert.ok(statusDisplayRank({ code: "status_0_os" }) < statusDisplayRank({ code: "status_0_sellcup" }));
 });
 
 test("menu events use the currently observed product assignment", () => {

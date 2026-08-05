@@ -32,7 +32,7 @@ import { translateLocation } from "@/lib/i18n/huaxin";
 import { getRefillHistory } from "@/lib/data/refills";
 import { getMachineCleanHistory } from "@/lib/data/clean-logs";
 import { MachineServiceQr } from "@/components/MachineServiceQr";
-import { resourceStatusSignal } from "@/lib/huaxin/status-signals";
+import { resourceStatusSignal, statusDisplayRank } from "@/lib/huaxin/status-signals";
 
 export const dynamic = "force-dynamic";
 
@@ -284,10 +284,12 @@ export default async function MachineDetailPage({
         </div>
         {status.length ? (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-            {[...status].sort((a, b) => Number(resourceStatusSignal(b)?.active ?? false) - Number(resourceStatusSignal(a)?.active ?? false)).map((s, i) => {
+            {[...status].sort((a, b) => statusDisplayRank(a) - statusDisplayRank(b) || translateStatusDesc(a.desc ?? a.code).localeCompare(translateStatusDesc(b.desc ?? b.code)) || String(a.code).localeCompare(String(b.code))).map((s, i) => {
               const desc = translateStatusDesc(s.desc ?? s.code).toLowerCase();
               const val = translateStatusValue(s.value);
               const resource = resourceStatusSignal(s);
+              const online = s.code === "status_0_online_status";
+              const isOnline = online && val.toLowerCase() === "online";
               let tone = "";
               if (desc.includes("formation ratio") || desc.includes("form") && desc.includes("ratio")) {
                 const num = parseFloat(val);
@@ -296,9 +298,10 @@ export default async function MachineDetailPage({
                 else tone = "text-warning font-bold";
               }
               if (resource?.active) tone = "text-danger font-bold";
+              if (online) tone = isOnline ? "text-sage font-bold" : "text-danger font-bold";
               const resourceName = resource?.field === "cup_empty" ? "Cup OOS" : "Material OOS";
               return (
-                <div key={s.code ?? i} className={`rounded-lg border px-3 py-2 ${resource?.active ? "border-danger/40 bg-danger/10" : "border-transparent bg-cream/50"}`}>
+                <div key={s.code ?? i} className={`rounded-lg border px-3 py-2 ${resource?.active || online && !isOnline ? "border-danger/40 bg-danger/10" : online ? "border-sage/40 bg-sage/10" : "border-transparent bg-cream/50"}`}>
                   <div className={`text-[10px] uppercase tracking-wide ${resource?.active ? "font-bold text-danger" : "text-taupe"}`}>{translateStatusDesc(s.desc ?? s.code)}</div>
                   <div className={`text-sm font-semibold ${tone || "text-cocoa"}`}>{resource?.active ? `${resourceName} active` : val}</div>
                   {resource?.active && <div className="mt-0.5 text-[10px] text-danger/80">Huaxin: {val}{s.data != null ? ` · signal ${s.data}` : ""}</div>}

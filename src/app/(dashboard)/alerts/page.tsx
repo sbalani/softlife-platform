@@ -17,7 +17,7 @@ const SEV: Record<string, { ring: string; dot: string; label: string }> = {
 };
 
 export default async function AlertsPage() {
-  const [{ alerts, source }, tz, rules, { machines }, products] = await Promise.all([getAlerts(), getDisplayTimezone(), getChangeAlertRules(), getMachines(), getProducts()]);
+  const [{ alerts, source }, { alerts: history }, tz, rules, { machines }, products] = await Promise.all([getAlerts(), getAlerts(true), getDisplayTimezone(), getChangeAlertRules(), getMachines(), getProducts()]);
   return (
     <div>
       <header className="mb-8">
@@ -27,6 +27,7 @@ export default async function AlertsPage() {
 
       <AlertRuleManager rules={rules} machines={machines} products={products.map(({ id, name }) => ({ id, name }))} />
 
+      <h2 className="mb-3 font-display text-xl font-bold text-cocoa">Active alerts</h2>
       <div className="space-y-3">
         {alerts.map((a) => {
           const sev = SEV[a.severity] ?? SEV.info;
@@ -63,6 +64,19 @@ export default async function AlertsPage() {
           );
         })}
       </div>
+      {alerts.length === 0 && <p className="rounded-2xl border border-line bg-white p-5 text-sm text-taupe">No active alerts.</p>}
+      <section className="mt-8">
+        <h2 className="mb-3 font-display text-xl font-bold text-cocoa">Alert history</h2>
+        <div className="overflow-x-auto rounded-2xl border border-line bg-white">
+          <table className="w-full min-w-[720px] text-sm">
+            <thead className="bg-sand/60 text-left text-[11px] uppercase tracking-wide text-taupe"><tr><th className="px-4 py-3">Machine</th><th className="px-4 py-3">Alert</th><th className="px-4 py-3">Started</th><th className="px-4 py-3">Recovered</th></tr></thead>
+            <tbody className="divide-y divide-line">
+              {history.map((alert) => <tr key={alert.id}><td className="px-4 py-3 font-semibold text-cocoa">{alert.device_imei ? <Link href={`/machines/${alert.device_imei}`} className="hover:text-terracotta hover:underline">{alert.machine_name ?? alert.device_imei}</Link> : alert.machine_name ?? "—"}</td><td className="px-4 py-3 text-cocoa">{alert.message}</td><td className="px-4 py-3 text-taupe">{formatDateTime(alert.created_at, tz)}</td><td className="px-4 py-3 font-semibold text-sage">{formatDateTime(alert.resolved_at!, tz)}</td></tr>)}
+              {history.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-taupe">No recovered alerts yet. New alert cycles will remain here after recovery.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
       {source === "sample" && (
         <p className="mt-4 text-xs text-taupe">Sample data — connect Supabase to see live alerts.</p>
       )}

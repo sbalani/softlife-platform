@@ -1,6 +1,7 @@
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { ymd as localYmd } from "@/lib/dates";
 import { storedOrderFromRow } from "@/lib/data/order-persistence";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type OrderProduct = { goodsName: string; price: string; position: number };
 
@@ -66,14 +67,14 @@ export async function getOrders(filters?: {
   dateFrom?: string;
   dateTo?: string;
   timeZone?: string;
-}): Promise<{ orders: Order[]; sync: OrderSyncSummary | null; readError?: string }> {
+}, client?: SupabaseClient): Promise<{ orders: Order[]; sync: OrderSyncSummary | null; readError?: string }> {
   const range = filters?.dateFrom && filters.dateTo && filters.timeZone
     ? { from: filters.dateFrom, to: filters.dateTo, timeZone: filters.timeZone }
     : { from: ymd(new Date(Date.now() - 30 * 86_400_000)), to: ymd(new Date()), timeZone: "UTC" };
   if (!isSupabaseConfigured()) return { orders: [], sync: null, readError: "Supabase is not configured." };
 
   try {
-    const supabase = await createClient();
+    const supabase = client ?? await createClient();
     const syncQuery = supabase
       .from("order_sync_runs")
       .select("status,requested_from,requested_to,finished_at,machines_failed")

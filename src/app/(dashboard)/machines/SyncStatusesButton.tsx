@@ -10,7 +10,7 @@ export function SyncStatusesButton() {
   const sync = () => {
     startTransition(async () => {
       const res = await syncMachineStatuses();
-      setResult(res.ok ? `Synced ${res.synced} machine(s).` : res.error ?? "Failed");
+      setResult(res.ok ? res.warning ?? `Synced detailed status for ${res.synced} machine(s).` : res.error ?? "Failed");
     });
   };
 

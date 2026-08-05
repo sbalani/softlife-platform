@@ -7,7 +7,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 export type AlertRuleResult = { ok: boolean; error?: string };
 
 const NUMERIC_FIELDS = new Set(["price", "marketPrice", "stock", "temperature"]);
-const STATUS_FIELDS = new Set(["cup_empty", "material_empty", "device_online"]);
+const STATUS_FIELDS = new Set(["cup_empty", "material_empty", "device_online", "cup_foreign_object", "ordering_system_fault", "cup_blocked", "cup_take_fault"]);
 const PRODUCT_FIELDS = new Set(["price", "marketPrice", "stock"]);
 
 export async function saveAlertRule(_previous: AlertRuleResult | null, formData: FormData): Promise<AlertRuleResult> {

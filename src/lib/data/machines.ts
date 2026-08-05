@@ -5,6 +5,7 @@ import { fleetFreshness } from "@/lib/data/fleet-freshness";
 export type Machine = {
   id: string;
   name: string;
+  display_name: string | null;
   ref: string | null;
   device_imei: string | null;
   location: string | null;
@@ -21,6 +22,8 @@ export type Machine = {
   created_at: string | null;
   net_online: boolean;
   huaxin_last_sync: string | null;
+  oos: boolean;
+  active_alert_count: number;
 };
 
 export type Source = "supabase" | "huaxin" | "sample";
@@ -42,7 +45,28 @@ export async function getMachines(): Promise<{
       rows.push(...((data as Machine[]) ?? []));
       if (!data || data.length < 1000) break;
     }
-    const machines = rows.map((machine) => ({ ...machine, location: machine.location_override || translateLocation(machine.location) }));
+    const [{ data: names, error: namesError }, { data: statuses, error: statusesError }, { data: alerts, error: alertsError }] = await Promise.all([
+      s.from("machines").select("id,display_name"),
+      s.from("machine_status_snapshots").select("machine_id,field,value").in("field", ["cup_empty", "material_empty"]),
+      s.from("v_alerts").select("machine_id,change_field").is("resolved_at", null),
+    ]);
+    if (namesError) throw namesError;
+    if (statusesError) throw statusesError;
+    if (alertsError) throw alertsError;
+    const displayNames = new Map(((names as { id: string; display_name: string | null }[]) ?? []).map((row) => [row.id, row.display_name]));
+    const oosMachines = new Set(((statuses as { machine_id: string; value: unknown }[]) ?? []).filter((row) => row.value === true || row.value === "true").map((row) => row.machine_id));
+    const alertCounts = new Map<string, number>();
+    for (const alert of (alerts as { machine_id: string | null; change_field: string | null }[]) ?? []) {
+      if (!alert.machine_id || alert.change_field === "cup_empty" || alert.change_field === "material_empty") continue;
+      alertCounts.set(alert.machine_id, (alertCounts.get(alert.machine_id) ?? 0) + 1);
+    }
+    const machines = rows.map((machine) => ({
+      ...machine,
+      display_name: displayNames.get(machine.id) ?? null,
+      location: machine.location_override || translateLocation(machine.location),
+      oos: oosMachines.has(machine.id),
+      active_alert_count: alertCounts.get(machine.id) ?? 0,
+    }));
     const freshness = fleetFreshness(machines.map((machine) => machine.huaxin_last_sync));
     return {
       machines,

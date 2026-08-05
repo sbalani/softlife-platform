@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { COUPON_PATHS, type ProductDiyItem, type DiyPushItem } from "../huaxin/client.ts";
 import type { SessionProfile } from "@/lib/auth/session";
-import { resourceStatusSignal, type HuaxinStatusRow } from "../huaxin/status-signals.ts";
+import { faultStatusSignal, resourceStatusSignal, type HuaxinStatusRow } from "../huaxin/status-signals.ts";
 
 export type { HuaxinStatusRow } from "../huaxin/status-signals.ts";
 
@@ -271,6 +271,8 @@ export function alertStatusSignals(rows: HuaxinStatusRow[]) {
   for (const row of byCode.values()) {
     const resource = resourceStatusSignal(row);
     if (resource) signals.push({ field: resource.field, value: resource.active, raw: row });
+    const fault = faultStatusSignal(row);
+    if (fault) signals.push({ field: fault.field, value: fault.active, raw: row });
   }
   const online = byCode.get("status_0_online_status");
   if (online) signals.push({ field: "device_online", value: String(online.value).toLowerCase() === "online", raw: online });

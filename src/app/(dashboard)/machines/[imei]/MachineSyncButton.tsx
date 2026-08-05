@@ -10,7 +10,7 @@ export function MachineSyncButton({ imei }: { imei: string }) {
   const sync = () => {
     startTransition(async () => {
       const res = await syncOneMachine(imei);
-      setResult(res.ok ? res.warning ?? "Status updated." : res.error ?? "Failed");
+      setResult(res.ok ? res.warning ?? "Machine updated." : res.error ?? "Failed");
     });
   };
 
@@ -21,7 +21,7 @@ export function MachineSyncButton({ imei }: { imei: string }) {
         disabled={pending}
         className="rounded-lg border border-line bg-white px-3 py-1.5 text-xs font-bold text-cocoa hover:bg-cream disabled:opacity-60"
       >
-        {pending ? "Syncing…" : "↻ Sync status"}
+        {pending ? "Syncing…" : "↻ Sync machine"}
       </button>
       {result && <span className="text-[10px] text-taupe">{result}</span>}
     </div>

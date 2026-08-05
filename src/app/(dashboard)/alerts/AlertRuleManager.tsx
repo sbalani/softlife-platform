@@ -13,6 +13,10 @@ const STATUS_OPTIONS: Record<string, [string, string][]> = {
   cup_empty: [["true", "Empty"], ["false", "Available"]],
   material_empty: [["true", "Out of product"], ["false", "Available"]],
   device_online: [["false", "Offline"], ["true", "Online"]],
+  cup_foreign_object: [["true", "Foreign object detected"], ["false", "Clear"]],
+  ordering_system_fault: [["true", "Fault"], ["false", "Normal"]],
+  cup_blocked: [["true", "Blocked"], ["false", "Clear"]],
+  cup_take_fault: [["true", "Fault"], ["false", "Normal"]],
 };
 
 function conditionLabel(rule: ChangeAlertRule) {
@@ -31,7 +35,7 @@ export function AlertRuleManager({ rules, machines, products }: { rules: ChangeA
       <p className="mb-4 text-xs text-taupe">Choose a metric, then independently scope it to a product, a machine, both, or neither. Rules are evaluated during machine sync and the scheduled monitor.</p>
       <form action={action} className="flex flex-wrap items-end gap-3">
         <label><span className={label}>Rule name</span><input name="name" required placeholder="Standard price range" className={`w-44 ${input}`} /></label>
-        <label><span className={label}>Metric or status</span><select name="field" value={field} onChange={(event) => setField(event.target.value)} className={input}><option value="price">Product price</option><option value="marketPrice">Product market price</option><option value="stock">Machine product stock</option><option value="temperature">Temperature</option><option value="cup_empty">Cup status</option><option value="material_empty">Product/material status</option><option value="device_online">Machine connectivity</option></select></label>
+        <label><span className={label}>Metric or status</span><select name="field" value={field} onChange={(event) => setField(event.target.value)} className={input}><option value="price">Product price</option><option value="marketPrice">Product market price</option><option value="stock">Machine product stock</option><option value="temperature">Temperature</option><option value="cup_empty">Cup shortage</option><option value="material_empty">Material shortage</option><option value="device_online">Machine connectivity</option><option value="cup_foreign_object">Foreign object in cup holder</option><option value="ordering_system_fault">Ordering system</option><option value="cup_blocked">Cup dispenser blocked</option><option value="cup_take_fault">Cup pickup</option></select></label>
         {PRODUCT_FIELDS.has(field) && <label><span className={label}>Product</span><select name="product_id" className={input}><option value="">All products</option>{products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}</select></label>}
         <label><span className={label}>Machine</span><select name="machine_id" className={input}><option value="">All machines</option>{machines.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}</select></label>
         {statusOptions ? <label><span className={label}>Alert when</span><select name="target_value" className={input}>{statusOptions.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label> : <><label><span className={label}>Minimum</span><input name="min_value" type="number" step="0.01" className={`w-24 ${input}`} /></label><label><span className={label}>Maximum</span><input name="max_value" type="number" step="0.01" className={`w-24 ${input}`} /></label></>}

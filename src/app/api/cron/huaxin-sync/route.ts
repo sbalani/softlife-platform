@@ -6,6 +6,7 @@ import { normalizeHuaxinTimestamp } from "@/lib/data/temperatures";
 import { ingestOrders } from "@/lib/data/order-sync";
 import { syncMachineMedia } from "@/lib/data/machine-media";
 import { syncCouponSnapshots } from "@/lib/data/coupons";
+import { sendPendingAlertNotifications } from "@/lib/data/alert-notifications";
 
 export const runtime = "nodejs";
 
@@ -101,6 +102,8 @@ export async function GET(req: Request) {
     console.error("[cron] Coupon sync failed:", error);
   }
   const orderSync = await ingestOrders(yesterday, today, [], "cron");
+  let notifications = 0;
+  try { notifications = await sendPendingAlertNotifications(supabase); } catch (error) { console.error("[cron] Alert push failed:", error); }
 
   return NextResponse.json({
     synced,
@@ -116,6 +119,7 @@ export async function GET(req: Request) {
     orderMachinesSucceeded: orderSync.succeededMachines,
     orderMachinesFailed: orderSync.failedMachines.length,
     orderSyncError: orderSync.error,
+    notifications,
     devicesSeen: devices.length,
     stored: true,
   });

@@ -7,10 +7,10 @@ import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  if (!isSupabaseConfigured()) return Response.json({ error: { message: "Not configured" } }, { status: 503 });
   const session = await getApiSession(req);
   if (!session) return Response.json({ error: { message: "Unauthorized" } }, { status: 401 });
   if (session.role !== "admin") return Response.json({ error: { message: "Forbidden" } }, { status: 403 });
+  if (!isSupabaseConfigured()) return Response.json({ error: { message: "Not configured" } }, { status: 503 });
 
   try {
     const date = ymd(new Date(), DEFAULT_TZ);
@@ -35,6 +35,8 @@ export async function GET(req: Request) {
     return Response.json({
       date,
       time_zone: DEFAULT_TZ,
+      order_sync: orderResult.sync,
+      sales_stale: !orderResult.sync || orderResult.sync.status !== "succeeded" || orderResult.sync.failedMachines > 0,
       machines: machines.map((machine) => {
         const today = sales.get(machine.device_imei ?? "") ?? { amount: 0, orders: 0, units: 0 };
         return {
@@ -46,6 +48,7 @@ export async function GET(req: Request) {
           oos: machine.oos,
           active_alert_count: machine.active_alert_count,
           status_observed_at: machine.status_observed_at,
+          status_stale: !machine.status_observed_at || Date.now() - Date.parse(machine.status_observed_at) > 2 * 60 * 60 * 1000,
           sales_today: Number(today.amount.toFixed(2)),
           orders_today: today.orders,
           units_today: today.units,

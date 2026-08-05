@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/cron/huaxin-sync",
-      "schedule": "*/30 * * * *"
+      "schedule": "0 7 * * *"
     }
   ]
 }

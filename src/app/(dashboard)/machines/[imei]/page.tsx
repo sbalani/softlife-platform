@@ -419,7 +419,7 @@ export default async function MachineDetailPage({
         </div>
         {telemetry && telemetry.temperatures.length ? (
           <div className="mt-3">
-            <LineChart data={telemetry.temperatures.map((t) => ({ label: new Date(t.time).toLocaleTimeString("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit" }), value: t.value }))} color="#6fa98c" height={180} unit="°C" />
+            <LineChart data={telemetry.temperatures.map((t) => ({ label: new Date(t.time).toLocaleTimeString("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit" }), value: t.value }))} color="#6fa98c" height={180} unit="°C" zoomable dynamicScale />
           </div>
         ) : (
           <p className="mt-3 text-sm text-taupe">No temperature readings in the last 24 hours.</p>

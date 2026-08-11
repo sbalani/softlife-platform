@@ -39,6 +39,7 @@ export type ResourceStatusSignal = {
 };
 
 export type MaterialRemainingStatus = {
+  active: boolean;
   remainingCups: number;
   totalCups: number;
   remainingPct: number;
@@ -48,6 +49,12 @@ export type MaterialRemainingStatus = {
 
 export function materialRemainingStatus(row: HuaxinStatusRow): MaterialRemainingStatus | null {
   if (row.code !== "status_0_sellcup") return null;
+  const normal = String(row.value ?? "").trim().match(/^normal\s*\[\s*(\d+)\s*]$/i);
+  if (normal) {
+    const totalCups = Number(normal[1]);
+    if (totalCups <= 0) return null;
+    return { active: false, remainingCups: totalCups, totalCups, remainingPct: 100, level: "normal", outOfStock: false };
+  }
   const counter = [row.value, row.data].map(String).find((value) => /\d+\s*\[\s*\d+\s*]/.test(value));
   const match = counter?.match(/(\d+)\s*\[\s*(\d+)\s*]/);
   if (!match) return null;
@@ -56,6 +63,7 @@ export function materialRemainingStatus(row: HuaxinStatusRow): MaterialRemaining
   if (totalCups <= 0) return null;
   const remainingPct = Math.max(0, Math.min(100, Math.floor((remainingCups / totalCups) * 100)));
   return {
+    active: true,
     remainingCups,
     totalCups,
     remainingPct,
@@ -67,14 +75,13 @@ export function materialRemainingStatus(row: HuaxinStatusRow): MaterialRemaining
 export function resourceStatusSignal(row: HuaxinStatusRow): ResourceStatusSignal | null {
   const field = row.code ? RESOURCE_FIELDS[row.code as keyof typeof RESOURCE_FIELDS] : undefined;
   if (!field) return null;
-  const rawData = String(row.data ?? "").trim();
-  if (rawData) {
-    const data = Number(rawData);
-    return { field, active: Number.isFinite(data) && data > 0, row };
-  }
   const value = String(row.value ?? "").trim().toLowerCase();
+  if (["0", "false", "normal", "none", "available", "正常", "无"].includes(value)) return { field, active: false, row };
   const active = ["1", "true", "abnormal", "starts lacking material", "liquid level low", "comienza a faltar material"].includes(value);
-  return { field, active, row };
+  if (active) return { field, active: true, row };
+  const rawData = String(row.data ?? "").trim();
+  const data = Number(rawData);
+  return { field, active: !value && rawData !== "" && Number.isFinite(data) && data > 0, row };
 }
 
 export function faultStatusSignal(row: HuaxinStatusRow): { field: string; active: boolean; row: HuaxinStatusRow } | null {

@@ -37,10 +37,10 @@ test("Huaxin status codes become stable alert signals", () => {
   ]);
 });
 
-test("only confirmed cup and material OOS signals become active", () => {
+test("explicit normal resource states override auxiliary numeric data", () => {
   assert.equal(resourceStatusSignal({ code: "status_0_cuplack", data: "1" })?.active, true);
   assert.equal(resourceStatusSignal({ code: "status_0_cuplack", data: "00" })?.active, false);
-  assert.equal(resourceStatusSignal({ code: "status_0_lackmaterial", data: 99, value: "Normal" })?.active, true);
+  assert.equal(resourceStatusSignal({ code: "status_0_lackmaterial", data: 99, value: "Normal" })?.active, false);
   assert.equal(resourceStatusSignal({ code: "status_0_lackmaterial", data: "0" })?.active, false);
   assert.equal(resourceStatusSignal({ code: "status_0_lackmaterial", value: "unknown" })?.active, false);
   assert.equal(resourceStatusSignal({ code: "other", desc: "Material Level", value: "0" }), null);
@@ -81,7 +81,10 @@ test("aggregate operating states distinguish modes from actionable faults", () =
 
 test("post-shortage cup counter uses the configured percentage thresholds", () => {
   assert.deepEqual(materialRemainingStatus({ code: "status_0_sellcup", value: "13[25]" }), {
-    remainingCups: 13, totalCups: 25, remainingPct: 52, level: "normal", outOfStock: false,
+    active: true, remainingCups: 13, totalCups: 25, remainingPct: 52, level: "normal", outOfStock: false,
+  });
+  assert.deepEqual(materialRemainingStatus({ code: "status_0_sellcup", value: "Normal[25]" }), {
+    active: false, remainingCups: 25, totalCups: 25, remainingPct: 100, level: "normal", outOfStock: false,
   });
   assert.equal(materialRemainingStatus({ code: "status_0_sellcup", value: "12[25]" })?.level, "warning");
   assert.equal(materialRemainingStatus({ code: "status_0_sellcup", data: "5[20]" })?.level, "critical");

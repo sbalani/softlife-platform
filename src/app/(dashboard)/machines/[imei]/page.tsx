@@ -309,7 +309,9 @@ export default async function MachineDetailPage({
               const warning = resource?.field === "material_empty" && resource.active || warningFault || remaining?.level === "warning";
               const highlighted = danger ? "border-danger/40 bg-danger/10" : warning ? "border-warning/40 bg-warning/10" : online || remaining ? "border-sage/40 bg-sage/10" : "border-transparent bg-cream/50";
               const displayValue = remaining
-                ? `${remaining.remainingCups === 0 ? "OOS · " : ""}${remaining.remainingCups} of ${remaining.totalCups} cups remaining (${remaining.remainingPct}%)`
+                ? remaining.active
+                  ? `${remaining.remainingCups === 0 ? "OOS · " : ""}${remaining.remainingCups} of ${remaining.totalCups} cups remaining (${remaining.remainingPct}%)`
+                  : `${remaining.totalCups} cups configured · countdown inactive`
                 : resource?.active ? `${resourceName} active` : val;
               return (
                 <div key={s.code ?? i} className={`rounded-lg border px-3 py-2 ${highlighted}`}>

@@ -10,6 +10,8 @@ const COMMANDS = [
   { command: "operate_sellout", label: "Sold out", icon: "⏸" },
   { command: "operate_openrefrigeration", label: "Fridge on", icon: "❄" },
   { command: "operate_closerefrigeration", label: "Fridge off", icon: "🔥" },
+  { command: "operate_openthawing", label: "Defrost on", icon: "💧" },
+  { command: "operate_closethawing", label: "Defrost off", icon: "⏹" },
   { command: "operate_status", label: "Status query", icon: "📡" },
 ];
 

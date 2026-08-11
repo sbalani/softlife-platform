@@ -10,6 +10,8 @@ const COMMANDS = [
   { command: "operate_sellout", label: "Sold out", note: "Stops customer sales" },
   { command: "operate_openrefrigeration", label: "Fridge on", note: "Starts refrigeration" },
   { command: "operate_closerefrigeration", label: "Fridge off", note: "Stops refrigeration" },
+  { command: "operate_openthawing", label: "Defrost on", note: "Starts defrosting" },
+  { command: "operate_closethawing", label: "Defrost off", note: "Stops defrosting" },
 ] as const;
 
 export function RemoteControlPanel({ machines }: { machines: AccessibleMachine[] }) {

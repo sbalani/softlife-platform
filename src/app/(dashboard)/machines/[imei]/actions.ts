@@ -337,6 +337,8 @@ export async function sendMachineCommand(
     "operate_sellout",
     "operate_openrefrigeration",
     "operate_closerefrigeration",
+    "operate_openthawing",
+    "operate_closethawing",
   ]);
   const session = await getSessionProfile();
   if (!session || session.role === "operator") return { ok: false, error: "Access denied." };

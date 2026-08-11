@@ -6,6 +6,7 @@ import { localizedGoodsName, languagePackEntries } from "@/lib/huaxin/client";
 import type { ProductDiyItem } from "@/lib/huaxin/client";
 import type { MenuDraftItem } from "@/lib/data/menu-drafts";
 import Image from "next/image";
+import { StockControl } from "./StockControl";
 
 const input = "w-full rounded border border-line bg-white px-2 py-1.5 text-xs text-cocoa focus:border-terracotta focus:outline-none";
 const lbl = "mb-0.5 block text-[10px] uppercase tracking-wide text-taupe";
@@ -164,7 +165,6 @@ export function BaseHopperCard({
               Base · price {displayPrice ?? "—"}
               {selectedBase && <span className="ml-1 text-sage">· linked: {selectedBase.name}</span>}
               {!selectedId && displayName && displayName !== "No base set" && <span className="ml-1 text-warning">· Other</span>}
-              {!draftItem && item?.stock ? ` · stock ${item.stock}` : ""}
             </div>
             {!draftItem && locales.length > 0 && (
               <div className="mt-0.5 flex flex-wrap gap-x-2 text-[9px] text-taupe/60">
@@ -298,6 +298,7 @@ export function BaseHopperCard({
           </div>
         </div>
       )}
+      {!draftItem && item && <StockControl imei={imei} position={BASE_POSITION} initialStock={item.stock} />}
       {showSaveOptions && (
         <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-line pt-2">
           <span className="text-[10px] text-taupe">Save to catalog:</span>

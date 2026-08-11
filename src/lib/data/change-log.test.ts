@@ -14,6 +14,15 @@ test("machine snapshots report field-level menu changes", () => {
   ]);
 });
 
+test("machine snapshots preserve zero stock for alert evaluation", () => {
+  const before = menuSnapshot({ diy: [{ position: 1, goodsName: "Vanilla", stock: 1 }], unify: [] });
+  const after = menuSnapshot({ diy: [{ position: 1, goodsName: "Vanilla", stock: 0 }], unify: [] });
+  assert.equal(after["diy:1"].stock, 0);
+  assert.deepEqual(diffSnapshots(before, after), [
+    { entityKey: "diy:1", field: "stock", oldValue: 1, newValue: 0 },
+  ]);
+});
+
 test("stored menu snapshots reconstruct editable Huaxin items", () => {
   const menu = menuFromSnapshot(menuSnapshot({
     diy: [{ position: 2, goodsName: "Vanilla", price: "4", languagePacks: [{ code: "es", goodsName: "Vainilla", intro: "Suave" }] }],

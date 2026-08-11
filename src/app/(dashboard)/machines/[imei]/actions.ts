@@ -6,7 +6,7 @@ import { getConfigFromEnv, editDeviceMedia, listDeviceProducts, pushDeviceSettin
 import type { DiyPushItem } from "@/lib/huaxin/client";
 import { generateAllergenComposite } from "@/lib/allergens/composite";
 import { getSessionProfile } from "@/lib/auth/session";
-import { recordMachinePush, recordProductChange } from "@/lib/data/change-log";
+import { recordMachinePush, recordMachineSync, recordProductChange } from "@/lib/data/change-log";
 import { syncMachineMedia } from "@/lib/data/machine-media";
 import { recordMachineClean } from "@/lib/data/clean-logs";
 import { cleanDay } from "@/lib/data/service-history-utils";
@@ -425,6 +425,39 @@ export async function removeDeviceMediaAction(
 
 export type ProductUpdateResult = { ok: boolean; error?: string; sentPayload?: unknown };
 export type BrandingResult = { ok: boolean; error?: string };
+
+export async function updateMachineStock(imei: string, position: string, rawStock: string): Promise<ProductUpdateResult> {
+  const actor = await getSessionProfile();
+  if (!actor || actor.role !== "admin") return { ok: false, error: "Admin access required." };
+  if (!/^\d+$/.test(position)) return { ok: false, error: "Invalid product position." };
+  if (!/^\d+$/.test(rawStock)) return { ok: false, error: "Stock must be a non-negative whole number." };
+  const stock = Number(rawStock);
+  if (!Number.isSafeInteger(stock)) return { ok: false, error: "Stock is too large." };
+  const cfg = getConfigFromEnv();
+  if (!cfg) return { ok: false, error: "Huaxin not configured." };
+  if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
+
+  try {
+    const s = await createServiceClient();
+    const { data: machine, error: machineError } = await s.from("machines").select("id,name,device_imei").eq("device_imei", imei).maybeSingle();
+    if (machineError) throw machineError;
+    if (!machine) return { ok: false, error: "Machine not found." };
+    const item: DiyPushItem = { position, code: "stock", value: String(stock) };
+    const result = await pushProductDiyWithLog(cfg, imei, [item]);
+    if (String(result.code) !== "200") return { ok: false, error: result.msg ?? "Update rejected", sentPayload: [item] };
+    try { await refreshProduct(cfg, imei); } catch { /* the stock update already landed */ }
+    try {
+      await recordMachineSync(s, machine, await listDeviceProducts(cfg, imei), actor);
+    } catch (error) {
+      console.error(`[stock] Snapshot refresh failed for ${imei}:`, error);
+    }
+    revalidatePath(`/machines/${imei}`);
+    revalidatePath("/alerts");
+    return { ok: true, sentPayload: [item] };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
 
 export async function updateMachineProduct(
   imei: string,

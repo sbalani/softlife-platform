@@ -2,17 +2,8 @@
 
 import { useState, useTransition } from "react";
 import type { AccessibleMachine } from "@/lib/data/accessible-machines";
+import { FRANCHISEE_REMOTE_COMMANDS } from "@/lib/huaxin/remote-commands";
 import { sendMachineCommand } from "../machines/[imei]/actions";
-
-const COMMANDS = [
-  { command: "operate_make", label: "Test cup", note: "Dispenses one free cup" },
-  { command: "operate_onsale", label: "Resume sales", note: "Makes the machine available" },
-  { command: "operate_sellout", label: "Sold out", note: "Stops customer sales" },
-  { command: "operate_openrefrigeration", label: "Fridge on", note: "Starts refrigeration" },
-  { command: "operate_closerefrigeration", label: "Fridge off", note: "Stops refrigeration" },
-  { command: "operate_openthawing", label: "Defrost on", note: "Starts defrosting" },
-  { command: "operate_closethawing", label: "Defrost off", note: "Stops defrosting" },
-] as const;
 
 export function RemoteControlPanel({ machines }: { machines: AccessibleMachine[] }) {
   const [imei, setImei] = useState(machines[0]?.device_imei ?? "");
@@ -47,7 +38,7 @@ export function RemoteControlPanel({ machines }: { machines: AccessibleMachine[]
       </label>
 
       <div className="grid grid-cols-1 gap-3">
-        {COMMANDS.map((item) => (
+        {FRANCHISEE_REMOTE_COMMANDS.map((item) => (
           <button key={item.command} onClick={() => send(item.command, item.label)} disabled={pending} className="rounded-2xl border border-line bg-white p-4 text-left transition active:scale-[.99] disabled:opacity-50">
             <span className="block text-base font-bold text-cocoa">{item.label}</span>
             <span className="mt-0.5 block text-xs text-taupe">{item.note}</span>

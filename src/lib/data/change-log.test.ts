@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { alertStatusSignals, diffSnapshots, menuFromSnapshot, menuProductIdMap, menuSnapshot } from "./change-log.ts";
-import { faultStatusSignal, resourceStatusSignal, statusDisplayRank } from "../huaxin/status-signals.ts";
+import { faultStatusSignal, materialRemainingStatus, resourceStatusSignal, statusDisplayRank } from "../huaxin/status-signals.ts";
+import { FRANCHISEE_REMOTE_COMMANDS, HUAXIN_REMOTE_COMMANDS } from "../huaxin/remote-commands.ts";
 
 test("machine snapshots report field-level menu changes", () => {
   const before = menuSnapshot({ diy: [{ position: 1, goodsName: "Vanilla", price: "3", imagePath: "old.jpg" }], unify: [] });
@@ -57,6 +58,34 @@ test("fault statuses and display order use Huaxin codes", () => {
   assert.ok(statusDisplayRank({ code: "status_0_lackmaterial" }) < statusDisplayRank({ code: "status_0_online_status" }));
   assert.ok(statusDisplayRank({ code: "status_0_online_status" }) < statusDisplayRank({ code: "status_0_os" }));
   assert.ok(statusDisplayRank({ code: "status_0_os" }) < statusDisplayRank({ code: "status_0_sellcup" }));
+});
+
+test("post-shortage cup counter uses the configured percentage thresholds", () => {
+  assert.deepEqual(materialRemainingStatus({ code: "status_0_sellcup", value: "13[25]" }), {
+    remainingCups: 13, totalCups: 25, remainingPct: 52, level: "normal", outOfStock: false,
+  });
+  assert.equal(materialRemainingStatus({ code: "status_0_sellcup", value: "12[25]" })?.level, "warning");
+  assert.equal(materialRemainingStatus({ code: "status_0_sellcup", data: "5[20]" })?.level, "critical");
+  assert.equal(materialRemainingStatus({ code: "status_0_sellcup", value: "0[25]" })?.outOfStock, true);
+  assert.equal(materialRemainingStatus({ code: "status_0_sellcup", value: "invalid" }), null);
+  assert.deepEqual(alertStatusSignals([
+    { code: "status_0_sellcup", value: "6[25]" },
+  ]).map(({ field, value }) => ({ field, value })), [
+    { field: "material_remaining_pct", value: 24 },
+    { field: "material_out", value: false },
+  ]);
+});
+
+test("remote command catalog covers every documented Huaxin operation", () => {
+  assert.equal(HUAXIN_REMOTE_COMMANDS.length, 19);
+  assert.deepEqual(new Set(HUAXIN_REMOTE_COMMANDS.map((item) => item.command)), new Set([
+    "operate_backorigin", "operate_openrefrigeration", "operate_closerefrigeration",
+    "operate_openthawing", "operate_closethawing", "operate_sellout", "operate_onsale",
+    "operate_make", "operate_android_setting", "operate_config_set1", "operate_config_set2",
+    "operate_status", "operate_refresh_product", "operate_refresh_resource", "operate_switch_two",
+    "operate_switch_three", "operate_switch_coupon", "operate_switch_theme", "operate_clearwarn",
+  ]));
+  assert.ok(FRANCHISEE_REMOTE_COMMANDS.every((item) => item.access === "remote"));
 });
 
 test("menu events use the currently observed product assignment", () => {

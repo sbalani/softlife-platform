@@ -99,7 +99,7 @@ export const STATUS_DESC_MAP: Record<string, string> = {
   "status_0_lackmaterial": "Material Shortage Status",
   "status_0_online_status": "App Online Status",
   "status_0_os": "Ordering System",
-  "status_0_sellcup": "Cups Sold After Material Shortage",
+  "status_0_sellcup": "Cups Remaining After Material Shortage",
   "status_0_faultcup": "Foreign Object in Cup Holder",
   "status_0_cupfault": "Cup Dispenser Blocked",
   "status_0_cupget": "Cup Pickup Status",
@@ -110,7 +110,7 @@ export const STATUS_DESC_MAP: Record<string, string> = {
   "Cuerpos extraños": "Foreign Object in Cup Holder",
   "Falta de Tarrina": "Cup Shortage Status",
   "Falta de material": "Material Shortage Status",
-  "Número de tazas vendidas": "Cups Sold After Material Shortage",
+  "Número de tazas vendidas": "Cups Remaining After Material Shortage",
   "Temperatura medida": "Measured Temperature",
 };
 

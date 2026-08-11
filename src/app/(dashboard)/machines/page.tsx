@@ -136,7 +136,7 @@ export default async function MachinesPage({
                   <td className="px-4 py-3 text-cocoa">{m.location ?? "—"}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${m.oos ? "bg-danger/15 text-danger" : "bg-sage/15 text-sage"}`}>{m.oos ? "OOS" : "OK"}</span>
+                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${m.oos ? "bg-danger/15 text-danger" : m.low_stock ? "bg-warning/15 text-warning" : "bg-sage/15 text-sage"}`}>{m.oos ? "OOS" : m.low_stock ? "Low stock" : "OK"}</span>
                       <span className={`text-xs font-semibold ${m.net_online ? "text-sage" : "text-danger"}`}>{m.net_online ? "Online" : "Offline"}</span>
                       {m.active_alert_count > 0 && <span title={`${m.active_alert_count} other active alert(s)`} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-warning text-xs font-black text-white">!</span>}
                     </div>

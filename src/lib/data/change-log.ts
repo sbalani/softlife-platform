@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { COUPON_PATHS, type ProductDiyItem, type DiyPushItem } from "../huaxin/client.ts";
 import type { SessionProfile } from "@/lib/auth/session";
-import { faultStatusSignal, resourceStatusSignal, type HuaxinStatusRow } from "../huaxin/status-signals.ts";
+import { faultStatusSignal, materialRemainingStatus, resourceStatusSignal, type HuaxinStatusRow } from "../huaxin/status-signals.ts";
 
 export type { HuaxinStatusRow } from "../huaxin/status-signals.ts";
 
@@ -267,7 +267,7 @@ export async function recordProductChange(
 
 export function alertStatusSignals(rows: HuaxinStatusRow[]) {
   const byCode = new Map(rows.map((row) => [row.code, row]));
-  const signals: { field: string; value: boolean; raw: HuaxinStatusRow }[] = [];
+  const signals: { field: string; value: boolean | number; raw: HuaxinStatusRow }[] = [];
   for (const row of byCode.values()) {
     const resource = resourceStatusSignal(row);
     if (resource) signals.push({ field: resource.field, value: resource.active, raw: row });
@@ -276,6 +276,12 @@ export function alertStatusSignals(rows: HuaxinStatusRow[]) {
   }
   const online = byCode.get("status_0_online_status");
   if (online) signals.push({ field: "device_online", value: String(online.value).toLowerCase() === "online", raw: online });
+  const materialCounter = byCode.get("status_0_sellcup");
+  const remaining = materialCounter && materialRemainingStatus(materialCounter);
+  if (remaining) {
+    signals.push({ field: "material_remaining_pct", value: remaining.remainingPct, raw: materialCounter });
+    signals.push({ field: "material_out", value: remaining.outOfStock, raw: materialCounter });
+  }
   return signals;
 }
 

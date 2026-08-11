@@ -32,7 +32,7 @@ import { translateLocation } from "@/lib/i18n/huaxin";
 import { getRefillHistory } from "@/lib/data/refills";
 import { getMachineCleanHistory } from "@/lib/data/clean-logs";
 import { MachineServiceQr } from "@/components/MachineServiceQr";
-import { resourceStatusSignal, statusDisplayRank } from "@/lib/huaxin/status-signals";
+import { materialRemainingStatus, resourceStatusSignal, statusDisplayRank } from "@/lib/huaxin/status-signals";
 
 export const dynamic = "force-dynamic";
 
@@ -288,6 +288,7 @@ export default async function MachineDetailPage({
               const desc = translateStatusDesc(s.desc ?? s.code).toLowerCase();
               const val = translateStatusValue(s.value);
               const resource = resourceStatusSignal(s);
+              const remaining = materialRemainingStatus(s);
               const online = s.code === "status_0_online_status";
               const isOnline = online && val.toLowerCase() === "online";
               let tone = "";
@@ -297,14 +298,21 @@ export default async function MachineDetailPage({
                 else if (num === 100) tone = "text-sage font-bold";
                 else tone = "text-warning font-bold";
               }
-              if (resource?.active) tone = "text-danger font-bold";
+              if (resource?.active) tone = resource.field === "material_empty" ? "text-warning font-bold" : "text-danger font-bold";
+              if (remaining) tone = remaining.level === "critical" ? "text-danger font-bold" : remaining.level === "warning" ? "text-warning font-bold" : "text-sage font-bold";
               if (online) tone = isOnline ? "text-sage font-bold" : "text-danger font-bold";
-              const resourceName = resource?.field === "cup_empty" ? "Cup OOS" : "Material OOS";
+              const resourceName = resource?.field === "cup_empty" ? "Cup OOS" : "Low stock";
+              const danger = resource?.field === "cup_empty" && resource.active || remaining?.level === "critical" || online && !isOnline;
+              const warning = resource?.field === "material_empty" && resource.active || remaining?.level === "warning";
+              const highlighted = danger ? "border-danger/40 bg-danger/10" : warning ? "border-warning/40 bg-warning/10" : online || remaining ? "border-sage/40 bg-sage/10" : "border-transparent bg-cream/50";
+              const displayValue = remaining
+                ? `${remaining.remainingCups === 0 ? "OOS · " : ""}${remaining.remainingCups} of ${remaining.totalCups} cups remaining (${remaining.remainingPct}%)`
+                : resource?.active ? `${resourceName} active` : val;
               return (
-                <div key={s.code ?? i} className={`rounded-lg border px-3 py-2 ${resource?.active || online && !isOnline ? "border-danger/40 bg-danger/10" : online ? "border-sage/40 bg-sage/10" : "border-transparent bg-cream/50"}`}>
-                  <div className={`text-[10px] uppercase tracking-wide ${resource?.active ? "font-bold text-danger" : "text-taupe"}`}>{translateStatusDesc(s.desc ?? s.code)}</div>
-                  <div className={`text-sm font-semibold ${tone || "text-cocoa"}`}>{resource?.active ? `${resourceName} active` : val}</div>
-                  {resource?.active && <div className="mt-0.5 text-[10px] text-danger/80">Huaxin: {val}{s.data != null ? ` · signal ${s.data}` : ""}</div>}
+                <div key={s.code ?? i} className={`rounded-lg border px-3 py-2 ${highlighted}`}>
+                  <div className={`text-[10px] uppercase tracking-wide ${danger ? "font-bold text-danger" : warning ? "font-bold text-warning" : "text-taupe"}`}>{translateStatusDesc(s.desc ?? s.code)}</div>
+                  <div className={`text-sm font-semibold ${tone || "text-cocoa"}`}>{displayValue}</div>
+                  {resource?.active && <div className={`mt-0.5 text-[10px] ${resource.field === "material_empty" ? "text-warning" : "text-danger/80"}`}>Huaxin: {val}{s.data != null ? ` · signal ${s.data}` : ""}</div>}
                 </div>
               );
             })}

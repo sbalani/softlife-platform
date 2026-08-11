@@ -11,6 +11,7 @@ import { syncMachineMedia } from "@/lib/data/machine-media";
 import { recordMachineClean } from "@/lib/data/clean-logs";
 import { cleanDay } from "@/lib/data/service-history-utils";
 import { ymd } from "@/lib/dates";
+import { FRANCHISEE_REMOTE_COMMANDS, HUAXIN_REMOTE_COMMANDS } from "@/lib/huaxin/remote-commands";
 
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
@@ -331,18 +332,10 @@ export async function sendMachineCommand(
   imei: string,
   command: string,
 ): Promise<{ ok: boolean; error?: string; huaxinCode?: string; huaxinMsg?: string }> {
-  const remoteCommands = new Set([
-    "operate_make",
-    "operate_onsale",
-    "operate_sellout",
-    "operate_openrefrigeration",
-    "operate_closerefrigeration",
-    "operate_openthawing",
-    "operate_closethawing",
-  ]);
+  const remoteCommands = new Set<string>(FRANCHISEE_REMOTE_COMMANDS.map((item) => item.command));
   const session = await getSessionProfile();
   if (!session || session.role === "operator") return { ok: false, error: "Access denied." };
-  const adminCommands = new Set([...remoteCommands, "operate_clearwarn", "operate_status"]);
+  const adminCommands = new Set<string>(HUAXIN_REMOTE_COMMANDS.map((item) => item.command));
   if (!(session.role === "admin" ? adminCommands : remoteCommands).has(command)) {
     return { ok: false, error: "Command not allowed." };
   }

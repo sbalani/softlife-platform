@@ -23,6 +23,7 @@ export type Machine = {
   net_online: boolean;
   huaxin_last_sync: string | null;
   oos: boolean;
+  low_stock: boolean;
   active_alert_count: number;
   status_observed_at: string | null;
 };
@@ -48,15 +49,17 @@ export async function getMachines(): Promise<{
     }
     const [{ data: names, error: namesError }, { data: statuses, error: statusesError }, { data: alerts, error: alertsError }] = await Promise.all([
       s.from("machines").select("id,display_name"),
-      s.from("machine_status_snapshots").select("machine_id,field,value,observed_at").in("field", ["cup_empty", "material_empty"]),
+      s.from("machine_status_snapshots").select("machine_id,field,value,observed_at").in("field", ["cup_empty", "material_empty", "material_out"]),
       s.from("v_alerts").select("machine_id,change_field").is("resolved_at", null),
     ]);
     if (namesError) throw namesError;
     if (statusesError) throw statusesError;
     if (alertsError) throw alertsError;
     const displayNames = new Map(((names as { id: string; display_name: string | null }[]) ?? []).map((row) => [row.id, row.display_name]));
-    const statusRows = (statuses as { machine_id: string; value: unknown; observed_at: string }[]) ?? [];
-    const oosMachines = new Set(statusRows.filter((row) => row.value === true || row.value === "true").map((row) => row.machine_id));
+    const statusRows = (statuses as { machine_id: string; field: string; value: unknown; observed_at: string }[]) ?? [];
+    const activeStatuses = statusRows.filter((row) => row.value === true || row.value === "true");
+    const oosMachines = new Set(activeStatuses.filter((row) => row.field === "cup_empty" || row.field === "material_out").map((row) => row.machine_id));
+    const lowStockMachines = new Set(activeStatuses.filter((row) => row.field === "material_empty").map((row) => row.machine_id));
     const statusTimes = new Map<string, string>();
     for (const row of statusRows) if (!statusTimes.has(row.machine_id) || row.observed_at > statusTimes.get(row.machine_id)!) statusTimes.set(row.machine_id, row.observed_at);
     const alertCounts = new Map<string, number>();
@@ -69,6 +72,7 @@ export async function getMachines(): Promise<{
       display_name: displayNames.get(machine.id) ?? null,
       location: machine.location_override || translateLocation(machine.location),
       oos: oosMachines.has(machine.id),
+      low_stock: lowStockMachines.has(machine.id) && !oosMachines.has(machine.id),
       active_alert_count: alertCounts.get(machine.id) ?? 0,
       status_observed_at: statusTimes.get(machine.id) ?? null,
     }));

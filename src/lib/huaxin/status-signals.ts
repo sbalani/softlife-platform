@@ -29,6 +29,32 @@ export type ResourceStatusSignal = {
   row: HuaxinStatusRow;
 };
 
+export type MaterialRemainingStatus = {
+  remainingCups: number;
+  totalCups: number;
+  remainingPct: number;
+  level: "normal" | "warning" | "critical";
+  outOfStock: boolean;
+};
+
+export function materialRemainingStatus(row: HuaxinStatusRow): MaterialRemainingStatus | null {
+  if (row.code !== "status_0_sellcup") return null;
+  const counter = [row.value, row.data].map(String).find((value) => /\d+\s*\[\s*\d+\s*]/.test(value));
+  const match = counter?.match(/(\d+)\s*\[\s*(\d+)\s*]/);
+  if (!match) return null;
+  const remainingCups = Number(match[1]);
+  const totalCups = Number(match[2]);
+  if (totalCups <= 0) return null;
+  const remainingPct = Math.max(0, Math.min(100, Math.floor((remainingCups / totalCups) * 100)));
+  return {
+    remainingCups,
+    totalCups,
+    remainingPct,
+    level: remainingPct <= 25 ? "critical" : remainingPct <= 50 ? "warning" : "normal",
+    outOfStock: remainingCups === 0,
+  };
+}
+
 export function resourceStatusSignal(row: HuaxinStatusRow): ResourceStatusSignal | null {
   const field = row.code ? RESOURCE_FIELDS[row.code as keyof typeof RESOURCE_FIELDS] : undefined;
   if (!field) return null;

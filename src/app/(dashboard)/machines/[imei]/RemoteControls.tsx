@@ -1,19 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { HUAXIN_REMOTE_COMMANDS } from "@/lib/huaxin/remote-commands";
 import { sendMachineCommand } from "./actions";
-
-const COMMANDS = [
-  { command: "operate_clearwarn", label: "Clear alarm", icon: "🔔" },
-  { command: "operate_make", label: "Test cup", icon: "🍦" },
-  { command: "operate_onsale", label: "Resume sales", icon: "▶" },
-  { command: "operate_sellout", label: "Sold out", icon: "⏸" },
-  { command: "operate_openrefrigeration", label: "Fridge on", icon: "❄" },
-  { command: "operate_closerefrigeration", label: "Fridge off", icon: "🔥" },
-  { command: "operate_openthawing", label: "Defrost on", icon: "💧" },
-  { command: "operate_closethawing", label: "Defrost off", icon: "⏹" },
-  { command: "operate_status", label: "Status query", icon: "📡" },
-];
 
 type CmdResult = { ok: boolean; error?: string; huaxinCode?: string; huaxinMsg?: string; cmd?: string };
 
@@ -32,7 +21,7 @@ export function RemoteControls({ imei }: { imei: string }) {
   return (
     <div>
       <div className="flex flex-wrap gap-2">
-        {COMMANDS.map((c) => (
+        {HUAXIN_REMOTE_COMMANDS.map((c) => (
           <button
             key={c.command}
             disabled={pending}

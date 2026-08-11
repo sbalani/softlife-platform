@@ -9,8 +9,17 @@ const FAULT_FIELDS = {
   status_0_faultcup: "cup_foreign_object",
   status_0_cupfault: "cup_blocked",
   status_0_cupget: "cup_take_fault",
-  status_0_os: "ordering_system_fault",
 } as const;
+
+const OPERATING_STATE_FIELDS: Record<string, string> = {
+  "8": "material_empty",
+  "101": "cup_empty",
+  "104": "cup_take_fault",
+  "120": "cup_foreign_object",
+  "255": "mixture_ratio_fault",
+};
+
+const BENIGN_OPERATING_STATES = new Set(["9", "11", "105"]);
 
 const DISPLAY_ORDER = [
   "status_0_lackmaterial",
@@ -69,10 +78,35 @@ export function resourceStatusSignal(row: HuaxinStatusRow): ResourceStatusSignal
 }
 
 export function faultStatusSignal(row: HuaxinStatusRow): { field: string; active: boolean; row: HuaxinStatusRow } | null {
+  if (row.code === "status_0_os") {
+    const signals = operatingStatusSignals(row);
+    return signals.find((signal) => signal.active) ?? signals[0] ?? null;
+  }
   const field = row.code ? FAULT_FIELDS[row.code as keyof typeof FAULT_FIELDS] : undefined;
   if (!field) return null;
   const value = String(row.value ?? row.data ?? "").trim().toLowerCase();
   return { field, active: Boolean(value) && !["0", "false", "normal", "none", "close", "closed", "off", "cierre", "正常", "无", "关"].includes(value), row };
+}
+
+export function operatingStatusSignals(row: HuaxinStatusRow): { field: string; active: boolean; row: HuaxinStatusRow }[] {
+  if (row.code !== "status_0_os") return [];
+  const value = String(row.value ?? row.data ?? "").trim();
+  const normalized = value.toLowerCase();
+  const stateCode = value.match(/^\[(\d+)]/)?.[1];
+  if (!value || ["0", "false", "normal", "none", "close", "closed", "off", "cierre", "正常", "无", "关"].includes(normalized)) {
+    return [{ field: "ordering_system_fault", active: false, row }];
+  }
+  const specificField = stateCode && OPERATING_STATE_FIELDS[stateCode];
+  if (specificField) {
+    return [
+      { field: "ordering_system_fault", active: false, row },
+      { field: specificField, active: true, row },
+    ];
+  }
+  if (stateCode && BENIGN_OPERATING_STATES.has(stateCode)) {
+    return [{ field: "ordering_system_fault", active: false, row }];
+  }
+  return [{ field: "ordering_system_fault", active: true, row }];
 }
 
 export function statusDisplayRank(row: HuaxinStatusRow): number {

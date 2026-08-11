@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { alertStatusSignals, diffSnapshots, menuFromSnapshot, menuProductIdMap, menuSnapshot } from "./change-log.ts";
-import { faultStatusSignal, materialRemainingStatus, resourceStatusSignal, statusDisplayRank } from "../huaxin/status-signals.ts";
+import { faultStatusSignal, materialRemainingStatus, operatingStatusSignals, resourceStatusSignal, statusDisplayRank } from "../huaxin/status-signals.ts";
 import { FRANCHISEE_REMOTE_COMMANDS, HUAXIN_REMOTE_COMMANDS } from "../huaxin/remote-commands.ts";
 
 test("machine snapshots report field-level menu changes", () => {
@@ -58,6 +58,25 @@ test("fault statuses and display order use Huaxin codes", () => {
   assert.ok(statusDisplayRank({ code: "status_0_lackmaterial" }) < statusDisplayRank({ code: "status_0_online_status" }));
   assert.ok(statusDisplayRank({ code: "status_0_online_status" }) < statusDisplayRank({ code: "status_0_os" }));
   assert.ok(statusDisplayRank({ code: "status_0_os" }) < statusDisplayRank({ code: "status_0_sellcup" }));
+});
+
+test("aggregate operating states distinguish modes from actionable faults", () => {
+  assert.deepEqual(operatingStatusSignals({ code: "status_0_os", value: "[11]Modo nocturno" }).map(({ field, active }) => ({ field, active })), [
+    { field: "ordering_system_fault", active: false },
+  ]);
+  assert.deepEqual(operatingStatusSignals({ code: "status_0_os", value: "[105]Cooling off" }).map(({ field, active }) => ({ field, active })), [
+    { field: "ordering_system_fault", active: false },
+  ]);
+  assert.deepEqual(operatingStatusSignals({ code: "status_0_os", value: "[104]Not taken away" }).map(({ field, active }) => ({ field, active })), [
+    { field: "ordering_system_fault", active: false },
+    { field: "cup_take_fault", active: true },
+  ]);
+  assert.deepEqual(operatingStatusSignals({ code: "status_0_os", value: "[255]Insufficient proportion" }).map(({ field, active }) => ({ field, active })), [
+    { field: "ordering_system_fault", active: false },
+    { field: "mixture_ratio_fault", active: true },
+  ]);
+  assert.equal(faultStatusSignal({ code: "status_0_os", value: "[999]Unknown" })?.field, "ordering_system_fault");
+  assert.equal(faultStatusSignal({ code: "status_0_os", value: "[999]Unknown" })?.active, true);
 });
 
 test("post-shortage cup counter uses the configured percentage thresholds", () => {

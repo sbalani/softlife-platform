@@ -136,6 +136,18 @@ export const STATUS_VALUE_MAP: Record<string, Record<string, string>> = {
 
 export function translateStatusValue(value: string | null | undefined): string {
   if (!value) return "—";
+  const operatingState = value.match(/^\[(\d+)]/)?.[1];
+  const operatingStates: Record<string, string> = {
+    "8": "Insufficient stock",
+    "9": "Closed",
+    "11": "Night mode",
+    "101": "Cup shortage",
+    "104": "Cup not taken",
+    "105": "Refrigeration off",
+    "120": "Foreign object in cup holder",
+    "255": "Insufficient proportion",
+  };
+  if (operatingState && operatingStates[operatingState]) return operatingStates[operatingState];
   // Common Chinese→English for status values
   const common: Record<string, string> = {
     "正常": "Normal",

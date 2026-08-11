@@ -32,7 +32,7 @@ import { translateLocation } from "@/lib/i18n/huaxin";
 import { getRefillHistory } from "@/lib/data/refills";
 import { getMachineCleanHistory } from "@/lib/data/clean-logs";
 import { MachineServiceQr } from "@/components/MachineServiceQr";
-import { materialRemainingStatus, resourceStatusSignal, statusDisplayRank } from "@/lib/huaxin/status-signals";
+import { faultStatusSignal, materialRemainingStatus, resourceStatusSignal, statusDisplayRank } from "@/lib/huaxin/status-signals";
 
 export const dynamic = "force-dynamic";
 
@@ -288,6 +288,7 @@ export default async function MachineDetailPage({
               const desc = translateStatusDesc(s.desc ?? s.code).toLowerCase();
               const val = translateStatusValue(s.value);
               const resource = resourceStatusSignal(s);
+              const fault = faultStatusSignal(s);
               const remaining = materialRemainingStatus(s);
               const online = s.code === "status_0_online_status";
               const isOnline = online && val.toLowerCase() === "online";
@@ -299,11 +300,13 @@ export default async function MachineDetailPage({
                 else tone = "text-warning font-bold";
               }
               if (resource?.active) tone = resource.field === "material_empty" ? "text-warning font-bold" : "text-danger font-bold";
+              if (fault?.active) tone = ["material_empty", "cup_take_fault"].includes(fault.field) ? "text-warning font-bold" : "text-danger font-bold";
               if (remaining) tone = remaining.level === "critical" ? "text-danger font-bold" : remaining.level === "warning" ? "text-warning font-bold" : "text-sage font-bold";
               if (online) tone = isOnline ? "text-sage font-bold" : "text-danger font-bold";
               const resourceName = resource?.field === "cup_empty" ? "Cup OOS" : "Low stock";
-              const danger = resource?.field === "cup_empty" && resource.active || remaining?.level === "critical" || online && !isOnline;
-              const warning = resource?.field === "material_empty" && resource.active || remaining?.level === "warning";
+              const warningFault = fault?.active && ["material_empty", "cup_take_fault"].includes(fault.field);
+              const danger = resource?.field === "cup_empty" && resource.active || fault?.active && !warningFault || remaining?.level === "critical" || online && !isOnline;
+              const warning = resource?.field === "material_empty" && resource.active || warningFault || remaining?.level === "warning";
               const highlighted = danger ? "border-danger/40 bg-danger/10" : warning ? "border-warning/40 bg-warning/10" : online || remaining ? "border-sage/40 bg-sage/10" : "border-transparent bg-cream/50";
               const displayValue = remaining
                 ? `${remaining.remainingCups === 0 ? "OOS · " : ""}${remaining.remainingCups} of ${remaining.totalCups} cups remaining (${remaining.remainingPct}%)`

@@ -128,38 +128,27 @@ async function syncProductsToIngredients(
   const baseItem = diy.find((d) => String(d.position) === "1");
   if (baseItem?.goodsName) {
     const match = findMatch(baseItem.goodsName);
-    await s.from("machines")
+    const { error } = await s.from("machines")
       .update({ base_product_id: match?.id ?? null })
       .eq("id", machineId);
+    if (error) throw error;
     await syncImage(match?.id, baseItem.imagePath);
   }
 
   // Lanes 2-7 → machine_ingredients (preserve lot data on existing rows)
-  const { data: existing } = await s.from("machine_ingredients")
-    .select("id,position").eq("machine_id", machineId);
-  const existingByPos = new Map(
-    ((existing as { id: string; position: string }[]) ?? []).map((e) => [e.position, e.id]),
-  );
-
   for (const [lane, mapping] of Object.entries(HUAXIN_LANE_TO_CONFIG)) {
     const item = diy.find((d) => String(d.position) === lane);
     if (!item) continue;
     const goodsName = (item.goodsName ?? "").trim();
     const match = goodsName ? findMatch(goodsName) : null;
     await syncImage(match?.id, item.imagePath);
-    const existingId = existingByPos.get(mapping.position);
-    if (existingId) {
-      await s.from("machine_ingredients")
-        .update({ product_id: match?.id ?? null, product_type: mapping.product_type, enabled: true })
-        .eq("id", existingId);
-    } else {
-      await s.from("machine_ingredients").insert({
-        machine_id: machineId,
-        position: mapping.position,
-        product_id: match?.id ?? null,
-        product_type: mapping.product_type,
-        enabled: true,
-      });
-    }
+    const { error } = await s.from("machine_ingredients").upsert({
+      machine_id: machineId,
+      position: mapping.position,
+      product_id: match?.id ?? null,
+      product_type: mapping.product_type,
+      enabled: true,
+    }, { onConflict: "machine_id,position" });
+    if (error) throw error;
   }
 }

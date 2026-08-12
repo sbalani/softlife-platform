@@ -391,7 +391,7 @@ export default async function MachineDetailPage({
                   {menu.diy.map((item, i) =>
                     String(item.position) === "1" ? (
                       <BaseHopperCard
-                        key={i}
+                        key={`base:${config?.baseProductId ?? "unlinked"}:${item.goodsName ?? ""}`}
                         imei={imei}
                         machineId={config?.machineId ?? null}
                         item={item}
@@ -402,11 +402,11 @@ export default async function MachineDetailPage({
                       />
                     ) : (
                       <ProductEditor
-                        key={i}
+                        key={`${item.position}:${linkedProductIdByLane.get(HUAXIN_TO_CONFIG_POS[String(item.position)] ?? "") ?? "unlinked"}:${item.goodsName ?? ""}`}
                         imei={imei}
                         machineId={config?.machineId ?? null}
                         item={item}
-                        ingredients={ingredients.map((p) => ({ id: p.id, name: p.name, name_es: p.name_translations?.es, price: p.price, image_url: p.image_url, allergen_url: p.allergen_url }))}
+                        ingredients={ingredients.filter((p) => p.type === (Number(item.position) <= 4 ? "topping" : "sauce")).map((p) => ({ id: p.id, name: p.name, name_es: p.name_translations?.es, price: p.price, image_url: p.image_url, allergen_url: p.allergen_url }))}
                         linkedProductId={linkedProductIdByLane.get(HUAXIN_TO_CONFIG_POS[String(item.position)] ?? "") ?? null}
                         draftId={pendingDraft?.id ?? null}
                         draftItem={draftByPosition.get(String(item.position)) ?? null}

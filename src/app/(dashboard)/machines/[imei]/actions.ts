@@ -503,21 +503,14 @@ export async function updateMachineProduct(
         const s = await createServiceClient();
         const configPos = HUAXIN_LANE_TO_CONFIG[String(position)];
         if (configPos) {
-          const { data: existing } = await s.from("machine_ingredients")
-            .select("id").eq("machine_id", options.machineId).eq("position", configPos.position).maybeSingle();
-          if (existing) {
-            await s.from("machine_ingredients")
-              .update({ product_id: options.productId ?? null })
-              .eq("id", (existing as { id: string }).id);
-          } else {
-            await s.from("machine_ingredients").insert({
-              machine_id: options.machineId,
-              position: configPos.position,
-              product_id: options.productId ?? null,
-              product_type: configPos.product_type,
-              enabled: true,
-            });
-          }
+          const { error: linkError } = await s.from("machine_ingredients").upsert({
+            machine_id: options.machineId,
+            position: configPos.position,
+            product_id: options.productId ?? null,
+            product_type: configPos.product_type,
+            enabled: true,
+          }, { onConflict: "machine_id,position" });
+          if (linkError) throw new Error(`Product reached Huaxin, but its platform link failed: ${linkError.message}`);
         }
       }
 

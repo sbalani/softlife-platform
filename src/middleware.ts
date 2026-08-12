@@ -5,7 +5,7 @@ import { NextResponse, type NextRequest } from "next/server";
  *  callbacks (Huaxin webhook, Vercel cron) authenticate with their own
  *  bearer tokens / shared secrets, not a browser cookie session. */
 function isPublicPath(pathname: string) {
-  return pathname === "/login" || pathname === "/set-password" || pathname.startsWith("/auth/callback") || pathname.startsWith("/api");
+  return pathname === "/login" || pathname === "/set-password" || pathname === "/franchisee-intake" || pathname.startsWith("/auth/callback") || pathname.startsWith("/api");
 }
 
 export async function middleware(request: NextRequest) {

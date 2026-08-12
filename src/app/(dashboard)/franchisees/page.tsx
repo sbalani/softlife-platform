@@ -1,12 +1,12 @@
-import { getTenants } from "@/lib/data/franchisees";
-import { formatDate } from "@/lib/dates";
+import { getFranchiseeIntakeSubmissions, getTenants } from "@/lib/data/franchisees";
+import { formatDate, formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { TenantForm } from "./TenantForm";
 
 export const dynamic = "force-dynamic";
 
 export default async function FranchiseesPage() {
-  const tenants = await getTenants();
+  const [tenants, submissions] = await Promise.all([getTenants(), getFranchiseeIntakeSubmissions()]);
   const tz = await getDisplayTimezone();
 
   return (
@@ -17,6 +17,26 @@ export default async function FranchiseesPage() {
           {tenants.length} franchisee / customer account{tenants.length === 1 ? "" : "s"}
         </p>
       </header>
+
+      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-display text-lg font-bold text-cocoa">Team intake form</h2>
+            <p className="mt-1 text-xs text-taupe">Share this public URL with team members: <span className="font-mono text-cocoa">/franchisee-intake</span></p>
+          </div>
+          <a href="/franchisee-intake" target="_blank" rel="noreferrer" className="rounded-lg bg-cocoa px-4 py-2 text-sm font-bold text-white">Open form</a>
+        </div>
+      </section>
+
+      {submissions.length > 0 && (
+        <section className="mb-6 overflow-x-auto rounded-2xl border border-warning/40 bg-white">
+          <div className="border-b border-line px-5 py-4"><h2 className="font-display text-lg font-bold text-cocoa">Pending intake submissions ({submissions.length})</h2></div>
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="bg-warning/10 text-left text-[11px] uppercase tracking-wide text-taupe"><tr><th className="px-5 py-3">Trade name</th><th className="px-5 py-3">Company</th><th className="px-5 py-3">Contact</th><th className="px-5 py-3">Phone</th><th className="px-5 py-3">Submitted</th></tr></thead>
+            <tbody className="divide-y divide-line">{submissions.map((submission) => <tr key={submission.id}><td className="px-5 py-3 font-semibold text-cocoa">{submission.trade_name}</td><td className="px-5 py-3 text-cocoa">{submission.company_name}</td><td className="px-5 py-3 text-cocoa">{submission.contact_name}</td><td className="px-5 py-3"><a href={`tel:${submission.contact_phone}`} className="font-semibold text-terracotta">{submission.contact_phone}</a></td><td className="px-5 py-3 text-taupe">{formatDateTime(submission.created_at, tz)}</td></tr>)}</tbody>
+          </table>
+        </section>
+      )}
 
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">
         <h2 className="mb-4 font-display text-lg font-bold text-cocoa">Add franchisee / customer</h2>

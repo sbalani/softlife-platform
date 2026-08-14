@@ -142,6 +142,7 @@ export function translateStatusValue(value: string | null | undefined): string {
     "9": "Closed",
     "11": "Night mode",
     "101": "Cup shortage",
+    "102": "Material exhausted",
     "104": "Cup not taken",
     "105": "Refrigeration off",
     "120": "Foreign object in cup holder",

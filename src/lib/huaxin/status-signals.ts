@@ -14,6 +14,7 @@ const FAULT_FIELDS = {
 const OPERATING_STATE_FIELDS: Record<string, string> = {
   "8": "material_empty",
   "101": "cup_empty",
+  "102": "material_out",
   "104": "cup_take_fault",
   "120": "cup_foreign_object",
   "255": "mixture_ratio_fault",
@@ -77,7 +78,7 @@ export function resourceStatusSignal(row: HuaxinStatusRow): ResourceStatusSignal
   if (!field) return null;
   const value = String(row.value ?? "").trim().toLowerCase();
   if (["0", "false", "normal", "none", "available", "正常", "无"].includes(value)) return { field, active: false, row };
-  const active = ["1", "true", "abnormal", "starts lacking material", "liquid level low", "comienza a faltar material"].includes(value);
+  const active = ["1", "true", "abnormal", "anomaly", "anomalies", "anomalía", "anomalías", "anomalia", "anomalias", "starts lacking material", "liquid level low", "comienza a faltar material"].includes(value);
   if (active) return { field, active: true, row };
   const rawData = String(row.data ?? "").trim();
   const data = Number(rawData);

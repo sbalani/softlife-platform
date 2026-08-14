@@ -6,6 +6,7 @@ export type Alert = {
   severity: "info" | "warning" | "critical";
   machine_name: string | null;
   product_name: string | null;
+  title: string;
   message: string;
   remaining_pct: number | null;
   created_at: string;
@@ -17,8 +18,8 @@ export type Alert = {
 };
 
 const SAMPLE: Alert[] = [
-  { id: "a1", type: "machine_refill", severity: "warning", machine_name: "B84MAX-001", product_name: null, message: "Base product at 28%; schedule a refill.", remaining_pct: 28, created_at: "2026-07-01T08:00:00Z", change_log_id: null, device_imei: null, change_field: null, entity_key: null, resolved_at: null },
-  { id: "a2", type: "warehouse_restock", severity: "critical", machine_name: null, product_name: null, message: "Consigned stock at 22%; schedule a restock.", remaining_pct: 22, created_at: "2026-07-01T07:30:00Z", change_log_id: null, device_imei: null, change_field: null, entity_key: null, resolved_at: null },
+  { id: "a1", type: "machine_refill", severity: "warning", machine_name: "B84MAX-001", product_name: null, title: "Material running low", message: "Base product is at 28%. Schedule a refill.", remaining_pct: 28, created_at: "2026-07-01T08:00:00Z", change_log_id: null, device_imei: null, change_field: null, entity_key: null, resolved_at: null },
+  { id: "a2", type: "warehouse_restock", severity: "critical", machine_name: null, product_name: null, title: "Warehouse stock low", message: "Consigned stock is at 22%. Schedule a restock.", remaining_pct: 22, created_at: "2026-07-01T07:30:00Z", change_log_id: null, device_imei: null, change_field: null, entity_key: null, resolved_at: null },
 ];
 
 export async function getAlerts(resolved = false): Promise<{ alerts: Alert[]; source: "supabase" | "sample" }> {

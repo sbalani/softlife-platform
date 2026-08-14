@@ -37,9 +37,6 @@ export default async function AlertsPage() {
                 <span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${sev.dot}`} />
                 <div className="flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-full bg-cream px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-taupe">
-                      {a.type.replace("_", " ")}
-                    </span>
                     <span className="text-xs font-bold" style={{ color: a.severity === "critical" ? "#dc2626" : a.severity === "warning" ? "#d97706" : "#6fa98c" }}>
                       {sev.label}
                     </span>
@@ -50,8 +47,9 @@ export default async function AlertsPage() {
                     )}
                     {a.product_name && <span className="text-xs text-taupe">· {a.product_name}</span>}
                   </div>
-                  <p className="mt-1.5 font-semibold text-cocoa">{a.message}</p>
-                  <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-taupe"><span>{formatDateTime(a.created_at, tz)}</span>{a.change_log_id && <Link href={`/change-log?${new URLSearchParams({ ...(a.device_imei ? { machine: a.device_imei } : {}), ...(a.change_field ? { field: a.change_field } : {}) })}`} className="font-semibold text-terracotta">View change</Link>}<ResolveAlertButton id={a.id} /></div>
+                  <h3 className="mt-1.5 font-display text-lg font-bold text-cocoa">{a.title}</h3>
+                  <p className="mt-1 text-sm text-cocoa">{a.message}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-taupe"><span>{formatDateTime(a.created_at, tz)}</span>{a.change_log_id && <Link href={`/change-log?${new URLSearchParams({ ...(a.device_imei ? { machine: a.device_imei } : {}), ...(a.change_field ? { field: a.change_field } : {}) })}`} className="font-semibold text-terracotta">Technical details</Link>}<ResolveAlertButton id={a.id} /></div>
                 </div>
                 {a.remaining_pct != null && (
                   <div className="text-right">
@@ -71,7 +69,7 @@ export default async function AlertsPage() {
           <table className="w-full min-w-[720px] text-sm">
             <thead className="bg-sand/60 text-left text-[11px] uppercase tracking-wide text-taupe"><tr><th className="px-4 py-3">Machine</th><th className="px-4 py-3">Alert</th><th className="px-4 py-3">Started</th><th className="px-4 py-3">Recovered</th></tr></thead>
             <tbody className="divide-y divide-line">
-              {history.map((alert) => <tr key={alert.id}><td className="px-4 py-3 font-semibold text-cocoa">{alert.device_imei ? <Link href={`/machines/${alert.device_imei}`} className="hover:text-terracotta hover:underline">{alert.machine_name ?? alert.device_imei}</Link> : alert.machine_name ?? "—"}</td><td className="px-4 py-3 text-cocoa">{alert.message}</td><td className="px-4 py-3 text-taupe">{formatDateTime(alert.created_at, tz)}</td><td className="px-4 py-3 font-semibold text-sage">{formatDateTime(alert.resolved_at!, tz)}</td></tr>)}
+              {history.map((alert) => <tr key={alert.id}><td className="px-4 py-3 font-semibold text-cocoa">{alert.device_imei ? <Link href={`/machines/${alert.device_imei}`} className="hover:text-terracotta hover:underline">{alert.machine_name ?? alert.device_imei}</Link> : alert.machine_name ?? "—"}</td><td className="px-4 py-3 text-cocoa"><div className="font-semibold">{alert.title}</div><div className="text-xs text-taupe">{alert.message}</div></td><td className="px-4 py-3 text-taupe">{formatDateTime(alert.created_at, tz)}</td><td className="px-4 py-3 font-semibold text-sage">{formatDateTime(alert.resolved_at!, tz)}</td></tr>)}
               {history.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-taupe">No recovered alerts yet. New alert cycles will remain here after recovery.</td></tr>}
             </tbody>
           </table>

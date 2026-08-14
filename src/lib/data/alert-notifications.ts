@@ -7,6 +7,7 @@ type AlertRow = {
   id: string;
   severity: string;
   machine_id: string | null;
+  title: string;
   message: string;
   created_at: string;
   machine_name: string | null;
@@ -56,7 +57,7 @@ export async function sendPendingAlertNotifications(s: SupabaseClient): Promise<
           body: JSON.stringify(chunk.map((token) => ({
             to: token.expo_push_token,
             sound: "default",
-            title: `${alert.severity === "critical" ? "Critical" : "Warning"}: ${machine}`,
+            title: `${alert.title} · ${machine}`,
             body: alert.message,
             data: { machineId: alert.machine_id, alertId: alert.id },
             channelId: "machine-alerts",

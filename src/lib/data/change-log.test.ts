@@ -80,12 +80,26 @@ test("aggregate operating states distinguish modes from actionable faults", () =
     { field: "ordering_system_fault", active: false },
     { field: "cup_take_fault", active: true },
   ]);
+  assert.deepEqual(operatingStatusSignals({ code: "status_0_os", value: "[102]Falta total de material" }).map(({ field, active }) => ({ field, active })), [
+    { field: "ordering_system_fault", active: false },
+    { field: "material_out", active: true },
+  ]);
   assert.deepEqual(operatingStatusSignals({ code: "status_0_os", value: "[255]Insufficient proportion" }).map(({ field, active }) => ({ field, active })), [
     { field: "ordering_system_fault", active: false },
     { field: "mixture_ratio_fault", active: true },
   ]);
   assert.equal(faultStatusSignal({ code: "status_0_os", value: "[999]Unknown" })?.field, "ordering_system_fault");
   assert.equal(faultStatusSignal({ code: "status_0_os", value: "[999]Unknown" })?.active, true);
+});
+
+test("confirmed aggregate shortages cannot be overwritten by localized resource rows", () => {
+  assert.deepEqual(alertStatusSignals([
+    { code: "status_0_os", value: "[101]Falta de Tarrina" },
+    { code: "status_0_cuplack", value: "Anomalías", data: 1 },
+  ]).map(({ field, value }) => ({ field, value })), [
+    { field: "ordering_system_fault", value: false },
+    { field: "cup_empty", value: true },
+  ]);
 });
 
 test("post-shortage cup counter uses the configured percentage thresholds", () => {

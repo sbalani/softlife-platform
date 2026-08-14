@@ -268,23 +268,28 @@ export async function recordProductChange(
 export function alertStatusSignals(rows: HuaxinStatusRow[]) {
   const byCode = new Map(rows.map((row) => [row.code, row]));
   const signals = new Map<string, { field: string; value: boolean | number; raw: HuaxinStatusRow }>();
+  const setSignal = (field: string, value: boolean | number, raw: HuaxinStatusRow) => {
+    const existing = signals.get(field);
+    if (existing?.value === true && value === false) return;
+    signals.set(field, { field, value, raw });
+  };
   for (const row of byCode.values()) {
     const resource = resourceStatusSignal(row);
-    if (resource) signals.set(resource.field, { field: resource.field, value: resource.active, raw: row });
+    if (resource) setSignal(resource.field, resource.active, row);
     if (row.code === "status_0_os") {
-      for (const status of operatingStatusSignals(row)) signals.set(status.field, { field: status.field, value: status.active, raw: row });
+      for (const status of operatingStatusSignals(row)) setSignal(status.field, status.active, row);
       continue;
     }
     const fault = faultStatusSignal(row);
-    if (fault) signals.set(fault.field, { field: fault.field, value: fault.active, raw: row });
+    if (fault) setSignal(fault.field, fault.active, row);
   }
   const online = byCode.get("status_0_online_status");
-  if (online) signals.set("device_online", { field: "device_online", value: String(online.value).toLowerCase() === "online", raw: online });
+  if (online) setSignal("device_online", String(online.value).toLowerCase() === "online", online);
   const materialCounter = byCode.get("status_0_sellcup");
   const remaining = materialCounter && materialRemainingStatus(materialCounter);
   if (remaining) {
-    signals.set("material_remaining_pct", { field: "material_remaining_pct", value: remaining.remainingPct, raw: materialCounter });
-    signals.set("material_out", { field: "material_out", value: remaining.outOfStock, raw: materialCounter });
+    setSignal("material_remaining_pct", remaining.remainingPct, materialCounter);
+    setSignal("material_out", remaining.outOfStock, materialCounter);
   }
   return [...signals.values()];
 }

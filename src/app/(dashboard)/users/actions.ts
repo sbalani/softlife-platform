@@ -7,6 +7,23 @@ import { getSessionProfile, type SessionProfile } from "@/lib/auth/session";
 
 export type UserResult = { ok: boolean; error?: string; message?: string };
 
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string" && error.message) return error.message;
+  if (typeof error === "string" && error) return error;
+  return fallback;
+}
+
+function logUserError(operation: string, error: unknown) {
+  const details = error && typeof error === "object" ? error as { name?: unknown; message?: unknown; code?: unknown; status?: unknown } : {};
+  console.error(`[users] ${operation} failed`, {
+    name: details.name,
+    message: details.message,
+    code: details.code,
+    status: details.status,
+  });
+}
+
 async function requireAdmin(): Promise<{ session: SessionProfile | null; denied: UserResult | null }> {
   const session = await getSessionProfile();
   if (!session || session.role !== "admin") {
@@ -39,24 +56,48 @@ export async function createUser(_prev: UserResult | null, fd: FormData): Promis
   try {
     const s = await createServiceClient();
     if (tenantId) {
-      const { data: tenant } = await s.from("tenants").select("id").eq("id", tenantId).maybeSingle();
+      const { data: tenant, error: tenantError } = await s.from("tenants").select("id,kind").eq("id", tenantId).maybeSingle();
+      if (tenantError) {
+        logUserError("employer lookup", tenantError);
+        return { ok: false, error: errorMessage(tenantError, "Could not verify the employer account.") };
+      }
       if (!tenant) return { ok: false, error: "Employer account not found." };
+      if (employerKind === "franchisee" && tenant.kind !== "franchisee") return { ok: false, error: "Select a franchisee employer account." };
     }
     const metadata = { full_name: fullName, role, employer_kind: employerKind, tenant_id: tenantId };
     const requestHeaders = await headers();
     const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
     const origin = requestHeaders.get("origin") ?? `${requestHeaders.get("x-forwarded-proto") ?? "https"}://${host}`;
-    const { error } = creationMode === "invite"
+    const { data, error } = creationMode === "invite"
       ? await s.auth.admin.inviteUserByEmail(email, {
           data: metadata,
           redirectTo: `${origin}/auth/callback?next=/set-password`,
         })
       : await s.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: metadata });
-    if (error) return { ok: false, error: error.message };
+    if (error) {
+      logUserError("Supabase Auth creation", error);
+      return { ok: false, error: errorMessage(error, "Supabase could not create the user.") };
+    }
+    if (!data.user) return { ok: false, error: "Supabase did not return the created user." };
+    const { error: profileError } = await s.from("profiles").upsert({
+      id: data.user.id,
+      email,
+      full_name: fullName ?? email,
+      role,
+      employer_kind: employerKind,
+      tenant_id: tenantId,
+    });
+    if (profileError) {
+      logUserError("profile creation", profileError);
+      const { error: cleanupError } = await s.auth.admin.deleteUser(data.user.id);
+      if (cleanupError) logUserError("failed-user cleanup", cleanupError);
+      return { ok: false, error: `The login was not kept because its profile could not be created: ${errorMessage(profileError, "unknown profile error")}` };
+    }
     revalidatePath("/users");
     return { ok: true, message: creationMode === "invite" ? "Invitation sent." : "User created." };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    logUserError("creation", e);
+    return { ok: false, error: errorMessage(e, "The user could not be created.") };
   }
 }
 

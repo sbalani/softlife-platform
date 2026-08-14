@@ -11,9 +11,9 @@ export default async function RemoteControlPage() {
   const machines = await getAccessibleMachines();
 
   return (
-    <div className="mx-auto max-w-lg md:hidden">
+    <div className="mx-auto max-w-2xl">
       <header className="mb-5">
-        <p className="text-xs font-bold uppercase tracking-[.2em] text-terracotta">Mobile controls</p>
+        <p className="text-xs font-bold uppercase tracking-[.2em] text-terracotta">Franchise controls</p>
         <h1 className="mt-1 font-display text-3xl font-bold text-cocoa">Remote control</h1>
         <p className="mt-2 text-sm text-taupe">Select a machine, then confirm the command. Commands act on live equipment.</p>
       </header>

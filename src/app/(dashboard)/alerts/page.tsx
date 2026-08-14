@@ -6,7 +6,6 @@ import { getChangeAlertRules } from "@/lib/data/change-alert-rules";
 import { getMachines } from "@/lib/data/machines";
 import { getProducts } from "@/lib/data/products";
 import { AlertRuleManager } from "./AlertRuleManager";
-import { ResolveAlertButton } from "./ResolveAlertButton";
 import { getAccessibleMachineIds } from "@/lib/data/accessible-machines";
 import { getSessionProfile } from "@/lib/auth/session";
 
@@ -41,6 +40,7 @@ export default async function AlertsPage() {
       {isAdmin && <AlertRuleManager rules={rules} machines={machines} products={products.map(({ id, name }) => ({ id, name }))} />}
 
       <h2 className="mb-3 font-display text-xl font-bold text-cocoa">Active alerts</h2>
+      <p className="mb-4 rounded-xl border border-sage/25 bg-sage/5 px-4 py-3 text-xs text-cocoa">Machine alerts resolve automatically after a new sync confirms the condition has cleared. If an alert remains here, the latest telemetry still reports it as active.</p>
       <div className="space-y-3">
         {alerts.map((a) => {
           const sev = SEV[a.severity] ?? SEV.info;
@@ -62,7 +62,7 @@ export default async function AlertsPage() {
                   </div>
                   <h3 className="mt-1.5 font-display text-lg font-bold text-cocoa">{a.title}</h3>
                   <p className="mt-1 text-sm text-cocoa">{a.message}</p>
-                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-taupe"><span>{formatDateTime(a.created_at, tz)}</span>{isAdmin && a.change_log_id && <Link href={`/change-log?${new URLSearchParams({ ...(a.device_imei ? { machine: a.device_imei } : {}), ...(a.change_field ? { field: a.change_field } : {}) })}`} className="font-semibold text-terracotta">Technical details</Link>}{isAdmin && <ResolveAlertButton id={a.id} />}</div>
+                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-taupe"><span>{formatDateTime(a.created_at, tz)}</span>{isAdmin && a.change_log_id && <Link href={`/change-log?${new URLSearchParams({ ...(a.device_imei ? { machine: a.device_imei } : {}), ...(a.change_field ? { field: a.change_field } : {}) })}`} className="font-semibold text-terracotta">Technical details</Link>}</div>
                 </div>
                 {a.remaining_pct != null && (
                   <div className="text-right">

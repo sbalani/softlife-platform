@@ -70,36 +70,30 @@ test("fault statuses and display order use Huaxin codes", () => {
 });
 
 test("aggregate operating states distinguish modes from actionable faults", () => {
-  assert.deepEqual(operatingStatusSignals({ code: "status_0_os", value: "[11]Modo nocturno" }).map(({ field, active }) => ({ field, active })), [
-    { field: "ordering_system_fault", active: false },
-  ]);
-  assert.deepEqual(operatingStatusSignals({ code: "status_0_os", value: "[105]Cooling off" }).map(({ field, active }) => ({ field, active })), [
-    { field: "ordering_system_fault", active: false },
-  ]);
-  assert.deepEqual(operatingStatusSignals({ code: "status_0_os", value: "[104]Not taken away" }).map(({ field, active }) => ({ field, active })), [
-    { field: "ordering_system_fault", active: false },
-    { field: "cup_take_fault", active: true },
-  ]);
-  assert.deepEqual(operatingStatusSignals({ code: "status_0_os", value: "[102]Falta total de material" }).map(({ field, active }) => ({ field, active })), [
-    { field: "ordering_system_fault", active: false },
-    { field: "material_out", active: true },
-  ]);
-  assert.deepEqual(operatingStatusSignals({ code: "status_0_os", value: "[255]Insufficient proportion" }).map(({ field, active }) => ({ field, active })), [
-    { field: "ordering_system_fault", active: false },
-    { field: "mixture_ratio_fault", active: true },
-  ]);
+  const modes = operatingStatusSignals({ code: "status_0_os", value: "[11]Modo nocturno" });
+  assert.ok(modes.every(({ active }) => !active));
+  assert.ok(operatingStatusSignals({ code: "status_0_os", value: "[105]Cooling off" }).every(({ active }) => !active));
+  const pickup = new Map(operatingStatusSignals({ code: "status_0_os", value: "[104]Not taken away" }).map(({ field, active }) => [field, active]));
+  assert.equal(pickup.get("cup_take_fault"), true);
+  assert.equal(pickup.get("mixture_ratio_fault"), false);
+  const material = new Map(operatingStatusSignals({ code: "status_0_os", value: "[102]Falta total de material" }).map(({ field, active }) => [field, active]));
+  assert.equal(material.get("material_out"), true);
+  assert.equal(material.get("cup_take_fault"), false);
+  const mixture = new Map(operatingStatusSignals({ code: "status_0_os", value: "[255]Insufficient proportion" }).map(({ field, active }) => [field, active]));
+  assert.equal(mixture.get("mixture_ratio_fault"), true);
+  assert.equal(mixture.get("material_out"), false);
   assert.equal(faultStatusSignal({ code: "status_0_os", value: "[999]Unknown" })?.field, "ordering_system_fault");
   assert.equal(faultStatusSignal({ code: "status_0_os", value: "[999]Unknown" })?.active, true);
 });
 
 test("confirmed aggregate shortages cannot be overwritten by localized resource rows", () => {
-  assert.deepEqual(alertStatusSignals([
+  const signals = new Map(alertStatusSignals([
     { code: "status_0_os", value: "[101]Falta de Tarrina" },
     { code: "status_0_cuplack", value: "Anomalías", data: 1 },
-  ]).map(({ field, value }) => ({ field, value })), [
-    { field: "ordering_system_fault", value: false },
-    { field: "cup_empty", value: true },
-  ]);
+  ]).map(({ field, value }) => [field, value]));
+  assert.equal(signals.get("ordering_system_fault"), false);
+  assert.equal(signals.get("cup_empty"), true);
+  assert.equal(signals.get("mixture_ratio_fault"), false);
 });
 
 test("post-shortage cup counter uses the configured percentage thresholds", () => {

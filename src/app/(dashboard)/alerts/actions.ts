@@ -91,12 +91,3 @@ export async function deleteAlertRule(id: string): Promise<void> {
   if (error) throw new Error(error.message);
   revalidatePath("/alerts");
 }
-
-export async function resolveAlert(id: string): Promise<void> {
-  const session = await getSessionProfile();
-  if (!session || session.role !== "admin") throw new Error("Access denied.");
-  const s = await createServiceClient();
-  const { error } = await s.from("alerts").update({ resolved_at: new Date().toISOString(), resolved_by: session.id }).eq("id", id);
-  if (error) throw new Error(error.message);
-  revalidatePath("/alerts");
-}

@@ -21,6 +21,7 @@ const OPERATING_STATE_FIELDS: Record<string, string> = {
 };
 
 const BENIGN_OPERATING_STATES = new Set(["9", "11", "105"]);
+const OPERATING_ACTIONABLE_FIELDS = [...new Set(Object.values(OPERATING_STATE_FIELDS))];
 
 const DISPLAY_ORDER = [
   "status_0_lackmaterial",
@@ -108,20 +109,18 @@ export function operatingStatusSignals(row: HuaxinStatusRow): { field: string; a
   const value = String(row.value ?? row.data ?? "").trim();
   const normalized = value.toLowerCase();
   const stateCode = value.match(/^\[(\d+)]/)?.[1];
+  const cleared = OPERATING_ACTIONABLE_FIELDS.map((field) => ({ field, active: false, row }));
   if (!value || ["0", "false", "normal", "none", "close", "closed", "off", "cierre", "正常", "无", "关"].includes(normalized)) {
-    return [{ field: "ordering_system_fault", active: false, row }];
+    return [{ field: "ordering_system_fault", active: false, row }, ...cleared];
   }
   const specificField = stateCode && OPERATING_STATE_FIELDS[stateCode];
   if (specificField) {
-    return [
-      { field: "ordering_system_fault", active: false, row },
-      { field: specificField, active: true, row },
-    ];
+    return [{ field: "ordering_system_fault", active: false, row }, ...cleared.map((signal) => signal.field === specificField ? { ...signal, active: true } : signal)];
   }
   if (stateCode && BENIGN_OPERATING_STATES.has(stateCode)) {
-    return [{ field: "ordering_system_fault", active: false, row }];
+    return [{ field: "ordering_system_fault", active: false, row }, ...cleared];
   }
-  return [{ field: "ordering_system_fault", active: true, row }];
+  return [{ field: "ordering_system_fault", active: true, row }, ...cleared];
 }
 
 export function statusDisplayRank(row: HuaxinStatusRow): number {

@@ -15,6 +15,7 @@ export type Machine = {
   customer: string | null;
   warehouse: string | null;
   state: string;
+  deployed: boolean;
   base_product: string | null;
   last_full_clean_date: string | null;
   ingredient_count: number;
@@ -48,7 +49,7 @@ export async function getMachines(): Promise<{
       if (!data || data.length < 1000) break;
     }
     const [{ data: names, error: namesError }, { data: statuses, error: statusesError }, { data: alerts, error: alertsError }] = await Promise.all([
-      s.from("machines").select("id,display_name"),
+      s.from("machines").select("id,display_name,deployed"),
       s.from("machine_status_snapshots").select("machine_id,field,value,observed_at").in("field", ["cup_empty", "material_empty", "material_out"]),
       s.from("v_alerts").select("machine_id,change_field").is("resolved_at", null),
     ]);
@@ -71,9 +72,9 @@ export async function getMachines(): Promise<{
       ...machine,
       display_name: displayNames.get(machine.id) ?? null,
       location: machine.location_override || translateLocation(machine.location),
-      oos: oosMachines.has(machine.id),
-      low_stock: lowStockMachines.has(machine.id) && !oosMachines.has(machine.id),
-      active_alert_count: alertCounts.get(machine.id) ?? 0,
+      oos: machine.deployed && oosMachines.has(machine.id),
+      low_stock: machine.deployed && lowStockMachines.has(machine.id) && !oosMachines.has(machine.id),
+      active_alert_count: machine.deployed ? alertCounts.get(machine.id) ?? 0 : 0,
       status_observed_at: statusTimes.get(machine.id) ?? null,
     }));
     const freshness = fleetFreshness(machines.map((machine) => machine.huaxin_last_sync));

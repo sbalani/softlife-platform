@@ -1,0 +1,10 @@
+ALTER TABLE public.machines ALTER COLUMN deployed SET DEFAULT false;
+
+UPDATE public.machines
+SET deployed = device_imei IN (
+  '867734086527252',
+  '861648085657983',
+  '861648083067961',
+  '861648083097216',
+  '861648083099527'
+);

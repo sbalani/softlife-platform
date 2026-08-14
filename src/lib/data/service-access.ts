@@ -7,7 +7,7 @@ type Session = Pick<SessionProfile, "role" | "tenant_id">;
 export async function machineTenantAt(s: SupabaseClient, machineId: string, eventTime: string) {
   const day = ymd(new Date(eventTime));
   const [{ data: machine, error: machineError }, { data: assignment, error: assignmentError }] = await Promise.all([
-    s.from("machines").select("tenant_id").eq("id", machineId).maybeSingle(),
+    s.from("machines").select("tenant_id,deployed").eq("id", machineId).maybeSingle(),
     s.from("machine_franchisee_assignments").select("tenant_id").eq("machine_id", machineId)
       .lte("start_date", day).or(`end_date.is.null,end_date.gte.${day}`)
       .order("start_date", { ascending: false }).limit(1).maybeSingle(),
@@ -15,6 +15,7 @@ export async function machineTenantAt(s: SupabaseClient, machineId: string, even
   if (machineError) throw machineError;
   if (assignmentError) throw assignmentError;
   if (!machine) throw new Error("Machine not found");
+  if (!machine.deployed) return null;
   return (assignment?.tenant_id as string) ?? (machine.tenant_id as string) ?? null;
 }
 
@@ -29,7 +30,7 @@ export async function accessibleMachineIds(s: SupabaseClient, session: Session, 
   if (!session.tenant_id) return [];
   const day = ymd(date);
   const [{ data: machines, error: machineError }, { data: assignments, error: assignmentError }] = await Promise.all([
-    s.from("machines").select("id,tenant_id"),
+    s.from("machines").select("id,tenant_id").eq("deployed", true),
     s.from("machine_franchisee_assignments").select("machine_id").eq("tenant_id", session.tenant_id)
       .lte("start_date", day).or(`end_date.is.null,end_date.gte.${day}`),
   ]);

@@ -33,6 +33,7 @@ export async function getAlerts(resolved = false, machineIds?: string[]): Promis
       .order("created_at", { ascending: false })
       .limit(resolved ? 200 : 50);
     query = resolved ? query.not("resolved_at", "is", null) : query.is("resolved_at", null);
+    if (!resolved) query = query.or("machine_id.is.null,machine_deployed.eq.true,type.eq.defrost_automation_failed");
     if (machineIds) query = query.in("machine_id", machineIds);
     const { data, error } = await query;
     if (error || !data) return machineIds ? { alerts: [], source: "supabase" } : { alerts: resolved ? [] : SAMPLE, source: "sample" };

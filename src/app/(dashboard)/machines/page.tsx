@@ -49,24 +49,24 @@ export default async function MachinesPage({
     salesByImei.set(order.device_imei, (salesByImei.get(order.device_imei) ?? 0) + order.price);
   }
   const mapMarkers = machines
-    .filter((m) => m.latitude != null && m.longitude != null)
+    .filter((m) => m.deployed && m.latitude != null && m.longitude != null)
     .map((m) => ({ name: m.display_name || m.name, location: m.location, lat: m.latitude!, lng: m.longitude!, online: m.net_online }));
 
-  const isActive = (m: (typeof machines)[number]) => m.state === "active";
+  const isDeployed = (m: (typeof machines)[number]) => m.deployed;
   const filtered = machines.filter((m) => {
     const matchesQ =
       !q ||
       [m.display_name, m.name, m.ref, m.device_imei, m.customer, m.location]
         .some((v) => (v ?? "").toLowerCase().includes(q));
     const matchesStatus =
-      status === "all" ? true : status === "active" ? isActive(m) : !isActive(m);
+      status === "all" ? true : status === "deployed" ? isDeployed(m) : !isDeployed(m);
     return matchesQ && matchesStatus;
   });
 
   const counts = {
     all: machines.length,
-    active: machines.filter(isActive).length,
-    inactive: machines.filter((m) => !isActive(m)).length,
+    deployed: machines.filter(isDeployed).length,
+    undeployed: machines.filter((m) => !isDeployed(m)).length,
   };
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -103,7 +103,7 @@ export default async function MachinesPage({
       </p>
 
       <div className="mb-4 flex items-center gap-2">
-        {(["all", "active", "inactive"] as const).map((value) => (
+        {(["all", "deployed", "undeployed"] as const).map((value) => (
           <Link key={value} href={chipHref(value, sp.q ?? "")} className={`rounded-full px-3 py-1.5 text-sm font-semibold capitalize transition ${status === value ? "bg-terracotta text-white" : "bg-white text-cocoa hover:bg-cream"}`}>
             {value} ({counts[value]})
           </Link>
@@ -136,8 +136,8 @@ export default async function MachinesPage({
                   <td className="px-4 py-3 text-cocoa">{m.location ?? "—"}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${m.oos ? "bg-danger/15 text-danger" : m.low_stock ? "bg-warning/15 text-warning" : "bg-sage/15 text-sage"}`}>{m.oos ? "OOS" : m.low_stock ? "Low stock" : "OK"}</span>
-                      <span className={`text-xs font-semibold ${m.net_online ? "text-sage" : "text-danger"}`}>{m.net_online ? "Online" : "Offline"}</span>
+                       <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${!m.deployed ? "bg-taupe/15 text-taupe" : m.oos ? "bg-danger/15 text-danger" : m.low_stock ? "bg-warning/15 text-warning" : "bg-sage/15 text-sage"}`}>{!m.deployed ? "Not deployed" : m.oos ? "OOS" : m.low_stock ? "Low stock" : "OK"}</span>
+                       {m.deployed && <span className={`text-xs font-semibold ${m.net_online ? "text-sage" : "text-danger"}`}>{m.net_online ? "Online" : "Offline"}</span>}
                       {m.active_alert_count > 0 && <span title={`${m.active_alert_count} other active alert(s)`} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-warning text-xs font-black text-white">!</span>}
                     </div>
                   </td>

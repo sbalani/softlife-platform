@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { alertStatusSignals, diffSnapshots, menuFromSnapshot, menuProductIdMap, menuSnapshot } from "./change-log.ts";
-import { faultStatusSignal, materialRemainingStatus, operatingStatusSignals, resourceStatusSignal, statusDisplayRank } from "../huaxin/status-signals.ts";
+import { faultStatusSignal, iceCreamFormationPct, materialRemainingStatus, operatingStatusSignals, resourceStatusSignal, statusDisplayRank } from "../huaxin/status-signals.ts";
 import { FRANCHISEE_REMOTE_COMMANDS, HUAXIN_REMOTE_COMMANDS } from "../huaxin/remote-commands.ts";
 
 test("machine snapshots report field-level menu changes", () => {
@@ -119,6 +119,13 @@ test("post-shortage cup counter uses the configured percentage thresholds", () =
     { field: "material_remaining_pct", value: 24 },
     { field: "material_out", value: false },
   ]);
+});
+
+test("ice cream formation uses the stable Huaxin percentage status", () => {
+  assert.equal(iceCreamFormationPct({ code: "status_0_percent", value: "100" }), 100);
+  assert.equal(iceCreamFormationPct({ code: "status_0_percent", value: "42%" }), 42);
+  assert.equal(iceCreamFormationPct({ code: "other", value: "100" }), null);
+  assert.equal(iceCreamFormationPct({ code: "status_0_percent", value: "unknown" }), null);
 });
 
 test("remote command catalog covers every documented Huaxin operation", () => {

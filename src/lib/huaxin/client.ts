@@ -111,6 +111,7 @@ async function request(
   const url = cfg.baseUrl.replace(/\/$/, "") + path;
   const body = JSON.stringify({ ...commonParams(cfg), ...(extra ?? {}) });
   const reqHeaders = { "Content-Type": "application/json", ...(headers ?? {}) };
+  const signal = AbortSignal.timeout(30_000);
 
   let res: { ok: boolean; status: number; statusText: string; text(): Promise<string> };
   if (cfg.verifySsl === false) {
@@ -121,10 +122,11 @@ async function request(
       method: "POST",
       headers: reqHeaders,
       body,
+      signal,
       dispatcher: new undici.Agent({ connect: { rejectUnauthorized: false } }),
     });
   } else {
-    res = await fetch(url, { method: "POST", headers: reqHeaders, body });
+    res = await fetch(url, { method: "POST", headers: reqHeaders, body, signal });
   }
 
   const text = await res.text();

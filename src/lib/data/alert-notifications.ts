@@ -26,6 +26,19 @@ export async function sendPendingAlertNotifications(s: SupabaseClient): Promise<
   const { data: profiles, error: profileError } = await s.from("profiles").select("id,role,tenant_id,employer_kind").in("id", userIds);
   if (profileError) throw profileError;
   const profileById = new Map(((profiles as Profile[]) ?? []).map((profile) => [profile.id, profile]));
+  const machineIdsByUser = new Map<string, string[] | null>();
+  for (const profile of profileById.values()) {
+    const role = normalizeMobileRole(profile.role);
+    machineIdsByUser.set(profile.id, await mobileMachineIds(s, {
+      id: profile.id,
+      email: null,
+      role,
+      tenantId: profile.tenant_id,
+      employerKind: ["softlife", "franchisee", "contractor"].includes(profile.employer_kind) ? profile.employer_kind as "softlife" | "franchisee" | "contractor" : "softlife",
+      scopeVersion: 1,
+      capabilities: MOBILE_CAPABILITIES[role],
+    }));
+  }
   let sent = 0;
 
   for (const alert of alerts as unknown as AlertRow[]) {
@@ -34,22 +47,16 @@ export async function sendPendingAlertNotifications(s: SupabaseClient): Promise<
       const profile = profileById.get(token.user_id);
       if (!profile) continue;
       const role = normalizeMobileRole(profile.role);
-      const machineIds = await mobileMachineIds(s, {
-        id: profile.id,
-        email: null,
-        role,
-        tenantId: profile.tenant_id,
-        employerKind: ["softlife", "franchisee", "contractor"].includes(profile.employer_kind) ? profile.employer_kind as "softlife" | "franchisee" | "contractor" : "softlife",
-        scopeVersion: 1,
-        capabilities: MOBILE_CAPABILITIES[role],
-      });
+      const machineIds = machineIdsByUser.get(profile.id) ?? [];
       if (alert.machine_id ? machineIds === null || machineIds.includes(alert.machine_id) : role === "admin") eligible.push(token);
     }
     if (!eligible.length) {
+      await s.from("alerts").update({ push_claimed_at: null }).eq("id", alert.id);
       continue;
     }
     const machine = alert.machine_name || "Machine alert";
     try {
+      let accepted = 0;
       for (let offset = 0; offset < eligible.length; offset += 100) {
         const chunk = eligible.slice(offset, offset + 100);
         const response = await fetch("https://exp.host/--/api/v2/push/send", {
@@ -66,18 +73,22 @@ export async function sendPendingAlertNotifications(s: SupabaseClient): Promise<
         });
         if (!response.ok) throw new Error(`Expo push failed: ${response.status} ${await response.text()}`);
         const tickets = (await response.json() as { data?: { status?: string; message?: string; details?: { error?: string } }[] }).data ?? [];
+        let rejected = false;
         for (let index = 0; index < chunk.length; index++) {
           const ticket = tickets[index];
-          if (ticket?.status === "ok") continue;
+          if (ticket?.status === "ok") { accepted++; continue; }
           if (ticket?.details?.error === "DeviceNotRegistered") await s.from("mobile_push_tokens").delete().eq("id", chunk[index].id);
-          else console.error(`[alert-push] Expo rejected ${alert.id}:`, ticket?.message ?? "Unknown ticket error");
+          else { rejected = true; console.error(`[alert-push] Expo rejected ${alert.id}:`, ticket?.message ?? "Unknown ticket error"); }
         }
+        if (rejected) throw new Error("Expo rejected one or more alert notifications");
       }
+      if (!accepted) throw new Error("No active device accepted the alert notification");
     } catch (error) {
-      await s.from("alerts").update({ push_notified_at: null }).eq("id", alert.id);
+      await s.from("alerts").update({ push_claimed_at: null }).eq("id", alert.id);
       console.error(`[alert-push] Delivery failed for ${alert.id}:`, error);
       continue;
     }
+    await s.from("alerts").update({ push_notified_at: new Date().toISOString(), push_claimed_at: null }).eq("id", alert.id);
     sent += eligible.length;
   }
   return sent;

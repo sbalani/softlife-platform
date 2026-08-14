@@ -16,6 +16,17 @@ import { FRANCHISEE_CONFIGURABLE_COMMANDS, HUAXIN_REMOTE_COMMANDS } from "@/lib/
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
 
+export async function clearDefrostIntervention(machineId: string, imei: string): Promise<SaveResult> {
+  const actor = await getSessionProfile();
+  if (!actor || actor.role !== "admin") return { ok: false, error: "Admin access required." };
+  const s = await createServiceClient();
+  const { error } = await s.rpc("clear_defrost_intervention", { p_machine_id: machineId, p_admin_id: actor.id });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/machines/${imei}`);
+  revalidatePath("/alerts");
+  return { ok: true };
+}
+
 export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData): Promise<SaveResult> {
   if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
   const actor = await getSessionProfile();
@@ -30,8 +41,15 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
     const lastClean = String(fd.get("last_full_clean") ?? "");
     const warehouseValue = String(fd.get("odoo_warehouse_id") ?? "");
     const odooWarehouseId = warehouseValue ? Number(warehouseValue) : null;
+    const deployed = fd.get("deployed") === "on";
+    const defrostEnabled = fd.get("defrost_enabled") === "on";
+    const defrostTime = String(fd.get("defrost_time") ?? "03:00");
+    const defrostMinutes = Number(fd.get("defrost_minutes") ?? 4);
     if (warehouseValue && (!Number.isInteger(odooWarehouseId) || Number(odooWarehouseId) <= 0)) return { ok: false, error: "Invalid warehouse." };
     if (lastClean && lastClean > ymd(new Date())) return { ok: false, error: "Cleaning date cannot be in the future." };
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(defrostTime)) return { ok: false, error: "Invalid defrost start time." };
+    if (!Number.isInteger(defrostMinutes) || defrostMinutes < 1 || defrostMinutes > 30) return { ok: false, error: "Defrost duration must be between 1 and 30 minutes." };
+    if (defrostEnabled && !deployed) return { ok: false, error: "Deploy the machine before enabling its defrost schedule." };
 
     // base_product_id is NOT touched here — it's set from the Base hopper
     // card in the product menu section (updateBaseHopper), which is the one
@@ -53,6 +71,16 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
       .select("id,last_full_clean_date")
       .single();
     if (mErr) return { ok: false, error: mErr.message };
+
+    const { error: scheduleError } = await s.rpc("set_machine_operations", {
+      p_machine_id: machineId,
+      p_deployed: deployed,
+      p_defrost_enabled: defrostEnabled,
+      p_defrost_time: defrostTime,
+      p_defrost_seconds: defrostMinutes * 60,
+      p_updated_by: actor.id,
+    });
+    if (scheduleError) return { ok: false, error: scheduleError.message };
 
     if (lastClean && cleanDay(savedMachine.last_full_clean_date) !== lastClean) {
       await recordMachineClean(s, {
@@ -348,6 +376,10 @@ export async function sendMachineCommand(
   }
   const { data: machine } = await service.from("machines").select("id").eq("device_imei", imei).maybeSingle();
   if (!machine) return { ok: false, error: "Machine not found or not assigned to you." };
+  const { data: activeDefrost, error: defrostError } = await service.from("machine_defrost_runs").select("id,state").eq("machine_id", machine.id).in("state", ["scheduled", "thawing", "thaw_closed", "forming", "recovery"]).maybeSingle();
+  if (defrostError) return { ok: false, error: "Could not verify automated defrost state." };
+  const safeDuringDefrost = new Set(["operate_sellout", "operate_closethawing", "operate_openrefrigeration", "operate_status"]);
+  if (activeDefrost && !safeDuringDefrost.has(command)) return { ok: false, error: `Command blocked while automated defrost is ${activeDefrost.state}.` };
   if (session.role === "franchisee") {
     if (!session.tenant_id) return { ok: false, error: "No franchisee account assigned." };
     const today = new Date().toISOString().slice(0, 10);
@@ -365,6 +397,13 @@ export async function sendMachineCommand(
 
   const cfg = getConfigFromEnv();
   if (!cfg) return { ok: false, error: "Huaxin not configured." };
+  const commandOwner = crypto.randomUUID();
+  let commandLease = false;
+  if (!safeDuringDefrost.has(command)) {
+    const { data: claimed, error: claimError } = await service.rpc("claim_interactive_machine_command", { p_machine_id: machine.id, p_owner: commandOwner });
+    if (claimError || !claimed) return { ok: false, error: "Command blocked by an automated defrost or unresolved intervention." };
+    commandLease = true;
+  }
   try {
     const result = await sendCommand(cfg, imei, command);
     const code = String(result.code);
@@ -373,6 +412,8 @@ export async function sendMachineCommand(
     return { ok: false, error: msg || "Command rejected", huaxinCode: code, huaxinMsg: msg };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  } finally {
+    if (commandLease) await service.rpc("release_interactive_machine_command", { p_machine_id: machine.id, p_owner: commandOwner });
   }
 }
 

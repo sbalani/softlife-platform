@@ -20,6 +20,9 @@ export type MachineConfig = {
   nayaxId: string | null;
   displayName: string | null;
   odooWarehouseId: number | null;
+  deployed: boolean;
+  defrostSchedule: { enabled: boolean; localStartTime: string; defrostMinutes: number; requiresIntervention: boolean } | null;
+  latestDefrostRun: { state: string; scheduledFor: string; lastFormationPct: number | null; failureDetail: string | null } | null;
   odooWarehouses: OdooWarehouseOpt[];
   ingredients: { position: string; product_id: string | null; product_type: string; current_lot_name: string | null; last_loaded_date: string | null }[];
   bases: ProductOpt[];
@@ -39,7 +42,7 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
     const s = await createServiceClient();
     const { data: m } = await s
       .from("machines")
-      .select("id,name,location,location_override,latitude,longitude,base_product_id,profile,last_full_clean_date,payment_model,customer_id,nayax_id,display_name,odoo_warehouse_id,created_at")
+      .select("id,name,location,location_override,latitude,longitude,base_product_id,profile,last_full_clean_date,payment_model,customer_id,nayax_id,display_name,odoo_warehouse_id,deployed,created_at")
       .eq("device_imei", imei)
       .maybeSingle();
     const machine = m as Record<string, unknown> | null;
@@ -50,12 +53,23 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
     if (warehouseError) throw warehouseError;
 
     let ingredients: MachineConfig["ingredients"] = [];
+    let defrostSchedule: MachineConfig["defrostSchedule"] = null;
+    let latestDefrostRun: MachineConfig["latestDefrostRun"] = null;
     if (machine?.id) {
-      const { data: ings } = await s
-        .from("machine_ingredients")
-        .select("position,product_id,product_type,current_lot_name,last_loaded_date")
-        .eq("machine_id", machine.id as string);
+      const [ingredientResult, scheduleResult, runResult] = await Promise.all([
+        s.from("machine_ingredients").select("position,product_id,product_type,current_lot_name,last_loaded_date").eq("machine_id", machine.id as string),
+        s.from("machine_defrost_schedules").select("enabled,local_start_time,defrost_seconds,requires_intervention").eq("machine_id", machine.id as string).maybeSingle(),
+        s.from("machine_defrost_runs").select("state,scheduled_for,last_formation_pct,failure_detail").eq("machine_id", machine.id as string).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+      ]);
+      if (ingredientResult.error) throw ingredientResult.error;
+      if (scheduleResult.error) throw scheduleResult.error;
+      if (runResult.error) throw runResult.error;
+      const { data: ings } = ingredientResult;
+      const { data: schedule } = scheduleResult;
+      const { data: run } = runResult;
       ingredients = (ings as MachineConfig["ingredients"]) ?? [];
+      if (schedule) defrostSchedule = { enabled: Boolean(schedule.enabled), localStartTime: String(schedule.local_start_time).slice(0, 5), defrostMinutes: Number(schedule.defrost_seconds) / 60, requiresIntervention: Boolean(schedule.requires_intervention) };
+      if (run) latestDefrostRun = { state: String(run.state), scheduledFor: String(run.scheduled_for), lastFormationPct: run.last_formation_pct == null ? null : Number(run.last_formation_pct), failureDetail: (run.failure_detail as string) ?? null };
     }
 
     return {
@@ -73,6 +87,9 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
       nayaxId: (machine?.nayax_id as string) ?? null,
       displayName: (machine?.display_name as string) ?? null,
       odooWarehouseId: (machine?.odoo_warehouse_id as number) ?? null,
+      deployed: machine?.deployed !== false,
+      defrostSchedule,
+      latestDefrostRun,
       odooWarehouses: (warehouseRows as OdooWarehouseOpt[]) ?? [],
       ingredients,
       bases: products.filter((p) => p.type === "base"),

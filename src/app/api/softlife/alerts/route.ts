@@ -13,17 +13,13 @@ export async function GET(req: Request) {
     const s = await createServiceClient();
     const allowedIds = await mobileMachineIds(s, session);
     if (allowedIds?.length === 0) return Response.json([]);
-    let query = s.from("alerts").select("id,type,severity,machine_id,title,message,remaining_pct,created_at,machines(name,display_name)")
+    let query = s.from("v_alerts").select("id,type,severity,machine_id,title,message,remaining_pct,created_at,machine_name")
       .is("resolved_at", null).neq("type", "change_out_of_range")
       .order("created_at", { ascending: false }).limit(50);
-    if (allowedIds) query = query.in("machine_id", allowedIds);
+    query = allowedIds ? query.in("machine_id", allowedIds) : query.or("machine_id.is.null,machine_deployed.eq.true,type.eq.defrost_automation_failed");
     const { data, error } = await query;
     if (error) throw error;
-    return Response.json((data as Record<string, unknown>[] ?? []).map((alert) => ({
-      ...alert,
-      machine_name: (alert.machines as { name?: string; display_name?: string | null } | null)?.display_name ?? (alert.machines as { name?: string } | null)?.name ?? null,
-      machines: undefined,
-    })));
+    return Response.json(data ?? []);
   } catch (error) {
     return Response.json({ error: { message: error instanceof Error ? error.message : String(error) } }, { status: 500 });
   }

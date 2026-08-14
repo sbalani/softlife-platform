@@ -22,6 +22,8 @@ export async function saveAlertRule(_previous: AlertRuleResult | null, formData:
   const severity = String(formData.get("severity") ?? "warning");
   const machineId = String(formData.get("machine_id") ?? "") || null;
   const productId = String(formData.get("product_id") ?? "") || null;
+  const seriesName = field === "temperature" ? String(formData.get("series_name") ?? "").trim() || null : null;
+  const notifyMobile = formData.get("notify_mobile") === "on";
   const ruleType = STATUS_FIELDS.has(field) ? "status_equals" : "numeric_range";
   const targetValue = ruleType === "status_equals" ? String(formData.get("target_value") ?? "") : null;
   if (!name) return { ok: false, error: "Rule name is required." };
@@ -52,6 +54,8 @@ export async function saveAlertRule(_previous: AlertRuleResult | null, formData:
     max_value: ruleType === "numeric_range" ? maxValue : null,
     target_value: targetValue,
     severity,
+    series_name: seriesName,
+    notify_mobile: notifyMobile,
     created_by: session.id,
   });
   if (error) return { ok: false, error: error.message };
@@ -65,6 +69,17 @@ export async function setAlertRuleEnabled(id: string, enabled: boolean): Promise
   const s = await createServiceClient();
   const { error } = await s.from("change_alert_rules").update({ enabled }).eq("id", id);
   if (error) throw new Error(error.message);
+  revalidatePath("/alerts");
+}
+
+export async function setAlertRuleMobileNotification(id: string, notifyMobile: boolean): Promise<void> {
+  const session = await getSessionProfile();
+  if (!session || session.role !== "admin") throw new Error("Access denied.");
+  const s = await createServiceClient();
+  const { error } = await s.from("change_alert_rules").update({ notify_mobile: notifyMobile }).eq("id", id);
+  if (error) throw new Error(error.message);
+  const { error: alertError } = await s.from("alerts").update({ mobile_notification: notifyMobile, ...(notifyMobile ? { push_notified_at: null, push_claimed_at: null } : {}) }).eq("change_alert_rule_id", id).is("resolved_at", null);
+  if (alertError) throw new Error(alertError.message);
   revalidatePath("/alerts");
 }
 

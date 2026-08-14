@@ -48,6 +48,13 @@ export type MaterialRemainingStatus = {
   outOfStock: boolean;
 };
 
+export function iceCreamFormationPct(row: HuaxinStatusRow): number | null {
+  if (row.code !== "status_0_percent") return null;
+  const raw = String(row.value ?? row.data ?? "").trim().replace(/%$/, "");
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 && value <= 100 ? value : null;
+}
+
 export function materialRemainingStatus(row: HuaxinStatusRow): MaterialRemainingStatus | null {
   if (row.code !== "status_0_sellcup") return null;
   const normal = String(row.value ?? "").trim().match(/^normal\s*\[\s*(\d+)\s*]$/i);

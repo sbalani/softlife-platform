@@ -24,7 +24,11 @@ export async function getAccessibleMachineIds(): Promise<string[] | null> {
     .lte("start_date", today)
     .or(`end_date.is.null,end_date.gte.${today}`);
   if (error) throw new Error(error.message);
-  return [...new Set(((assignments as { machine_id: string }[]) ?? []).map((row) => row.machine_id))];
+  const assignedIds = [...new Set(((assignments as { machine_id: string }[]) ?? []).map((row) => row.machine_id))];
+  if (!assignedIds.length) return [];
+  const { data: deployed, error: machineError } = await service.from("machines").select("id").in("id", assignedIds).eq("deployed", true);
+  if (machineError) throw new Error(machineError.message);
+  return ((deployed as { id: string }[]) ?? []).map((row) => row.id);
 }
 
 export async function getAccessibleMachines(): Promise<AccessibleMachine[]> {
@@ -39,6 +43,7 @@ export async function getAccessibleMachines(): Promise<AccessibleMachine[]> {
     .order("display_name", { ascending: true, nullsFirst: false });
 
   if (assignedMachineIds !== null) query = query.in("id", assignedMachineIds);
+  if (assignedMachineIds !== null) query = query.eq("deployed", true);
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);

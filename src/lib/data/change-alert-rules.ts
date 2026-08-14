@@ -14,6 +14,8 @@ export type ChangeAlertRule = {
   max_value: number | null;
   severity: "info" | "warning" | "critical";
   enabled: boolean;
+  series_name: string | null;
+  notify_mobile: boolean;
 };
 
 export async function getChangeAlertRules(): Promise<ChangeAlertRule[]> {
@@ -34,5 +36,7 @@ export async function getChangeAlertRules(): Promise<ChangeAlertRule[]> {
     max_value: row.max_value == null ? null : Number(row.max_value),
     severity: row.severity as ChangeAlertRule["severity"],
     enabled: Boolean(row.enabled),
+    series_name: (row.series_name as string) ?? null,
+    notify_mobile: Boolean(row.notify_mobile),
   }));
 }

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useActionState } from "react";
 import { saveMachineConfig, type SaveResult } from "./actions";
 import type { MachineConfig } from "@/lib/data/machine-config";
+import { ClearDefrostInterventionButton } from "./ClearDefrostInterventionButton";
 
 export function MachineConfigForm({ config, imei, today, lastCleanDate }: { config: MachineConfig; imei: string; today: string; lastCleanDate: string }) {
   const [profile, setProfile] = useState(config.profile ?? "");
@@ -70,6 +71,21 @@ export function MachineConfigForm({ config, imei, today, lastCleanDate }: { conf
             <option value="hybrid">Hybrid (both)</option>
           </select>
         </label>
+        <label className="flex items-start gap-3 rounded-xl border border-line bg-cream/40 p-3 sm:col-span-2">
+          <input type="checkbox" name="deployed" defaultChecked={config.deployed} className="mt-1 accent-terracotta" />
+          <span><span className="block text-sm font-bold text-cocoa">Deployed and monitored</span><span className="mt-1 block text-xs text-taupe">Undeployed machines keep their history but do not generate alerts, mobile notifications, or franchise/operator access.</span></span>
+        </label>
+        <fieldset className="rounded-xl border border-line bg-white p-3 sm:col-span-3">
+          <legend className="px-1 text-[11px] font-bold uppercase tracking-wide text-taupe">Daily automated defrost</legend>
+          <div className="mt-2 flex flex-wrap items-end gap-4">
+            <label className="flex items-center gap-2 pb-2 text-sm font-bold text-cocoa"><input type="checkbox" name="defrost_enabled" defaultChecked={config.defrostSchedule?.enabled ?? false} className="accent-terracotta" />Enabled</label>
+            <label><span className={labelClass}>Start time</span><input type="time" name="defrost_time" defaultValue={config.defrostSchedule?.localStartTime ?? "03:00"} className={selectClass} /></label>
+            <label><span className={labelClass}>Defrost minutes</span><input type="number" name="defrost_minutes" min="1" max="30" step="1" defaultValue={config.defrostSchedule?.defrostMinutes ?? 4} className={`w-24 ${selectClass}`} /></label>
+            <p className="max-w-xl pb-2 text-xs text-taupe">Europe/Madrid time. Sales are disabled first. After defrost, refrigeration restarts and sales remain disabled until a fresh formation reading reaches 100%. A 90-minute timeout requires manual intervention.</p>
+          </div>
+          {config.latestDefrostRun && <p className={`mt-3 text-xs font-semibold ${config.latestDefrostRun.state === "failed" || config.latestDefrostRun.state === "manual_intervention" ? "text-danger" : "text-taupe"}`}>Latest run: {config.latestDefrostRun.state.replaceAll("_", " ")}{config.latestDefrostRun.lastFormationPct != null ? ` · Formation ${config.latestDefrostRun.lastFormationPct}%` : ""}{config.latestDefrostRun.failureDetail ? ` · ${config.latestDefrostRun.failureDetail}` : ""}</p>}
+          {config.defrostSchedule?.requiresIntervention && config.machineId && <ClearDefrostInterventionButton machineId={config.machineId} imei={imei} />}
+        </fieldset>
       </div>
 
       <div className="flex items-center gap-4">

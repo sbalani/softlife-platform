@@ -56,7 +56,11 @@ export async function mobileMachineIds(s: SupabaseClient, session: MobileSession
     const { data, error } = await s.from("user_machine_assignments").select("machine_id")
       .eq("user_id", session.id).lte("starts_at", eventTime).or(`ends_at.is.null,ends_at.gte.${eventTime}`);
     if (error) throw error;
-    return [...new Set(((data as { machine_id: string }[]) ?? []).map((row) => row.machine_id))];
+    const ids = [...new Set(((data as { machine_id: string }[]) ?? []).map((row) => row.machine_id))];
+    if (!ids.length) return [];
+    const { data: machines, error: machineError } = await s.from("machines").select("id").in("id", ids).eq("deployed", true);
+    if (machineError) throw machineError;
+    return ((machines as { id: string }[]) ?? []).map((row) => row.id);
   }
   if (!session.tenantId) return [];
   const { data: assignments, error: assignmentError } = await s.from("machine_franchisee_assignments").select("machine_id,tenant_id,start_date")
@@ -66,7 +70,11 @@ export async function mobileMachineIds(s: SupabaseClient, session: MobileSession
   for (const assignment of (assignments as { machine_id: string; tenant_id: string }[]) ?? []) {
     if (!effective.has(assignment.machine_id)) effective.set(assignment.machine_id, assignment.tenant_id);
   }
-  return [...effective].filter(([, tenantId]) => tenantId === session.tenantId).map(([machineId]) => machineId);
+  const ids = [...effective].filter(([, tenantId]) => tenantId === session.tenantId).map(([machineId]) => machineId);
+  if (!ids.length) return [];
+  const { data: machines, error: machineError } = await s.from("machines").select("id").in("id", ids).eq("deployed", true);
+  if (machineError) throw machineError;
+  return ((machines as { id: string }[]) ?? []).map((row) => row.id);
 }
 
 export async function canAccessMobileMachine(s: SupabaseClient, session: MobileSession, machineId: string, eventTime: string) {

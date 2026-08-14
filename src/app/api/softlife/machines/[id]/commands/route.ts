@@ -9,6 +9,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export const runtime = "nodejs";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SAFE_DURING_DEFROST = new Set(["operate_sellout", "operate_closethawing", "operate_openrefrigeration", "operate_status"]);
 
 async function commandsFor(s: SupabaseClient, session: MobileSession) {
   if (session.role === "admin") return HUAXIN_REMOTE_COMMANDS;
@@ -34,14 +35,16 @@ async function authorizedMachine(req: Request, rawId: string) {
   if (error) throw error;
   const machine = data as { id: string; name: string; display_name: string | null; device_imei: string | null } | null;
   if (!machine?.device_imei) return { response: Response.json({ error: { message: "Machine is not available for remote control" } }, { status: 409 }) };
-  return { session, service, machine };
+  const { data: activeDefrost, error: defrostError } = await service.from("machine_defrost_runs").select("id,state").eq("machine_id", id).in("state", ["scheduled", "thawing", "thaw_closed", "forming", "recovery"]).maybeSingle();
+  if (defrostError) throw defrostError;
+  return { session, service, machine, activeDefrost };
 }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const result = await authorizedMachine(req, (await params).id);
     if ("response" in result) return result.response;
-    const commands = await commandsFor(result.service, result.session);
+    const commands = (await commandsFor(result.service, result.session)).filter((item) => !result.activeDefrost || SAFE_DURING_DEFROST.has(item.command));
     return Response.json({
       machine_id: result.machine.id,
       commands: commands.map(({ command, label, note }) => ({ command, label, note })),
@@ -57,12 +60,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if ("response" in result) return result.response;
     const body = await req.json().catch(() => null) as { command?: unknown } | null;
     const command = typeof body?.command === "string" ? body.command : "";
-    const commands = await commandsFor(result.service, result.session);
+    const commands = (await commandsFor(result.service, result.session)).filter((item) => !result.activeDefrost || SAFE_DURING_DEFROST.has(item.command));
     if (!commands.some((item) => item.command === command)) {
       return Response.json({ error: { message: "Command not allowed" } }, { status: 403 });
     }
     const cfg = getConfigFromEnv();
     if (!cfg) return Response.json({ error: { message: "Huaxin not configured" } }, { status: 503 });
+    const commandOwner = crypto.randomUUID();
+    let commandLease = false;
+    if (!SAFE_DURING_DEFROST.has(command)) {
+      const { data: claimed, error: claimError } = await result.service.rpc("claim_interactive_machine_command", { p_machine_id: result.machine.id, p_owner: commandOwner });
+      if (claimError || !claimed) return Response.json({ error: { message: "Command blocked by an automated defrost or unresolved intervention" } }, { status: 409 });
+      commandLease = true;
+    }
     try {
       const response = await sendCommand(cfg, result.machine.device_imei!, command);
       const code = String(response.code);
@@ -98,6 +108,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         metadata: { source: "mobile", role: result.session.role, error: error instanceof Error ? error.message : String(error) },
       });
       return Response.json({ error: { message: "The command could not be confirmed. Do not retry automatically." } }, { status: 502 });
+    } finally {
+      if (commandLease) await result.service.rpc("release_interactive_machine_command", { p_machine_id: result.machine.id, p_owner: commandOwner });
     }
   } catch (error) {
     return Response.json({ error: { message: error instanceof Error ? error.message : String(error) } }, { status: 500 });

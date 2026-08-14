@@ -1,127 +1,372 @@
-SOFTLIFE MOBILE COUPON API DEPLOYMENT HANDOFF
-==============================================
+SOFTLIFE MOBILE COUPON AND REMOTE-CONTROL RELEASE HANDOFF
+=========================================================
+
+Status date: 2026-08-14
 
 Scope
 -----
 
-This handoff covers the backend deployment blocker for the new admin coupon
-API used by the SoftLife mobile app. It does not request changes to the mobile
-application or to the remote-control API.
+This document tells the mobile agent what is deployed, the exact coupon API
+contract, and the remaining mobile changes required before Android/iOS builds.
+The previous Vercel cron deployment blocker has been resolved. The mobile app
+does not need to implement or configure any scheduler.
 
 
-1. CURRENT STATUS
------------------
+1. PRODUCTION BACKEND STATUS
+----------------------------
 
-The admin coupon mobile API is implemented and pushed to origin/main.
+Production web/backend deployment:
 
-Commit:
+  Commit 12c8fbc Move defrost scheduler to Supabase
+  Vercel status: Ready
+
+Coupon backend commit included in production:
 
   b5e2286 Expose admin coupon mobile API
 
-Endpoints added:
+Remote-control backend commits included in production:
 
-  GET    /api/softlife/admin/coupons
-  POST   /api/softlife/admin/coupons
-  GET    /api/softlife/admin/coupons/{couponId}
-  POST   /api/softlife/admin/coupons/{couponId}
-  DELETE /api/softlife/admin/coupons/{couponId}
+  b3a7c95 Scope franchisee operations by assignment
+  f726c3e Add safe scheduled defrost automation
 
-Relevant files:
+Verified production behavior:
 
-  src/app/api/softlife/admin/coupons/route.ts
-  src/app/api/softlife/admin/coupons/[id]/route.ts
-  src/lib/data/coupon-admin.ts
-
-The routes require a Supabase bearer token and enforce session.role ===
-"admin" server-side.
+  GET /api/softlife/admin/coupons without a token returns HTTP 401.
+  The route previously returned 404 and is now deployed.
+  The removed Vercel defrost route returns 404 by design.
+  Supabase Edge Function defrost rejects unauthenticated requests with 401.
+  A Vault-authenticated Supabase invocation returns HTTP 200.
 
 
-2. VERIFICATION ALREADY COMPLETED
----------------------------------
+2. SCHEDULER ARCHITECTURE - NO MOBILE WORK
+------------------------------------------
 
-The following checks passed locally with these routes present:
+Automated defrost no longer uses Vercel Cron.
 
-  npm run build
-  npm run test:coupon-dates
-  npm run test:coupon-content
-  npx eslint src/app/api/softlife/admin/coupons/route.ts \
-    src/app/api/softlife/admin/coupons/[id]/route.ts
+Current architecture:
 
-Next.js included both coupon API routes in the successful production build.
+  Supabase pg_cron checks once per minute for due work.
+  The check runs inside Postgres and is inexpensive.
+  The Supabase Edge Function is invoked only when a schedule is due or an
+  active defrost run has reached its next state transition.
+  Huaxin credentials and the scheduler token are stored in Supabase Vault.
+  The Edge Function owns command attempts, recovery, state transitions,
+  status snapshots, audit logs, and alert push delivery.
 
-
-3. PRODUCTION SYMPTOM
----------------------
-
-As of 2026-08-14, this request returns HTTP 404:
-
-  GET https://softlife-platform.vercel.app/api/softlife/admin/coupons
-
-An unauthenticated request should return HTTP 401 after the new route is
-deployed. The 404 means production is still serving an older commit without
-the coupon routes.
+The mobile agent must not add Vercel cron configuration, call the Edge
+Function, or store any scheduler/Huaxin secret.
 
 
-4. DEPLOYMENT BLOCKER
----------------------
+3. AUTHENTICATION
+-----------------
 
-GitHub reports the Vercel status for commit b5e2286 as:
+All mobile API calls use:
 
-  Deployment failed.
+  Authorization: Bearer <Supabase access token>
 
-The Vercel failure points to Hobby-plan cron limits. Current vercel.json
-contains:
+All coupon endpoints below are admin-only.
+
+Expected authorization errors:
+
+  401  Missing, expired, or invalid access token
+  403  Authenticated user is not an admin
+
+The coupon tab must remain hidden or disabled for franchisees and operators.
+The backend still enforces admin authorization if the UI is bypassed.
+
+
+4. COUPON ENDPOINTS
+-------------------
+
+Production base URL:
+
+  https://softlife-platform.vercel.app/api
+
+Endpoints:
+
+  GET    /softlife/admin/coupons
+  POST   /softlife/admin/coupons
+  GET    /softlife/admin/coupons/{couponId}
+  POST   /softlife/admin/coupons/{couponId}
+  DELETE /softlife/admin/coupons/{couponId}
+
+couponId is the positive numeric Huaxin coupon ID, not a Supabase UUID.
+
+
+5. LIST COUPONS
+---------------
+
+Request:
+
+  GET /softlife/admin/coupons
+
+Success response:
 
   {
-    "path": "/api/cron/defrost",
-    "schedule": "* * * * *"
+    "coupons": [
+      {
+        "couponId": "123",
+        "couponName": "Summer promotion",
+        "couponType": "0",
+        "deviceImeis": "861648083097216",
+        "validDay": "30",
+        "startTime": "2026-08-14 00:00:00",
+        "endTime": "2026-09-13 23:59:59",
+        "content": "{...Huaxin coupon content...}",
+        "localName": "Malaga",
+        "createTime": "...",
+        "updateTime": "...",
+        "merchantName": "..."
+      }
+    ],
+    "latest_synced_at": "ISO-8601 timestamp or null",
+    "stale_machines": 0,
+    "machines": [
+      {
+        "id": "Supabase machine UUID",
+        "name": "Display name",
+        "imei": "861648083097216"
+      }
+    ]
   }
 
-Vercel Hobby only allows cron jobs that run once per day. The one-minute
-defrost schedule causes the entire deployment to be rejected. This blocker is
-unrelated to the coupon API implementation.
+Important behavior:
+
+  - coupons comes from Supabase machine coupon snapshots.
+  - The response may include expired coupons; it is not an active-only list.
+  - deviceImeis is aggregated across machine snapshots.
+  - stale_machines indicates missing or stale machine snapshots.
+  - machines supplies the UUID values required by create.machineIds.
 
 
-5. REQUEST FOR PLATFORM DEVELOPER
+6. CREATE COUPON
+----------------
+
+Request:
+
+  POST /softlife/admin/coupons
+  Content-Type: application/json
+
+Discount coupon body:
+
+  {
+    "couponType": "0",
+    "couponName": "Summer promotion",
+    "startTime": "2026-08-14",
+    "endTime": "2026-09-13",
+    "validDay": 30,
+    "totalCount": 10,
+    "secondary": 1,
+    "machineIds": ["Supabase machine UUID"],
+    "localName": "Malaga",
+    "money": 1.5
+  }
+
+One-cup/free-product coupon body:
+
+  {
+    "couponType": "1",
+    "couponName": "Free cup",
+    "startTime": "2026-08-14",
+    "endTime": "2026-09-13",
+    "validDay": 30,
+    "totalCount": 10,
+    "secondary": 1,
+    "machineIds": ["Supabase machine UUID"],
+    "localName": "Malaga",
+    "amount": 1,
+    "productPosition": "1",
+    "productName": "Ice cream"
+  }
+
+Validation:
+
+  - couponType must be "0" or "1".
+  - couponName and localName are required.
+  - startTime/endTime use YYYY-MM-DD.
+  - endTime must not precede startTime.
+  - validDay must equal the day difference between startTime and endTime.
+  - totalCount must be a whole number from 0 through 100.
+  - secondary must be a whole number of at least 1.
+  - machineIds must contain valid, stored Supabase machine UUIDs with IMEIs.
+  - Type "0" requires money greater than zero.
+  - Type "1" requires amount >= 1, productPosition, and productName.
+
+Success response:
+
+  {
+    "ok": true,
+    "couponId": "123",
+    "warning": "optional warning"
+  }
+
+warning means Huaxin accepted the coupon but one or more Supabase snapshot
+refreshes failed. Treat this as success, display the warning, and refetch.
+
+Validation or Huaxin rejection currently returns HTTP 400:
+
+  {
+    "error": {
+      "message": "Human-readable reason"
+    }
+  }
+
+
+7. LIST COUPON CODES
+--------------------
+
+Request:
+
+  GET /softlife/admin/coupons/{couponId}
+
+Success response:
+
+  {
+    "records": [
+      {
+        "code": "...",
+        "status": "0",
+        "expireTime": "...",
+        "createTime": "..."
+      }
+    ]
+  }
+
+Known status values:
+
+  0  Unused
+  1  Used
+  2  Expired
+
+The records originate from Huaxin. Preserve unknown fields/status values and
+display a fallback rather than failing decoding.
+
+
+8. GENERATE MORE CODES
+-----------------------
+
+Request:
+
+  POST /softlife/admin/coupons/{couponId}
+
+Body:
+
+  {
+    "num": 5
+  }
+
+num must be a whole number from 1 through 100.
+
+Success response:
+
+  {
+    "ok": true
+  }
+
+Refetch the code records after success.
+
+
+9. DELETE COUPON
+----------------
+
+Request:
+
+  DELETE /softlife/admin/coupons/{couponId}
+
+Success response:
+
+  {
+    "ok": true,
+    "warning": "optional warning"
+  }
+
+As with create, warning means Huaxin accepted the deletion but snapshot
+refresh was incomplete. Treat it as success and display the warning.
+
+
+10. REMOTE CONTROL STATUS
+-------------------------
+
+Remote controls are deployed and remain unchanged:
+
+  GET  /softlife/machines/{machineUuid}/commands
+  POST /softlife/machines/{machineUuid}/commands
+
+The app must render the GET response instead of hard-coding permissions.
+
+operate_make is labeled Free Cup by production. It is the command previously
+called Test Cup. It is unavailable while automated defrost is active.
+
+Do not automatically retry an HTTP 502 command response because delivery may
+have reached the machine even when confirmation failed.
+
+
+11. REQUIRED MOBILE FIXES BEFORE EAS BUILD
+------------------------------------------
+
+Apply these changes to softlife-haccp-mobile after commit 99679f9:
+
+  1. Change the mock operate_make label from "Test cup" to "Free Cup".
+  2. Rename "Cupones activos" to "Cupones", because the API does not filter
+     expired coupons.
+  3. Make the HTTP client tolerate non-JSON error responses. It currently
+     calls JSON.parse unconditionally; return ApiError with HTTP status and
+     response text when JSON decoding fails.
+  4. Add couponId?: string to the successful create response type if the app
+     needs to display the newly created Huaxin ID.
+  5. Keep warning responses as successful mutations and show the warning.
+  6. Refetch coupons after create/delete and codes after generation.
+  7. Test with a real authenticated admin account against production.
+  8. Confirm a franchisee/operator cannot see the coupon tab and receives 403
+     if the endpoint is called directly.
+
+
+12. MOBILE VERIFICATION CHECKLIST
 ---------------------------------
 
-Please resolve the defrost scheduler without weakening its required timing or
-safety behavior. The suggested option is to move the one-minute trigger to
-Supabase Cron (pg_cron + pg_net) or another scheduler, then remove the
-one-minute entry from vercel.json.
+Before starting EAS builds:
 
-The defrost endpoint is protected by CRON_SECRET:
+  [ ] Admin coupon list loads from production.
+  [ ] Machine selector uses Supabase UUIDs from GET /admin/coupons.
+  [ ] Discount coupon creation succeeds and displays any warning.
+  [ ] One-cup coupon creation succeeds.
+  [ ] Code list loads and unknown status values do not crash rendering.
+  [ ] Generating codes refetches records.
+  [ ] Delete requires confirmation and refetches the coupon list.
+  [ ] Non-admin coupon access is hidden and backend returns 403.
+  [ ] Remote command list loads from GET /commands.
+  [ ] operate_make displays as Free Cup.
+  [ ] HTTP 401, 403, 400, 409, 500, 502, and non-JSON failures are readable.
+  [ ] TypeScript, lint, unit tests, and Expo bundle verification pass.
 
-  GET /api/cron/defrost
-  Authorization: Bearer <CRON_SECRET>
-
-Store the matching secret securely in the scheduler. Do not commit it to the
-repository or place it directly in a SQL migration.
-
-After resolving the scheduler:
-
-  1. Deploy current origin/main to Vercel production.
-  2. Confirm the defrost schedule still runs once per minute.
-  3. Confirm an unauthenticated coupon request returns 401, not 404:
-
-       curl -i https://softlife-platform.vercel.app/api/softlife/admin/coupons
-
-  4. Confirm an authenticated non-admin request returns 403.
-  5. Confirm an authenticated admin request returns the coupon list response.
-  6. Notify the mobile developer that production is ready.
+After this checklist passes, restart Android and iOS EAS builds.
 
 
-6. MOBILE RELEASE STATUS
-------------------------
+13. BACKEND VERIFICATION ALREADY COMPLETED
+------------------------------------------
 
-The mobile integration is committed and pushed separately:
+  npm run build
+  Result: passed
 
-  softlife-haccp-mobile commit 99679f9
-  Add mobile controls and coupon management
+  npx tsc --noEmit
+  Result: passed
 
-Android and iOS EAS builds were intentionally canceled after the production
-coupon endpoint returned 404. They should be restarted only after the backend
-deployment is confirmed, so a broken coupon section is not distributed to
-TestFlight or Android testers.
+  Deno check for Supabase defrost function
+  Result: passed
+
+  Supabase database lint
+  Result: no schema errors
+
+  Supabase defrost Edge Function
+  Result: deployed and active
+
+  Supabase Cron
+  Result: active, one-minute due-work check
+
+  Vault-authenticated Edge invocation
+  Result: HTTP 200, claimed 0, failed 0
+
+  Production coupon unauthenticated request
+  Result: HTTP 401, confirming route deployment
 
 END OF HANDOFF

@@ -5,7 +5,6 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "postbuild": "node scripts/migrate-defrost-secrets.mjs",
     "start": "next start",
     "lint": "eslint",
     "test:change-log": "node --experimental-strip-types --test src/lib/data/change-log.test.ts",

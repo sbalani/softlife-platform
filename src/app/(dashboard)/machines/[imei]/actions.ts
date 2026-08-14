@@ -11,7 +11,7 @@ import { syncMachineMedia } from "@/lib/data/machine-media";
 import { recordMachineClean } from "@/lib/data/clean-logs";
 import { cleanDay } from "@/lib/data/service-history-utils";
 import { ymd } from "@/lib/dates";
-import { FRANCHISEE_REMOTE_COMMANDS, HUAXIN_REMOTE_COMMANDS } from "@/lib/huaxin/remote-commands";
+import { FRANCHISEE_CONFIGURABLE_COMMANDS, HUAXIN_REMOTE_COMMANDS } from "@/lib/huaxin/remote-commands";
 
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
@@ -332,14 +332,20 @@ export async function sendMachineCommand(
   imei: string,
   command: string,
 ): Promise<{ ok: boolean; error?: string; huaxinCode?: string; huaxinMsg?: string }> {
-  const remoteCommands = new Set<string>(FRANCHISEE_REMOTE_COMMANDS.map((item) => item.command));
   const session = await getSessionProfile();
   if (!session || session.role === "operator") return { ok: false, error: "Access denied." };
   const adminCommands = new Set<string>(HUAXIN_REMOTE_COMMANDS.map((item) => item.command));
-  if (!(session.role === "admin" ? adminCommands : remoteCommands).has(command)) {
-    return { ok: false, error: "Command not allowed." };
-  }
   const service = await createServiceClient();
+  if (session.role === "admin") {
+    if (!adminCommands.has(command)) return { ok: false, error: "Command not allowed." };
+  } else {
+    if (!session.tenant_id) return { ok: false, error: "No franchisee account assigned." };
+    const { data: tenant, error } = await service.from("tenants").select("remote_commands").eq("id", session.tenant_id).maybeSingle();
+    if (error) return { ok: false, error: "Franchise controls are temporarily unavailable." };
+    const configurableCommands = new Set<string>(FRANCHISEE_CONFIGURABLE_COMMANDS.map((item) => item.command));
+    const remoteCommands = new Set<string>(((tenant?.remote_commands as string[] | null) ?? ["operate_make"]));
+    if (!configurableCommands.has(command) || !remoteCommands.has(command)) return { ok: false, error: "This control is not enabled for your franchise account." };
+  }
   const { data: machine } = await service.from("machines").select("id").eq("device_imei", imei).maybeSingle();
   if (!machine) return { ok: false, error: "Machine not found or not assigned to you." };
   if (session.role === "franchisee") {

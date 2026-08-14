@@ -36,6 +36,7 @@ export async function sendPendingAlertNotifications(s: SupabaseClient): Promise<
       const role = normalizeMobileRole(profile.role);
       const machineIds = await mobileMachineIds(s, {
         id: profile.id,
+        email: null,
         role,
         tenantId: profile.tenant_id,
         employerKind: ["softlife", "franchisee", "contractor"].includes(profile.employer_kind) ? profile.employer_kind as "softlife" | "franchisee" | "contractor" : "softlife",

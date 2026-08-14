@@ -20,6 +20,7 @@ export async function getApiSession(req: Request): Promise<MobileSession | null>
     ? profile.employer_kind as MobileSession["employerKind"] : "softlife";
   return {
     id: user.id,
+    email: user.email ?? null,
     role,
     tenantId: (profile.tenant_id as string) ?? null,
     employerKind,

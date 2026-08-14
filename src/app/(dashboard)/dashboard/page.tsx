@@ -8,6 +8,9 @@ import { ymd } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { getAliasMap, resolveProductName } from "@/lib/data/products";
 import { OrderDataNote } from "@/components/order-data-note";
+import { getAccessibleMachineIds } from "@/lib/data/accessible-machines";
+import { createServiceClient } from "@/lib/supabase/server";
+import { getSessionProfile } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -24,12 +27,19 @@ export default async function DashboardPage() {
   const now = new Date();
   const rangeTo = ymd(now, tz);
   const rangeFrom = ymd(new Date(+now - 29 * 86_400_000), tz);
-  const [{ orders, sync, readError }, { machines }, { alerts, source: alertsSource }, aliasMap] = await Promise.all([
-    getOrders({ dateFrom: rangeFrom, dateTo: rangeTo, timeZone: tz }),
+  const [machineScope, session] = await Promise.all([getAccessibleMachineIds(), getSessionProfile()]);
+  const scopedClient = machineScope === null ? undefined : await createServiceClient();
+  const [orderResult, machineResult, { alerts, source: alertsSource }, aliasMap] = await Promise.all([
+    machineScope?.length === 0 ? Promise.resolve({ orders: [], sync: null, readError: undefined }) : getOrders({ dateFrom: rangeFrom, dateTo: rangeTo, timeZone: tz }, scopedClient),
     getMachines(),
-    getAlerts(),
+    getAlerts(false, machineScope ?? undefined),
     getAliasMap(),
   ]);
+  const machineIds = machineScope && new Set(machineScope);
+  const machines = machineIds ? machineResult.machines.filter((machine) => machineIds.has(machine.id)) : machineResult.machines;
+  const allowedImeis = new Set(machines.flatMap((machine) => machine.device_imei ? [machine.device_imei] : []));
+  const orders = machineScope === null ? orderResult.orders : orderResult.orders.filter((order) => !!order.device_imei && allowedImeis.has(order.device_imei));
+  const { sync, readError } = orderResult;
   const completed = orders.filter((o) => o.order_state === "COMPLETE" && !o.is_admin_override);
   const totalSales = completed.reduce((s, o) => s + o.price, 0);
   const totalUnits = completed.reduce((s, o) => s + o.nums, 0);
@@ -98,7 +108,7 @@ export default async function DashboardPage() {
         label,
         value: Number(v.revenue.toFixed(2)),
         units: v.units,
-        href: machine?.device_imei ? `/machines/${machine.device_imei}` : undefined,
+        href: session?.role === "admin" && machine?.device_imei ? `/machines/${machine.device_imei}` : undefined,
       };
     });
 

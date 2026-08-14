@@ -2,6 +2,8 @@ import { getOrders } from "@/lib/data/orders";
 import { getAliasMap, resolveProductName } from "@/lib/data/products";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { analyticsRange, filterAnalyticsOrders, machineSalesReport, ordersInPeriod, type AnalyticsParams, type MachineSalesCadence } from "@/lib/analytics";
+import { getAccessibleMachineIds, getAccessibleMachines } from "@/lib/data/accessible-machines";
+import { createServiceClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -31,9 +33,13 @@ export async function GET(request: Request) {
     product: url.searchParams.get("product") ?? undefined,
     payType: url.searchParams.get("payType") ?? undefined,
   };
-  const [timeZone, aliasMap] = await Promise.all([getDisplayTimezone(), getAliasMap()]);
+  const [timeZone, aliasMap, machineScope] = await Promise.all([getDisplayTimezone(), getAliasMap(), getAccessibleMachineIds()]);
   const range = analyticsRange(params, timeZone);
-  const { orders, readError } = await getOrders({ dateFrom: range.from, dateTo: range.to, timeZone });
+  const scopedClient = machineScope === null ? undefined : await createServiceClient();
+  const orderResult = machineScope?.length === 0 ? { orders: [], readError: undefined } : await getOrders({ dateFrom: range.from, dateTo: range.to, timeZone }, scopedClient);
+  const allowedImeis = machineScope === null ? null : new Set((await getAccessibleMachines()).map((machine) => machine.device_imei));
+  const orders = allowedImeis ? orderResult.orders.filter((order) => !!order.device_imei && allowedImeis.has(order.device_imei)) : orderResult.orders;
+  const { readError } = orderResult;
   if (readError) return new Response(`Supabase order read failed: ${readError}`, { status: 503 });
   const filtered = ordersInPeriod(filterAnalyticsOrders(orders, params, aliasMap), range.from, range.to, timeZone);
   if (report === "weekly" || report === "monthly") {

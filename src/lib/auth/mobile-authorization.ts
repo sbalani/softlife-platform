@@ -12,6 +12,7 @@ export const MOBILE_CAPABILITIES: Record<SessionProfile["role"], MobileCapabilit
 
 export type MobileSession = {
   id: string;
+  email: string | null;
   role: SessionProfile["role"];
   tenantId: string | null;
   employerKind: "softlife" | "franchisee" | "contractor";
@@ -58,21 +59,14 @@ export async function mobileMachineIds(s: SupabaseClient, session: MobileSession
     return [...new Set(((data as { machine_id: string }[]) ?? []).map((row) => row.machine_id))];
   }
   if (!session.tenantId) return [];
-  const [{ data: assignments, error: assignmentError }, { data: owned, error: ownedError }] = await Promise.all([
-    s.from("machine_franchisee_assignments").select("machine_id,tenant_id,start_date")
-      .lte("start_date", day).or(`end_date.is.null,end_date.gte.${day}`).order("start_date", { ascending: false }),
-    s.from("machines").select("id").eq("tenant_id", session.tenantId),
-  ]);
+  const { data: assignments, error: assignmentError } = await s.from("machine_franchisee_assignments").select("machine_id,tenant_id,start_date")
+    .lte("start_date", day).or(`end_date.is.null,end_date.gte.${day}`).order("start_date", { ascending: false });
   if (assignmentError) throw assignmentError;
-  if (ownedError) throw ownedError;
   const effective = new Map<string, string>();
   for (const assignment of (assignments as { machine_id: string; tenant_id: string }[]) ?? []) {
     if (!effective.has(assignment.machine_id)) effective.set(assignment.machine_id, assignment.tenant_id);
   }
-  return [...new Set([
-    ...[...effective].filter(([, tenantId]) => tenantId === session.tenantId).map(([machineId]) => machineId),
-    ...(((owned as { id: string }[]) ?? []).filter((row) => !effective.has(row.id)).map((row) => row.id)),
-  ])];
+  return [...effective].filter(([, tenantId]) => tenantId === session.tenantId).map(([machineId]) => machineId);
 }
 
 export async function canAccessMobileMachine(s: SupabaseClient, session: MobileSession, machineId: string, eventTime: string) {

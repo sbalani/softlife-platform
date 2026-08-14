@@ -4,6 +4,7 @@ export type Tenant = {
   id: string;
   name: string;
   kind: string;
+  remote_commands: string[];
   created_at: string;
 };
 
@@ -23,7 +24,7 @@ export async function getTenants(): Promise<Tenant[]> {
     const s = await createServiceClient();
     const { data } = await s
       .from("tenants")
-      .select("id, name, kind, created_at")
+      .select("id, name, kind, remote_commands, created_at")
       .order("name");
     return (data as Tenant[]) ?? [];
   } catch {

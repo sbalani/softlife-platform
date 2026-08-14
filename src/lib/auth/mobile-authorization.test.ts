@@ -7,5 +7,5 @@ test("mobile roles expose only their operational capabilities", () => {
   assert.equal(normalizeMobileRole("unknown"), "operator");
   assert.equal(MOBILE_CAPABILITIES.operator.includes("remote.basic"), false);
   assert.equal(MOBILE_CAPABILITIES.franchisee.includes("service.clean"), true);
-  assert.equal(hasMobileCapability({ id: "user", role: "operator", tenantId: null, employerKind: "softlife", scopeVersion: 1, capabilities: MOBILE_CAPABILITIES.operator }, "service.refill"), true);
+  assert.equal(hasMobileCapability({ id: "user", email: null, role: "operator", tenantId: null, employerKind: "softlife", scopeVersion: 1, capabilities: MOBILE_CAPABILITIES.operator }, "service.refill"), true);
 });

@@ -20,4 +20,6 @@ export const HUAXIN_REMOTE_COMMANDS = [
   { command: "operate_clearwarn", label: "Clear alarm", note: "Clears the current machine alarm", icon: "🔔", access: "admin" },
 ] as const;
 
-export const FRANCHISEE_REMOTE_COMMANDS = HUAXIN_REMOTE_COMMANDS.filter((item) => item.access === "remote");
+export type HuaxinRemoteCommand = (typeof HUAXIN_REMOTE_COMMANDS)[number];
+export const FRANCHISEE_CONFIGURABLE_COMMANDS = HUAXIN_REMOTE_COMMANDS.filter((item) => item.access === "remote");
+export const FRANCHISEE_REMOTE_COMMANDS = HUAXIN_REMOTE_COMMANDS.filter((item) => item.command === "operate_make");

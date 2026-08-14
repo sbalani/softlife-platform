@@ -5,8 +5,7 @@ import { useState, type ReactNode } from "react";
 import { SignOutButton } from "./SignOutButton";
 
 type Role = "admin" | "operator" | "franchisee";
-// Other franchisee pages stay hidden until their server data loaders are tenant-scoped.
-const FRANCHISEE_NAV = new Set(["/remote-control"]);
+const FRANCHISEE_NAV = new Set(["/dashboard", "/analytics", "/alerts", "/remote-control"]);
 
 const NAV: { label: string; href?: string; soon?: boolean; adminOnly?: boolean; mobileOnly?: boolean; icon: ReactNode }[] = [
   { label: "Dashboard", href: "/dashboard", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM14 8h6V4h-6zM4 20h6v-3H4z"/></svg> },

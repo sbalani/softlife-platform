@@ -130,7 +130,7 @@ test("remote command catalog covers every documented Huaxin operation", () => {
     "operate_status", "operate_refresh_product", "operate_refresh_resource", "operate_switch_two",
     "operate_switch_three", "operate_switch_coupon", "operate_switch_theme", "operate_clearwarn",
   ]));
-  assert.ok(FRANCHISEE_REMOTE_COMMANDS.every((item) => item.access === "remote"));
+  assert.deepEqual(FRANCHISEE_REMOTE_COMMANDS.map((item) => item.command), ["operate_make"]);
 });
 
 test("menu events use the currently observed product assignment", () => {

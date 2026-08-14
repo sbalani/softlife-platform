@@ -8,8 +8,7 @@ ALTER TABLE public.change_alert_rules
   ADD COLUMN target_value TEXT;
 
 ALTER TABLE public.alerts
-  ADD COLUMN product_id UUID REFERENCES public.products(id) ON DELETE SET NULL,
-  ADD COLUMN entity_key TEXT;
+  ADD COLUMN product_id UUID REFERENCES public.products(id) ON DELETE SET NULL;
 
 ALTER TABLE public.change_alert_rules DROP CONSTRAINT change_alert_rules_check;
 ALTER TABLE public.change_alert_rules DROP CONSTRAINT change_alert_rules_check1;
@@ -28,7 +27,6 @@ CREATE INDEX change_alert_rules_scope_idx
   ON public.change_alert_rules (field, machine_id, product_id) WHERE enabled;
 CREATE INDEX change_alert_rules_product_id_idx ON public.change_alert_rules (product_id);
 CREATE INDEX alerts_product_id_idx ON public.alerts (product_id);
-CREATE INDEX alerts_rule_scope_idx ON public.alerts (change_alert_rule_id, machine_id, product_id, entity_key) WHERE resolved_at IS NULL;
 
 UPDATE public.machine_change_log
 SET product_id = entity_key::UUID
@@ -121,11 +119,10 @@ BEGIN
         WHERE a.change_alert_rule_id = rule.id
           AND a.machine_id IS NOT DISTINCT FROM NEW.machine_id
           AND a.product_id IS NOT DISTINCT FROM NEW.product_id
-          AND a.entity_key IS NOT DISTINCT FROM NEW.entity_key
           AND a.resolved_at IS NULL
       ) THEN
         INSERT INTO public.alerts (
-          tenant_id, type, severity, machine_id, product_id, entity_key, message,
+          tenant_id, type, severity, machine_id, product_id, message,
           change_log_id, change_alert_rule_id
         ) VALUES (
           machine_tenant,
@@ -133,7 +130,6 @@ BEGIN
           rule.severity,
           NEW.machine_id,
           NEW.product_id,
-          NEW.entity_key,
           CASE
             WHEN rule.rule_type = 'numeric_range' THEN subject || ': ' || replace(NEW.field, '_', ' ') ||
               ' is ' || numeric_value || ', outside rule "' || rule.name || '" (' || allowed_range || ').'
@@ -150,7 +146,6 @@ BEGIN
       WHERE change_alert_rule_id = rule.id
         AND machine_id IS NOT DISTINCT FROM NEW.machine_id
         AND product_id IS NOT DISTINCT FROM NEW.product_id
-        AND entity_key IS NOT DISTINCT FROM NEW.entity_key
         AND resolved_at IS NULL;
     END IF;
   END LOOP;
@@ -196,10 +191,10 @@ AS
 SELECT a.id, a.type, a.severity, a.message, a.remaining_pct, a.created_at,
        m.name AS machine_name, p.name AS product_name, a.machine_id, a.product_id,
        a.change_log_id, a.change_alert_rule_id, a.resolved_at,
-       c.device_imei, c.field AS change_field, COALESCE(a.entity_key, c.entity_key) AS entity_key
+       c.device_imei, c.field AS change_field, c.entity_key
 FROM public.alerts a
 LEFT JOIN public.machines m ON m.id = a.machine_id
 LEFT JOIN public.products p ON p.id = a.product_id
 LEFT JOIN public.machine_change_log c ON c.id = a.change_log_id;
 
-GRANT SELECT ON public.v_alerts TO authenticated;
+GRANT SELECT ON public.v_alerts TO authenticated;;

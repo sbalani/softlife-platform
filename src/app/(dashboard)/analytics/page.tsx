@@ -10,6 +10,8 @@ import { getSessionProfile } from "@/lib/auth/session";
 import { calculateFranchiseePayouts } from "@/lib/data/franchisee-profit";
 import { analyticsRange, datesBetween, filterAnalyticsOrders, ordersInPeriod, type AnalyticsParams } from "@/lib/analytics";
 import { OrderDataNote } from "@/components/order-data-note";
+import { getAccessibleMachineIds } from "@/lib/data/accessible-machines";
+import { createServiceClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -38,19 +40,26 @@ function localParts(iso: string, timeZone: string) {
 }
 
 export default async function AnalyticsPage({ searchParams }: { searchParams: Promise<AnalyticsParams> }) {
-  const [params, tz, { machines }, aliasMap, session] = await Promise.all([
+  const [params, tz, machineResult, aliasMap, session, machineScope] = await Promise.all([
     searchParams,
     getDisplayTimezone(),
     getMachines(),
     getAliasMap(),
     getSessionProfile(),
+    getAccessibleMachineIds(),
   ]);
+  const machineIds = machineScope && new Set(machineScope);
+  const machines = machineIds ? machineResult.machines.filter((machine) => machineIds.has(machine.id)) : machineResult.machines;
+  const allowedImeis = new Set(machines.flatMap((machine) => machine.device_imei ? [machine.device_imei] : []));
   const range = analyticsRange(params, tz);
-  const { orders: loadedOrders, sync, readError } = await getOrders({
+  const scopedClient = machineScope === null ? undefined : await createServiceClient();
+  const orderResult = machineScope?.length === 0 ? { orders: [], sync: null, readError: undefined } : await getOrders({
     dateFrom: range.previousFrom,
     dateTo: range.to,
     timeZone: tz,
-  });
+  }, scopedClient);
+  const { sync, readError } = orderResult;
+  const loadedOrders = machineScope === null ? orderResult.orders : orderResult.orders.filter((order) => !!order.device_imei && allowedImeis.has(order.device_imei));
   const filtered = filterAnalyticsOrders(loadedOrders, params, aliasMap);
   const currentOrders = ordersInPeriod(filtered, range.from, range.to, tz);
   const previousOrders = ordersInPeriod(filtered, range.previousFrom, range.previousTo, tz);
@@ -66,7 +75,8 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   const previousAverage = previousSales.length ? previousRevenue / previousSales.length : 0;
   const refunded = completed.filter((order) => order.refund_status === "Refunded");
   const refundedValue = refunded.reduce((sum, order) => sum + order.price, 0);
-  const payoutRows = session?.role === "admin" ? await calculateFranchiseePayouts(sales) : [];
+  const allPayoutRows = session?.role === "admin" || session?.role === "franchisee" ? await calculateFranchiseePayouts(sales) : [];
+  const payoutRows = session?.role === "franchisee" ? allPayoutRows.filter((row) => row.tenantId === session.tenant_id) : allPayoutRows;
   const payoutGroups = [...new Set(payoutRows.map((row) => row.tenantId))].map((tenantId) => {
     const rows = payoutRows.filter((row) => row.tenantId === tenantId);
     return { tenantId, tenantName: rows[0]?.tenantName ?? "Franchisee", rows, payout: rows.reduce((sum, row) => sum + row.payout, 0) };
@@ -106,7 +116,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     machineStats.set(key, row);
   }
   const machineRows = [...machineStats.values()].sort((a, b) => b.revenue - a.revenue);
-  const machineBars = machineRows.slice(0, 8).map((row) => ({ label: row.name, value: Number(row.revenue.toFixed(2)), href: row.imei ? `/machines/${row.imei}` : undefined }));
+  const machineBars = machineRows.slice(0, 8).map((row) => ({ label: row.name, value: Number(row.revenue.toFixed(2)), href: session?.role === "admin" && row.imei ? `/machines/${row.imei}` : undefined }));
 
   const productStats = new Map<string, { revenue: number; units: number; orders: number }>();
   for (const order of sales) {
@@ -192,7 +202,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
       <section className="mt-6 rounded-2xl border border-line bg-white p-5">
         <h2 className="mb-1 font-display text-lg font-bold text-cocoa">Machine performance</h2><p className="mb-3 text-xs text-taupe">Grouped by IMEI, not mutable machine name</p>
         {machineBars.length > 0 && <div className="mb-5"><VBarChart data={machineBars} color="#d47e54" formatValue={(value) => `€${value.toFixed(0)}`} /></div>}
-        <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-sm"><thead className="text-left text-[11px] uppercase text-taupe"><tr><th className="py-2">Machine</th><th>IMEI</th><th className="text-right">Orders</th><th className="text-right">Units</th><th className="text-right">AOV</th><th className="text-right">Refunds</th><th className="text-right">Net sales</th></tr></thead><tbody className="divide-y divide-line">{machineRows.map((row) => <tr key={row.imei || row.name}><td className="py-2 font-semibold text-cocoa">{row.imei ? <Link href={`/machines/${row.imei}`} className="text-terracotta">{row.name}</Link> : row.name}</td><td className="font-mono text-xs text-taupe">{row.imei || "—"}</td><td className="text-right">{row.orders}</td><td className="text-right">{row.units}</td><td className="text-right">€{(row.orders ? row.revenue / row.orders : 0).toFixed(2)}</td><td className="text-right">{row.refunds}</td><td className="text-right font-bold">€{row.revenue.toFixed(2)}</td></tr>)}</tbody></table>{!machineRows.length && <p className="py-8 text-center text-sm text-taupe">No machine sales match these filters.</p>}</div>
+        <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-sm"><thead className="text-left text-[11px] uppercase text-taupe"><tr><th className="py-2">Machine</th><th>IMEI</th><th className="text-right">Orders</th><th className="text-right">Units</th><th className="text-right">AOV</th><th className="text-right">Refunds</th><th className="text-right">Net sales</th></tr></thead><tbody className="divide-y divide-line">{machineRows.map((row) => <tr key={row.imei || row.name}><td className="py-2 font-semibold text-cocoa">{session?.role === "admin" && row.imei ? <Link href={`/machines/${row.imei}`} className="text-terracotta">{row.name}</Link> : row.name}</td><td className="font-mono text-xs text-taupe">{row.imei || "—"}</td><td className="text-right">{row.orders}</td><td className="text-right">{row.units}</td><td className="text-right">€{(row.orders ? row.revenue / row.orders : 0).toFixed(2)}</td><td className="text-right">{row.refunds}</td><td className="text-right font-bold">€{row.revenue.toFixed(2)}</td></tr>)}</tbody></table>{!machineRows.length && <p className="py-8 text-center text-sm text-taupe">No machine sales match these filters.</p>}</div>
       </section>
 
       <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-2">

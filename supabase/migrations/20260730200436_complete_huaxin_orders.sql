@@ -52,22 +52,14 @@ FROM payloads p
 WHERE p.id = o.id;
 
 UPDATE public.huaxin_orders o
-SET tenant_id = COALESCE((
-  SELECT a.tenant_id
-  FROM public.machine_franchisee_assignments a
-  WHERE a.machine_id = o.machine_id
-    AND a.start_date <= (o.order_time AT TIME ZONE 'Europe/Madrid')::DATE
-    AND (a.end_date IS NULL OR a.end_date >= (o.order_time AT TIME ZONE 'Europe/Madrid')::DATE)
-  ORDER BY a.start_date DESC
-  LIMIT 1
-), (SELECT m.tenant_id FROM public.machines m WHERE m.id = o.machine_id))
-WHERE o.tenant_id IS NULL;
+SET tenant_id = m.tenant_id
+FROM public.machines m
+WHERE m.id = o.machine_id AND o.tenant_id IS NULL;
 
 ALTER TABLE public.huaxin_orders ALTER COLUMN order_code SET NOT NULL;
 
 CREATE INDEX huaxin_orders_machine_time_idx ON public.huaxin_orders (machine_id, order_time DESC);
 CREATE INDEX huaxin_orders_imei_time_idx ON public.huaxin_orders (device_imei, order_time DESC);
-CREATE INDEX huaxin_orders_tenant_time_idx ON public.huaxin_orders (tenant_id, order_time DESC);
 CREATE INDEX huaxin_orders_out_trade_no_idx ON public.huaxin_orders (out_trade_no) WHERE out_trade_no IS NOT NULL;
 
 CREATE VIEW public.v_orders
@@ -78,8 +70,8 @@ SELECT o.id, o.order_time, o.order_code, o.out_trade_no, o.order_state, o.status
        o.product_name, o.products, o.nums, o.pay_type_raw, o.pay_time,
        o.create_time_utc, o.refund_status, o.refund_out_no, o.coupon_used,
        o.activity_name, o.device_label, o.device_imei, o.machine_id, o.tenant_id,
-       o.ingest_source, o.first_ingested_at, o.last_ingested_at, m.name AS machine_name
+       o.first_ingested_at, o.last_ingested_at, m.name AS machine_name
 FROM public.huaxin_orders o
 LEFT JOIN public.machines m ON m.id = o.machine_id;
 
-GRANT SELECT ON public.v_orders TO authenticated;
+GRANT SELECT ON public.v_orders TO authenticated;;

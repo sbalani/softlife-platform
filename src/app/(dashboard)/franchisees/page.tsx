@@ -2,6 +2,7 @@ import { getFranchiseeIntakeSubmissions, getTenants } from "@/lib/data/franchise
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { TenantForm } from "./TenantForm";
+import { RemoteCommandPermissions } from "./RemoteCommandPermissions";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,7 @@ export default async function FranchiseesPage() {
               <th className="px-5 py-3 font-bold">Name</th>
               <th className="px-5 py-3 font-bold">Kind</th>
               <th className="px-5 py-3 font-bold">Created</th>
+              <th className="px-5 py-3 font-bold">Franchise controls</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -60,11 +62,12 @@ export default async function FranchiseesPage() {
                 <td className="px-5 py-3 text-taupe">
                   {formatDate(t.created_at, tz)}
                 </td>
+                <td className="px-5 py-3">{t.kind === "franchisee" ? <RemoteCommandPermissions tenantId={t.id} initialCommands={t.remote_commands ?? ["operate_make"]} /> : "—"}</td>
               </tr>
             ))}
             {tenants.length === 0 && (
               <tr>
-                <td colSpan={3} className="px-5 py-10 text-center text-taupe">
+                <td colSpan={4} className="px-5 py-10 text-center text-taupe">
                   No franchisees yet — add one above.
                 </td>
               </tr>

@@ -1,0 +1,127 @@
+SOFTLIFE MOBILE COUPON API DEPLOYMENT HANDOFF
+==============================================
+
+Scope
+-----
+
+This handoff covers the backend deployment blocker for the new admin coupon
+API used by the SoftLife mobile app. It does not request changes to the mobile
+application or to the remote-control API.
+
+
+1. CURRENT STATUS
+-----------------
+
+The admin coupon mobile API is implemented and pushed to origin/main.
+
+Commit:
+
+  b5e2286 Expose admin coupon mobile API
+
+Endpoints added:
+
+  GET    /api/softlife/admin/coupons
+  POST   /api/softlife/admin/coupons
+  GET    /api/softlife/admin/coupons/{couponId}
+  POST   /api/softlife/admin/coupons/{couponId}
+  DELETE /api/softlife/admin/coupons/{couponId}
+
+Relevant files:
+
+  src/app/api/softlife/admin/coupons/route.ts
+  src/app/api/softlife/admin/coupons/[id]/route.ts
+  src/lib/data/coupon-admin.ts
+
+The routes require a Supabase bearer token and enforce session.role ===
+"admin" server-side.
+
+
+2. VERIFICATION ALREADY COMPLETED
+---------------------------------
+
+The following checks passed locally with these routes present:
+
+  npm run build
+  npm run test:coupon-dates
+  npm run test:coupon-content
+  npx eslint src/app/api/softlife/admin/coupons/route.ts \
+    src/app/api/softlife/admin/coupons/[id]/route.ts
+
+Next.js included both coupon API routes in the successful production build.
+
+
+3. PRODUCTION SYMPTOM
+---------------------
+
+As of 2026-08-14, this request returns HTTP 404:
+
+  GET https://softlife-platform.vercel.app/api/softlife/admin/coupons
+
+An unauthenticated request should return HTTP 401 after the new route is
+deployed. The 404 means production is still serving an older commit without
+the coupon routes.
+
+
+4. DEPLOYMENT BLOCKER
+---------------------
+
+GitHub reports the Vercel status for commit b5e2286 as:
+
+  Deployment failed.
+
+The Vercel failure points to Hobby-plan cron limits. Current vercel.json
+contains:
+
+  {
+    "path": "/api/cron/defrost",
+    "schedule": "* * * * *"
+  }
+
+Vercel Hobby only allows cron jobs that run once per day. The one-minute
+defrost schedule causes the entire deployment to be rejected. This blocker is
+unrelated to the coupon API implementation.
+
+
+5. REQUEST FOR PLATFORM DEVELOPER
+---------------------------------
+
+Please resolve the defrost scheduler without weakening its required timing or
+safety behavior. The suggested option is to move the one-minute trigger to
+Supabase Cron (pg_cron + pg_net) or another scheduler, then remove the
+one-minute entry from vercel.json.
+
+The defrost endpoint is protected by CRON_SECRET:
+
+  GET /api/cron/defrost
+  Authorization: Bearer <CRON_SECRET>
+
+Store the matching secret securely in the scheduler. Do not commit it to the
+repository or place it directly in a SQL migration.
+
+After resolving the scheduler:
+
+  1. Deploy current origin/main to Vercel production.
+  2. Confirm the defrost schedule still runs once per minute.
+  3. Confirm an unauthenticated coupon request returns 401, not 404:
+
+       curl -i https://softlife-platform.vercel.app/api/softlife/admin/coupons
+
+  4. Confirm an authenticated non-admin request returns 403.
+  5. Confirm an authenticated admin request returns the coupon list response.
+  6. Notify the mobile developer that production is ready.
+
+
+6. MOBILE RELEASE STATUS
+------------------------
+
+The mobile integration is committed and pushed separately:
+
+  softlife-haccp-mobile commit 99679f9
+  Add mobile controls and coupon management
+
+Android and iOS EAS builds were intentionally canceled after the production
+coupon endpoint returned 404. They should be restarted only after the backend
+deployment is confirmed, so a broken coupon section is not distributed to
+TestFlight or Android testers.
+
+END OF HANDOFF

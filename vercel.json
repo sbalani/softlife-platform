@@ -4,10 +4,6 @@
     {
       "path": "/api/cron/huaxin-sync",
       "schedule": "0 7 * * *"
-    },
-    {
-      "path": "/api/cron/defrost",
-      "schedule": "* * * * *"
     }
   ]
 }

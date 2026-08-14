@@ -15,11 +15,61 @@ import { getSessionProfile } from "@/lib/auth/session";
 import { recordCouponExchange } from "@/lib/data/change-log";
 import { refreshCouponSnapshots } from "@/lib/data/coupons";
 import { buildCouponContent, parseCouponUseCount } from "@/lib/coupon-content";
+import type { CreateCouponInput } from "@/lib/data/coupon-admin";
+import { createCouponRequest, getGrantedCouponRecords, grantCouponRequest, rejectCouponRequest } from "@/lib/data/coupon-requests";
 
 export type CouponResult = { ok: boolean; error?: string; warning?: string };
 
+function requestInput(fd: FormData): CreateCouponInput {
+  return {
+    couponType: String(fd.get("couponType") ?? "0"),
+    couponName: String(fd.get("couponName") ?? ""),
+    startTime: String(fd.get("startTime") ?? ""),
+    endTime: String(fd.get("endTime") ?? ""),
+    validDay: Number(fd.get("validDay") ?? 0),
+    totalCount: Number(fd.get("totalCount") ?? 0),
+    secondary: Number(fd.get("secondary") ?? 0),
+    machineIds: String(fd.get("machineIds") ?? "").split(",").map((id) => id.trim()).filter(Boolean),
+    localName: String(fd.get("localName") ?? ""),
+    money: Number(fd.get("money") ?? 0),
+    amount: Number(fd.get("amount") ?? 0),
+    productPosition: String(fd.get("productPosition") ?? ""),
+    productName: String(fd.get("productName") ?? ""),
+  };
+}
+
 async function isAdmin() {
   return (await getSessionProfile())?.role === "admin";
+}
+
+export async function requestCouponAction(_prev: CouponResult | null, fd: FormData): Promise<CouponResult> {
+  const session = await getSessionProfile();
+  if (!session) return { ok: false, error: "Sign in required." };
+  const result = await createCouponRequest(session, requestInput(fd));
+  if (result.ok) revalidatePath("/coupons");
+  return result;
+}
+
+export async function grantCouponRequestAction(requestId: string): Promise<CouponResult> {
+  const session = await getSessionProfile();
+  if (!session) return { ok: false, error: "Sign in required." };
+  const result = await grantCouponRequest(session, requestId);
+  revalidatePath("/coupons");
+  return result;
+}
+
+export async function rejectCouponRequestAction(requestId: string, note: string): Promise<CouponResult> {
+  const session = await getSessionProfile();
+  if (!session) return { ok: false, error: "Sign in required." };
+  const result = await rejectCouponRequest(session, requestId, note);
+  revalidatePath("/coupons");
+  return result;
+}
+
+export async function fetchGrantedCouponRecordsAction(requestId: string): Promise<{ records: unknown[]; error?: string }> {
+  const session = await getSessionProfile();
+  if (!session) return { records: [], error: "Sign in required." };
+  return getGrantedCouponRecords(session, requestId);
 }
 
 export async function createCouponAction(_prev: CouponResult | null, fd: FormData): Promise<CouponResult> {

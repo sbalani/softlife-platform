@@ -49,7 +49,7 @@ export async function middleware(request: NextRequest) {
   if (user && !isPublicPath(path)) {
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
     const role = profile?.role;
-    const franchiseePaths = ["/dashboard", "/analytics", "/alerts", "/remote-control"];
+    const franchiseePaths = ["/dashboard", "/analytics", "/alerts", "/remote-control", "/coupons"];
     const machineService = path.startsWith("/machine/");
     const allowed = role === "admin" || machineService || (role === "operator" && path.startsWith("/refills")) || (role === "franchisee" && franchiseePaths.some((prefix) => path === prefix || path.startsWith(`${prefix}/`)));
     if (!allowed) {

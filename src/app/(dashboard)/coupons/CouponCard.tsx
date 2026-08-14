@@ -16,6 +16,7 @@ const STATUS: Record<string, string> = { "0": "Unused", "1": "Used", "2": "Expir
 
 export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
   const [pending, startTransition] = useTransition();
+  const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [codes, setCodes] = useState<CodeRecord[] | null>(null);
   const [genCount, setGenCount] = useState("5");
@@ -57,32 +58,22 @@ export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
   const secondary = parseCouponSecondary(coupon.content);
 
   return (
-    <div className="rounded-2xl border border-line bg-white p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="font-display text-lg font-bold text-cocoa">{coupon.couponName ?? "Unnamed"}</h3>
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${TYPE_BADGE[ct] ?? "bg-cream text-taupe"}`}>{TYPE_NAME[ct] ?? ct}</span>
-          </div>
-          <p className="mt-1 text-xs text-taupe">
-            ID {coupon.couponId}
-            {coupon.startTime ? ` · ${coupon.startTime}` : ""}
-            {coupon.endTime ? ` → ${coupon.endTime}` : ""}
-            {coupon.validDay ? ` · ${coupon.validDay}d` : ""}
-          </p>
-          {coupon.deviceImeis && <p className="mt-0.5 text-xs text-taupe">Machines: {coupon.deviceImeis}</p>}
-          {coupon.content && <p className="mt-0.5 text-xs text-taupe">{coupon.content}</p>}
-          {secondary && <p className="mt-0.5 text-xs font-semibold text-cocoa">Uses per code: {secondary}</p>}
+    <details className="rounded-2xl border border-line bg-white p-5" onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className="cursor-pointer list-none">
+        <div className="flex items-center justify-between gap-4">
+          <div><div className="flex items-center gap-2"><h3 className="font-display text-lg font-bold text-cocoa">{coupon.couponName ?? "Unnamed"}</h3><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${TYPE_BADGE[ct] ?? "bg-cream text-taupe"}`}>{TYPE_NAME[ct] ?? ct}</span></div><p className="mt-1 text-xs text-taupe">ID {coupon.couponId}{coupon.startTime ? ` · ${coupon.startTime}` : ""}{coupon.endTime ? ` → ${coupon.endTime}` : ""}</p></div>
+          <span className="text-xs font-bold text-terracotta">{open ? "Hide coupon" : "Show coupon"}</span>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <button onClick={viewCodes} disabled={pending} className="text-xs font-bold text-terracotta hover:underline disabled:opacity-50">
-            {expanded ? "Hide codes" : "View codes"}
-          </button>
-          <button onClick={remove} disabled={pending} className="text-xs font-bold text-danger hover:underline disabled:opacity-50">Delete</button>
-        </div>
+      </summary>
+
+      <div className="mt-4 border-t border-line pt-4">
+        {coupon.validDay && <p className="text-xs text-taupe">Duration: {coupon.validDay} days</p>}
+        {coupon.deviceImeis && <p className="mt-1 text-xs text-taupe">Machines: {coupon.deviceImeis}</p>}
+        {coupon.content && <p className="mt-1 text-xs text-taupe">{coupon.content}</p>}
+        {secondary && <p className="mt-1 text-xs font-semibold text-cocoa">Uses per code: {secondary}</p>}
       </div>
 
-      <div className="mt-3 flex items-center gap-2 border-t border-line pt-3">
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
         <input
           type="number" min="1" max="100" value={genCount}
           onChange={(e) => setGenCount(e.target.value)}
@@ -91,6 +82,8 @@ export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
         <button onClick={generate} disabled={pending} className="rounded bg-cocoa px-3 py-1 text-[10px] font-bold text-white hover:opacity-90 disabled:opacity-50">
           Generate codes
         </button>
+        <button onClick={viewCodes} disabled={pending} className="px-2 text-xs font-bold text-terracotta hover:underline disabled:opacity-50">{expanded ? "Hide codes" : "View codes"}</button>
+        <button onClick={remove} disabled={pending} className="ml-auto text-xs font-bold text-danger hover:underline disabled:opacity-50">Delete</button>
         {msg && <span className="text-[10px] text-taupe">{msg}</span>}
       </div>
 
@@ -108,6 +101,6 @@ export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
           ) : codes ? <p className="text-xs text-taupe">No serial codes yet. Generate some above.</p> : <p className="text-xs text-taupe">Loading…</p>}
         </div>
       )}
-    </div>
+    </details>
   );
 }

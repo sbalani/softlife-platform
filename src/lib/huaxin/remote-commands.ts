@@ -6,7 +6,7 @@ export const HUAXIN_REMOTE_COMMANDS = [
   { command: "operate_closethawing", label: "Defrost off", note: "Stops defrosting", icon: "⏹", access: "remote" },
   { command: "operate_sellout", label: "Sold out", note: "Stops customer sales", icon: "⏸", access: "remote" },
   { command: "operate_onsale", label: "Resume sales", note: "Makes the machine available", icon: "▶", access: "remote" },
-  { command: "operate_make", label: "Test cup", note: "Dispenses one free cup", icon: "🍦", access: "remote" },
+  { command: "operate_make", label: "Free Cup", note: "Dispenses one free cup", icon: "🍦", access: "remote" },
   { command: "operate_android_setting", label: "Android settings", note: "Opens the Android system settings", icon: "⚙", access: "admin" },
   { command: "operate_config_set1", label: "Device settings 1", note: "Opens device parameter screen 1", icon: "⚙", access: "admin" },
   { command: "operate_config_set2", label: "Device settings 2", note: "Opens device parameter screen 2", icon: "⚙", access: "admin" },

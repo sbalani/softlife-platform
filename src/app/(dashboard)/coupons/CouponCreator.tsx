@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { addCouponDays, couponDaysBetween } from "@/lib/coupon-dates";
-import { createCouponAction, type CouponResult } from "./actions";
+import { createCouponAction, requestCouponAction, type CouponResult } from "./actions";
 
 const input = "rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa focus:border-terracotta focus:outline-none";
 const label = "mb-1 block text-[11px] uppercase tracking-wide text-taupe";
@@ -21,10 +21,11 @@ const INITIAL: Values = {
   productName: "", secondary: "1",
 };
 
-export function CouponCreator({ machines }: { machines: MachineOption[] }) {
-  const [res, action, pending] = useActionState<CouponResult | null, FormData>(createCouponAction, null);
+export function CouponCreator({ machines, request = false }: { machines: MachineOption[]; request?: boolean }) {
+  const [res, action, pending] = useActionState<CouponResult | null, FormData>(request ? requestCouponAction : createCouponAction, null);
   const [values, setValues] = useState(INITIAL);
-  const [selectedImeis, setSelectedImeis] = useState<string[]>([]);
+  const [selectedMachines, setSelectedMachines] = useState<string[]>([]);
+  const machineValue = (machine: MachineOption) => request ? machine.id : machine.imei;
   const set = (field: keyof Values, value: string) => setValues((current) => ({ ...current, [field]: value }));
   const changeStart = (startTime: string) => setValues((current) => ({ ...current, startTime, endTime: addCouponDays(startTime, Number(current.validDay)) }));
   const changeEnd = (endTime: string) => setValues((current) => ({ ...current, endTime, validDay: current.startTime ? String(couponDaysBetween(current.startTime, endTime)) : current.validDay }));
@@ -43,10 +44,10 @@ export function CouponCreator({ machines }: { machines: MachineOption[] }) {
       </div>
 
       <fieldset className="rounded-xl border border-line p-3">
-        <div className="mb-2 flex items-center justify-between gap-3"><legend className="text-[11px] font-bold uppercase tracking-wide text-taupe">Machines</legend><button type="button" onClick={() => setSelectedImeis(selectedImeis.length === machines.length ? [] : machines.map((machine) => machine.imei))} className="text-xs font-semibold text-terracotta">{selectedImeis.length === machines.length ? "Clear" : "Select all"}</button></div>
-        <input type="hidden" name="deviceImeis" value={selectedImeis.join(",")} />
-        <p className="mb-2 text-xs text-taupe">Select at least one machine. Huaxin requires explicit IMEIs.</p>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{machines.map((machine) => <label key={machine.id} className="flex cursor-pointer items-start gap-2 rounded-lg bg-cream/50 p-2 text-sm text-cocoa"><input type="checkbox" checked={selectedImeis.includes(machine.imei)} onChange={(event) => setSelectedImeis((current) => event.target.checked ? [...current, machine.imei] : current.filter((imei) => imei !== machine.imei))} className="mt-1 accent-terracotta" /><span><span className="block font-semibold">{machine.name}</span><span className="font-mono text-[10px] text-taupe">{machine.imei}</span></span></label>)}</div>
+        <div className="mb-2 flex items-center justify-between gap-3"><legend className="text-[11px] font-bold uppercase tracking-wide text-taupe">Machines</legend><button type="button" onClick={() => setSelectedMachines(selectedMachines.length === machines.length ? [] : machines.map(machineValue))} className="text-xs font-semibold text-terracotta">{selectedMachines.length === machines.length ? "Clear" : "Select all"}</button></div>
+        <input type="hidden" name={request ? "machineIds" : "deviceImeis"} value={selectedMachines.join(",")} />
+        <p className="mb-2 text-xs text-taupe">Select at least one machine.</p>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{machines.map((machine) => { const value = machineValue(machine); return <label key={machine.id} className="flex cursor-pointer items-start gap-2 rounded-lg bg-cream/50 p-2 text-sm text-cocoa"><input type="checkbox" checked={selectedMachines.includes(value)} onChange={(event) => setSelectedMachines((current) => event.target.checked ? [...current, value] : current.filter((selected) => selected !== value))} className="mt-1 accent-terracotta" /><span><span className="block font-semibold">{machine.name}</span><span className="font-mono text-[10px] text-taupe">{machine.imei}</span></span></label>; })}</div>
       </fieldset>
 
       <div className="rounded-xl border border-line bg-cream/40 p-3">
@@ -56,7 +57,7 @@ export function CouponCreator({ machines }: { machines: MachineOption[] }) {
         <label className="mt-3 block"><span className={label}>Uses per code</span><input name="secondary" type="number" min="1" step="1" required value={values.secondary} onChange={(event) => set("secondary", event.target.value)} className={`w-24 ${input}`} /><span className="mt-1 block text-[10px] text-taupe">Huaxin secondary-card count. Use 1 for a single-use code.</span></label>
       </div>
 
-      <div className="flex items-center gap-4"><button disabled={pending} className="rounded-lg bg-terracotta px-4 py-2 text-sm font-bold text-white disabled:opacity-60">{pending ? "Creating..." : "Create coupon"}</button>{res && <span className={`text-sm font-semibold ${res.warning ? "text-warning" : res.ok ? "text-sage" : "text-danger"}`}>{res.ok ? res.warning ?? "Created." : res.error}</span>}</div>
+      <div className="flex items-center gap-4"><button disabled={pending || (request && !!res?.ok)} className="rounded-lg bg-terracotta px-4 py-2 text-sm font-bold text-white disabled:opacity-60">{pending ? request ? "Requesting..." : "Creating..." : request && res?.ok ? "Request sent" : request ? "Request coupon" : "Create coupon"}</button>{res && <span className={`text-sm font-semibold ${res.warning ? "text-warning" : res.ok ? "text-sage" : "text-danger"}`}>{res.ok ? res.warning ?? (request ? "Request sent." : "Created.") : res.error}</span>}</div>
     </form>
   );
 }

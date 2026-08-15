@@ -160,4 +160,193 @@ Backend with the range route present:
 Standalone backend lint still has three pre-existing errors in dashboard
 product/settings files unrelated to this route. The production build passes.
 
+6. MOBILE RESPONSE TO PLATFORM REVIEW
+-------------------------------------
+
+Response date: 2026-08-15
+
+Mobile completion commit:
+
+  415cc0e Harden offline sync and session safety
+
+Commit 415cc0e is pushed to the mobile origin/main branch. EAS Android and iOS
+release builds remain paused pending platform review of this response.
+
+
+7. BLOCKER COMPLETION STATUS
+----------------------------
+
+Section 2 - Offline queues over 50 records: completed.
+
+  - Combined service visits and refill-only records are sent sequentially in
+    chunks of at most 50.
+  - Every successful chunk is validated and committed before the next starts.
+  - Accepted/rejected combined rows are updated atomically in SQLite.
+  - A failed later chunk leaves earlier accepted work settled and unsent work
+    pending.
+  - Transient failures retry after 1, 2, 4, 8, and 16 seconds while online.
+  - Reconnect and new enqueue events reset the bounded retry cycle.
+  - Protocol-invalid responses stop without applying or repeatedly retrying
+    the affected chunk.
+
+Section 3 - Catalog authorization scope: completed using approach B.
+
+  - Authorization identity includes uid, scope_version, role, tenant_id,
+    employer_kind, and sorted capabilities.
+  - Any authorization identity change rotates the process session generation
+    and clears machines, lots, protected response cache, and QueryClient data
+    before publishing the replacement session.
+  - Catalog/cache reads and writes are generation guarded.
+  - Protected writes and clears share a serialized queue, preventing an old
+    request from repopulating SQLite after logout or account/scope transition.
+
+Section 4 - Terminal authorization failures: completed.
+
+  - Refresh HTTP 401 and 403 are terminal.
+  - Ordinary protected API 401 responses use one shared refresh flight and
+    retry the original request once with the replacement token.
+  - Concurrent API 401 responses share the same refresh request.
+  - Query generic retry excludes 401, 403, aborts, stale sessions, stale cache
+    operations, and analytics contract mismatches.
+  - SecureStore now uses one versioned session envelope and migrates legacy
+    token/user keys.
+  - Terminal cleanup blocks protected UI until SecureStore, SQLite, and
+    QueryClient cleanup succeeds; failed native cleanup operations retry.
+
+Section 5 - Logout/in-flight cache race: completed.
+
+  - Session generation invalidates stale work before asynchronous cleanup.
+  - Active queries are cancelled and the process QueryClient is cleared.
+  - Protected SQLite writes are serialized with clears and check generation.
+  - Query keys include session generation.
+  - Push display is disabled until the current session's Expo token POST
+    succeeds. Logout clears pending notification responses and visible
+    notifications. The backend's expo_push_token upsert reassigns the unique
+    device token when a later account registers.
+
+Section 6 - Analytics range completeness: completed.
+
+  - Mobile always sends both from and to.
+  - A response is accepted/cached only when date_from, date_to, and
+    time_zone exactly match the requested Europe/Madrid range.
+  - A mismatched response never falls back silently and hides aggregate totals.
+  - sync.requestedFrom/requestedTo are checked for complete selected-range
+    coverage and an explicit historical completeness warning is shown.
+  - Every returned order is defensively filtered by its Europe/Madrid calendar
+    date before totals, charting, ranking, recent-order display, or empty state.
+  - Pull-to-refresh explicitly states that it does not backfill history.
+
+
+8. ADDITIONAL REVIEW ITEMS
+--------------------------
+
+  - Fleet and Analytics pull-to-refresh now perform lightweight query refetch
+    only.
+  - Full Huaxin fleet synchronization remains a separate confirmed admin
+    action on Fleet, with an up-to-five-minute warning and no historical
+    backfill claim.
+  - expo-network addNetworkStateListener replaces 30-second polling and drives
+    React Query reconnect plus outbox retry.
+  - Accepted partial outbox progress triggers query invalidation and a separate
+    bounded catalog-refresh retry, even if a later chunk fails.
+  - Coupon create/delete rotates the per-key disk-cache epoch and cancels the
+    current query before invalidation. Deletion updates memory optimistically;
+    creation hides the old list until a genuinely newer successful fetch.
+  - cached_responses has a seven-day fallback TTL, global expiry pruning, and
+    a maximum of 100 newest entries per user.
+  - Timestamps use Europe/Madrid on analytics and machine sales views.
+  - Labels say Pedidos netos where refunds/admin overrides are excluded.
+  - Zero-sales chart bars have zero height.
+  - Orders without a stable IMEI are kept ungrouped by order ID rather than
+    merged by display name.
+
+
+9. AUTOMATED TESTS ADDED
+------------------------
+
+Command:
+
+  npm test
+
+Result:
+
+  17 passed, 0 failed
+
+Covered pure regression boundaries:
+
+  - 51 refill-only records -> 50 + 1.
+  - 51 combined service visits -> 50 + 1.
+  - Second-chunk failure preserves first-chunk settlement.
+  - Incomplete sync results are not applied and are protocol failures.
+  - Concurrent 401 recovery uses one refresh flight.
+  - Refresh 403 terminates the session.
+  - Scope/capability authorization-key transitions.
+  - Scope-changing refresh installs the replacement session.
+  - Protected-write/logout ordering and stale-write rejection.
+  - Cache TTL and authorization fallback policy.
+  - Bounded retry/network-state policy.
+  - Response mismatch and historical coverage detection.
+  - Europe/Madrid filtering, net metric semantics, ungrouped machines.
+  - Madrid DST start/end and repeated-hour boundaries.
+
+Residual test gap:
+
+  Native SecureStore, expo-sqlite, notification, and network-listener behavior
+  is verified through typecheck/bundles and pure race-policy tests, not an
+  instrumented device integration suite.
+
+
+10. VERIFICATION RESULTS
+------------------------
+
+  npm run typecheck
+  Result: passed
+
+  npm test
+  Result: 17 passed, 0 failed
+
+  npx expo export --platform android
+  Result: passed
+
+  npx expo export --platform ios
+  Result: passed
+
+  npx expo install --check
+  Result: dependencies are up to date for Expo SDK 56
+
+  npx expo-doctor
+  Result: 21/22 checks passed
+
+The one Expo Doctor warning is the known Hermes V1 memory regression in SDK
+56. Expo's supported fix requires Expo SDK 57 / React Native 0.86.2 or later,
+which is outside this release-hardening change.
+
+npm audit result:
+
+  16 high, 8 moderate, 0 critical
+
+The reported paths are primarily Expo/Metro/React Native build-tool chains
+(image-size, nanoid, shell-quote, uuid, Metro, and xcode). npm's proposed
+forced fixes downgrade Expo to SDK 53 and React Native to 0.72, which is not a
+supported fix for this SDK 56 app. No npm audit fix --force was run. These
+should be reevaluated with the planned SDK 57 upgrade.
+
+
+11. BACKEND DEPENDENCIES
+------------------------
+
+No additional backend contract change is required for commit 415cc0e. Mobile
+uses the deployed inclusive Europe/Madrid from/to endpoint from backend commit
+84208e0. Explicit historical-coverage metadata or a controlled historical
+backfill remains a useful platform follow-up; until then the mobile warning is
+always shown when the latest sync range does not enclose the selected range.
+
+
+12. RELEASE STATUS
+------------------
+
+EAS release builds have not started. Please review mobile commit 415cc0e and
+this response. The mobile developer will only restart Android/iOS release
+builds after platform confirmation or explicit product-owner risk acceptance.
+
 END OF HANDOFF

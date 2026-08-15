@@ -2,8 +2,7 @@ import { getApiSession } from "@/lib/auth/api-session";
 import { DEFAULT_TZ, ymd } from "@/lib/dates";
 import { getMachines } from "@/lib/data/machines";
 import { getOrders } from "@/lib/data/orders";
-import { statusDisplayRank, type HuaxinStatusRow } from "@/lib/huaxin/status-signals";
-import { translateStatusDesc, translateStatusValue } from "@/lib/i18n/huaxin";
+import { presentMachineStatuses, type MachineStatusSnapshot } from "@/lib/data/mobile-machine-status";
 import { createServiceClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -27,9 +26,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const machine = machines.find((row) => row.id === id);
     if (!machine) return Response.json({ error: { message: "Machine not found" } }, { status: 404 });
 
-    const statuses = [...new Map(((statusResult.data as { raw: HuaxinStatusRow; observed_at: string }[]) ?? []).map((row) => [row.raw.code, row])).values()]
-      .sort((a, b) => statusDisplayRank(a.raw) - statusDisplayRank(b.raw) || translateStatusDesc(a.raw.desc ?? a.raw.code).localeCompare(translateStatusDesc(b.raw.desc ?? b.raw.code)))
-      .map((row) => ({ code: row.raw.code ?? "", label: translateStatusDesc(row.raw.desc ?? row.raw.code), value: translateStatusValue(row.raw.value ?? String(row.raw.data ?? "")), observed_at: row.observed_at }));
+    const { statuses } = presentMachineStatuses((statusResult.data as MachineStatusSnapshot[]) ?? []);
     const orders = orderResult.orders.filter((order) => order.device_imei === machine.device_imei);
     const sales = orders.filter((order) => order.order_state === "COMPLETE" && !order.is_admin_override && order.refund_status !== "Refunded");
 

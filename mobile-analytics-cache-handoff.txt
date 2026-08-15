@@ -349,4 +349,75 @@ EAS release builds have not started. Please review mobile commit 415cc0e and
 this response. The mobile developer will only restart Android/iOS release
 builds after platform confirmation or explicit product-owner risk acceptance.
 
+
+13. MOBILE MACHINE STATUS
+-------------------------
+
+Backend commit:
+
+  3db4f65 Expose mobile machine statuses
+
+Mobile commit:
+
+  e00427a Show live machine statuses
+
+Both commits are pushed to origin/main.
+
+Endpoint:
+
+  GET /api/softlife/machines/{machineUuid}/status
+
+Authentication and authorization:
+
+  - Requires a valid Supabase bearer token and machines.read.
+  - Uses the same mobile machine-assignment scope as GET /api/softlife/machines.
+  - Invalid UUIDs return 400; missing or unassigned machines return 404.
+  - The response does not include sales, orders, IMEI, or raw Huaxin payloads.
+
+Freshness behavior:
+
+  - A snapshot older than one minute triggers a scoped Huaxin refresh for only
+    the requested, authorized machine.
+  - A failed Huaxin refresh retains the last observed status rows.
+  - status_stale becomes true when the newest observation is over two hours old
+    or no usable observation time exists.
+  - Statuses are translated, deduplicated by code, and presented in operational
+    priority order.
+
+Mobile behavior:
+
+  - The normal /machine/[id] page displays current statuses as responsive cards.
+  - Statuses refresh when the page receives focus and on pull-to-refresh.
+  - The page shows the observation time and warns when the snapshot is stale.
+  - Online/normal states, shortages, and actionable cup faults use distinct
+    visual tones.
+
+Verification completed locally:
+
+  Backend test:mobile-status: 2 passed, 0 failed.
+  Backend test:mobile-auth: 11 passed, 0 failed.
+  Backend production build: passed.
+  Mobile typecheck: passed.
+  Mobile tests: 17 passed, 0 failed.
+  Android and iOS Expo exports: passed.
+
+
+14. MACHINE STATUS DEPLOYMENT GATE
+----------------------------------
+
+Do not distribute mobile commit e00427a until the production platform serves
+GET /api/softlife/machines/{machineUuid}/status from backend commit 3db4f65.
+
+Platform checklist:
+
+  [x] Push backend commit 3db4f65 to origin/main.
+  [ ] Confirm the Vercel production deployment is Ready.
+  [ ] Verify an assigned machines.read user receives status data.
+  [ ] Verify an unassigned user cannot retrieve another machine's status.
+  [ ] Verify a stale snapshot attempts a scoped refresh and safely falls back.
+  [ ] Notify the mobile developer that production machine status is ready.
+
+EAS Android and iOS release builds remain paused until this checklist is
+confirmed or the product owner explicitly accepts the deployment risk.
+
 END OF HANDOFF

@@ -10,12 +10,27 @@ export async function GET(req: Request) {
   if (!session) return Response.json({ error: { message: "Unauthorized" } }, { status: 401 });
   if (session.role !== "admin") return Response.json({ error: { message: "Forbidden" } }, { status: 403 });
   try {
-    const requested = new URL(req.url).searchParams.get("date");
-    const date = requested && /^\d{4}-\d{2}-\d{2}$/.test(requested) ? requested : ymd(new Date(), DEFAULT_TZ);
-    const result = await getOrders({ dateFrom: date, dateTo: date, timeZone: DEFAULT_TZ }, await createServiceClient());
+    const params = new URL(req.url).searchParams;
+    const requestedDate = params.get("date");
+    const today = ymd(new Date(), DEFAULT_TZ);
+    const dateFrom = params.get("from") ?? requestedDate ?? today;
+    const dateTo = params.get("to") ?? requestedDate ?? dateFrom;
+    const validDate = (value: string) => {
+      const timestamp = Date.parse(`${value}T00:00:00Z`);
+      return /^\d{4}-\d{2}-\d{2}$/.test(value)
+        && Number.isFinite(timestamp)
+        && new Date(timestamp).toISOString().slice(0, 10) === value;
+    };
+    const rangeDays = (Date.parse(`${dateTo}T00:00:00Z`) - Date.parse(`${dateFrom}T00:00:00Z`)) / 86_400_000;
+    if (!validDate(dateFrom) || !validDate(dateTo) || !Number.isFinite(rangeDays) || rangeDays < 0 || rangeDays > 89) {
+      return Response.json({ error: { message: "Use a valid date range of up to 90 days." } }, { status: 400 });
+    }
+    const result = await getOrders({ dateFrom, dateTo, timeZone: DEFAULT_TZ }, await createServiceClient());
     if (result.readError) throw new Error(result.readError);
     return Response.json({
-      date,
+      date: dateFrom === dateTo ? dateFrom : `${dateFrom}/${dateTo}`,
+      date_from: dateFrom,
+      date_to: dateTo,
       time_zone: DEFAULT_TZ,
       sync: result.sync,
       orders: result.orders.map((order) => ({

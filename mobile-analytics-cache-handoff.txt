@@ -1,0 +1,163 @@
+SOFTLIFE MOBILE ANALYTICS AND OFFLINE-CACHE HANDOFF
+===================================================
+
+Status date: 2026-08-15
+
+Scope
+-----
+
+This handoff coordinates the mobile analytics release with the backend order
+API. It covers the new order date-range contract, deployment dependency, and
+the mobile cache/refresh behavior. It does not change Huaxin synchronization,
+coupon behavior, remote controls, or database schemas in the platform repo.
+
+
+1. MOBILE STATUS
+----------------
+
+Mobile repository:
+
+  sbalani/softlife-haccp-mobile
+
+Mobile commit:
+
+  4e18866 Add offline data and sales analytics
+
+Implemented mobile behavior:
+
+  - The Orders tab is now Analytics.
+  - The default view covers the latest 7 Europe/Madrid calendar days.
+  - Admins can switch between Today, 7 days, and 30 days.
+  - Metrics include net sales, completed orders, units, average ticket,
+    daily sales, top machines, and the 50 most recent returned orders.
+  - Fleet, analytics/orders, admin machine details, alerts, and coupons are
+    cached per user and scope in expo-sqlite.
+  - Cached data remains visible during transient/offline failures, but is not
+    used to bypass HTTP 401 or 403 responses.
+  - Cached reads retry every 15 seconds and React Query receives network
+    reconnect state from expo-network.
+  - Home, fleet, analytics, machine details, alerts, and coupons use native
+    pull-to-refresh instead of dedicated refresh buttons.
+  - A successfully synchronized refill/cleaning visit forces a fresh machine
+    and lot catalog request and invalidates fleet/order/machine/alert queries.
+
+
+2. BACKEND CONTRACT REQUIRED BY MOBILE
+---------------------------------------
+
+Endpoint:
+
+  GET /api/softlife/admin/orders
+
+Authentication and authorization:
+
+  Authorization: Bearer <Supabase access token>
+  401 when the token is missing or invalid.
+  403 when the authenticated user is not an admin.
+
+Backward-compatible single-day request:
+
+  GET /api/softlife/admin/orders?date=2026-08-15
+
+New date-range request:
+
+  GET /api/softlife/admin/orders?from=2026-08-09&to=2026-08-15
+
+Rules:
+
+  - from and to use YYYY-MM-DD.
+  - Dates are interpreted as Europe/Madrid calendar dates.
+  - The range is inclusive.
+  - from must not be after to.
+  - The maximum inclusive range is 90 days.
+  - Invalid or impossible dates return HTTP 400.
+  - Omitting all date parameters retains the existing current-day behavior.
+
+Success response additions:
+
+  {
+    "date": "2026-08-09/2026-08-15",
+    "date_from": "2026-08-09",
+    "date_to": "2026-08-15",
+    "time_zone": "Europe/Madrid",
+    "sync": null,
+    "orders": []
+  }
+
+The existing order object shape is unchanged. date remains for compatibility;
+date_from and date_to describe the normalized range. A single-day response may
+continue returning date as YYYY-MM-DD.
+
+
+3. BACKEND IMPLEMENTATION IN THIS CHANGE
+----------------------------------------
+
+Relevant file:
+
+  src/app/api/softlife/admin/orders/route.ts
+
+The route change included with this handoff:
+
+  - Preserves the date query parameter.
+  - Adds inclusive from/to parameters.
+  - Validates real calendar dates and a maximum 90-day range.
+  - Calls getOrders once with dateFrom/dateTo and DEFAULT_TZ.
+  - Returns date_from and date_to without changing order records.
+
+No Supabase migration is required. The existing getOrders implementation
+already supports dateFrom/dateTo and filters records by the requested timezone.
+
+
+4. DEPLOYMENT DEPENDENCY
+------------------------
+
+The mobile app's 7-day and 30-day views require this backend route change in
+production. Do not distribute the new mobile build until Vercel production is
+serving from/to requests. The current production API may ignore those params
+until this change is deployed, which would make range totals look like today's
+totals.
+
+Backend developer checklist:
+
+  [ ] Review the route contract and implementation.
+  [ ] Merge/push the backend handoff commit to origin/main if not already there.
+  [ ] Confirm the Vercel production deployment is Ready.
+  [ ] Test an authenticated admin 7-day request.
+  [ ] Confirm date= remains backward compatible.
+  [ ] Confirm invalid dates, reversed ranges, and ranges over 90 days return 400.
+  [ ] Confirm unauthenticated and non-admin requests still return 401/403.
+  [ ] Notify the mobile developer that production range analytics is ready.
+
+
+5. VERIFICATION COMPLETED LOCALLY
+---------------------------------
+
+Mobile:
+
+  npm run typecheck
+  Result: passed
+
+  npx expo export --platform android
+  Result: passed
+
+  npx expo export --platform ios
+  Result: passed
+
+Backend with the range route present:
+
+  npm run build
+  Result: passed
+
+  npx tsc --noEmit
+  Result: passed
+
+  npm run test:analytics
+  Result: 5 passed, 0 failed
+
+  npm run test:order-persistence
+  Result: 6 passed, 0 failed
+
+Standalone backend lint still has three pre-existing errors in dashboard
+product/settings files unrelated to this route. The production build passes.
+
+END OF HANDOFF

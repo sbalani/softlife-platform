@@ -411,7 +411,8 @@ GET /api/softlife/machines/{machineUuid}/status from backend commit 3db4f65.
 Platform checklist:
 
   [x] Push backend commit 3db4f65 to origin/main.
-  [ ] Confirm the Vercel production deployment is Ready.
+  [x] Confirm the Vercel production deployment for faa1916 is Ready.
+  [x] Confirm the production endpoint rejects an unauthenticated request with 401.
   [ ] Verify an assigned machines.read user receives status data.
   [ ] Verify an unassigned user cannot retrieve another machine's status.
   [ ] Verify a stale snapshot attempts a scoped refresh and safely falls back.

@@ -1,364 +1,351 @@
-SOFTLIFE BACKEND HANDOVER: FRANCHISEE REMOTE-CONTROL PERMISSIONS
-================================================================
+SOFTLIFE PLATFORM NOTES FOR MOBILE DEVELOPER
+============================================
 
-Scope
------
+Status date: 2026-08-15
+Reviewed mobile commit: 4e18866 Add offline data and sales analytics
+Reviewed backend commit: 84208e0 Add mobile analytics date ranges
 
-This handover covers only franchisee remote-control permissions, machine assignments, command authorization, the web admin/remote-control changes, and the mobile command API. It does not cover coupons or Android machine-opening work.
+Communication ownership
+-----------------------
 
+This is the platform team's handoff file for the mobile developer.
 
-1. BACKEND STATUS
------------------
+The mobile developer's mobile-analytics-cache-handoff.txt was reviewed but was
+not modified. Please post the mobile response and completion status in the
+mobile-owned handoff file.
 
-The remote-permissions backend work is complete and is present on origin/main.
 
-Key commit:
-
-  b3a7c95 Scope franchisee operations by assignment
-
-Later related commits:
-
-  f11f867 Renamed Test cup to Free Cup. The command ID remains operate_make.
-  f726c3e Added automated-defrost safety and interactive command leases.
-
-The production mobile endpoint is live at:
-
-  GET  https://softlife-platform.vercel.app/api/softlife/machines/{machineUuid}/commands
-  POST https://softlife-platform.vercel.app/api/softlife/machines/{machineUuid}/commands
-
-An unauthenticated production request currently reaches the route and returns HTTP 401 Unauthorized, confirming that the route is deployed.
-
-
-2. DATABASE MIGRATION AND STORAGE
----------------------------------
-
-Migration:
-
-  supabase/migrations/20260814120000_franchisee_remote_permissions.sql
-
-Important terminology correction: there is no franchisee_remote_permissions table. The migration adds this column to public.tenants:
-
-  remote_commands TEXT[] NOT NULL DEFAULT ARRAY['operate_make']::TEXT[]
-
-Therefore permissions are stored once per franchisee tenant, not once per user or machine.
-
-Behavior:
-
-  - Existing and new franchisees default to operate_make.
-  - An empty array disables every franchisee remote command.
-  - Application code validates values against the configurable command allow-list.
-  - There is currently no database CHECK constraint restricting array values.
-
-Production status:
-
-  - Migration 20260814120000 is applied to the linked production database.
-  - Defrost/lease migrations 20260814141200, 20260814141300, and 20260814141400 are also applied.
-  - Every current production franchisee tenant currently has only [operate_make].
-
-
-3. FRANCHISEE COMMAND PERMISSIONS
----------------------------------
-
-The commands that an admin may grant to a franchisee are:
-
-  operate_openrefrigeration   Fridge on
-  operate_closerefrigeration  Fridge off
-  operate_openthawing         Defrost on
-  operate_closethawing        Defrost off
-  operate_sellout             Sold out
-  operate_onsale              Resume sales
-  operate_make                Free Cup
-
-Source of truth:
-
-  src/lib/huaxin/remote-commands.ts
-
-Commands outside this configurable list are not available to franchisees, even if an invalid value somehow appears in remote_commands.
-
-
-4. TEST CUP / FREE CUP
-----------------------
-
-The Huaxin command historically called Test Cup is:
-
-  operate_make
-
-The current server label is:
-
-  Free Cup
-
-The behavior is unchanged: it dispenses one free cup. The migration grants operate_make by default to every franchisee.
-
-Mobile should use the command identifier for behavior and render the label returned by GET /commands. Do not hard-code Test Cup as a separate command because it does not exist separately.
-
-operate_make is not safe during an active automated defrost. It will be omitted from GET /commands while defrost is active, and POST will reject it.
-
-
-5. ADMIN PERMISSION UI
-----------------------
-
-Admin UI location:
-
-  /franchisees
-
-Relevant files:
-
-  src/app/(dashboard)/franchisees/RemoteCommandPermissions.tsx
-  src/app/(dashboard)/franchisees/actions.ts
-  src/app/(dashboard)/franchisees/page.tsx
-
-The UI displays checkboxes for the seven configurable commands on franchisee tenant rows.
-
-Server action:
-
-  setFranchiseeRemoteCommands(tenantId, commands)
-
-Authorization and validation:
-
-  - Requires an admin session.
-  - Deduplicates selected commands.
-  - Rejects unknown or admin-only commands.
-  - Updates only tenants where kind='franchisee'.
-  - Revalidates /franchisees and /remote-control.
-  - An empty selection is valid and disables all franchisee controls.
-
-
-6. WEB REMOTE-CONTROL PAGE
----------------------------
-
-Relevant files:
-
-  src/app/(dashboard)/remote-control/page.tsx
-  src/app/(dashboard)/remote-control/RemoteControlPanel.tsx
-  src/app/(dashboard)/machines/[imei]/actions.ts
-  src/lib/data/accessible-machines.ts
-
-Page behavior:
-
-  - Admins and franchisees can open /remote-control.
-  - Operators are redirected and cannot use remote control.
-  - Admins receive the full backend command catalog.
-  - Franchisees receive only the commands granted in tenants.remote_commands and present in the configurable allow-list.
-  - Franchisees only see currently assigned, deployed machines.
-  - The user must confirm a command before it is sent.
-  - The page displays a clear empty state if no controls are granted.
-
-Server action authorization is repeated on the server. A user cannot bypass permissions by modifying the browser UI.
-
-The browser server action checks:
-
-  - User is admin or franchisee, not operator.
-  - Franchisee has a tenant_id.
-  - Command is configurable and granted to that tenant.
-  - Machine has a current date-effective assignment to that tenant.
-  - No incompatible automated-defrost run is active.
-  - The interactive command lease can be acquired.
-
-
-7. MACHINE / FRANCHISEE ASSIGNMENTS
-------------------------------------
-
-Canonical table:
-
-  public.machine_franchisee_assignments
-
-Relevant fields:
-
-  machine_id
-  tenant_id
-  start_date
-  end_date
-
-Relevant code:
-
-  src/app/(dashboard)/machines/[imei]/assignment-actions.ts
-  src/lib/data/accessible-machines.ts
-  src/lib/auth/mobile-authorization.ts
-
-Rules:
-
-  - Assignment administration requires an admin session.
-  - Date ranges cannot overlap for the same machine.
-  - Overlap prevention exists in application validation and a database exclusion constraint.
-  - Remote-control authorization queries machine_franchisee_assignments directly.
-  - Authorization does not rely on the legacy machines.customer_id field.
-  - Mobile evaluates franchisee assignment dates using Europe/Madrid calendar dates.
-  - Franchisees can only access deployed=true machines.
-  - Admin mobile access is unrestricted by franchisee assignment.
-
-The client must use the machine UUID from /api/softlife/machines, not the IMEI, in the commands endpoint path.
-
-
-8. MOBILE AUTHORIZATION
-------------------------
-
-Authentication header:
-
-  Authorization: Bearer <Supabase access token>
-
-Capabilities:
-
-  - admin: has remote.basic
-  - franchisee: has remote.basic
-  - operator: does not have remote.basic
-
-The backend rechecks the current profile, role, tenant, assignment, deployment state, tenant command grants, and defrost state on every request. The mobile app must not treat a previously downloaded permission list as permanent.
-
-
-9. MOBILE API: LIST COMMANDS
------------------------------
-
-Request:
-
-  GET /api/softlife/machines/{machineUuid}/commands
-
-Success response:
-
-  {
-    "machine_id": "machine-uuid",
-    "commands": [
-      {
-        "command": "operate_make",
-        "label": "Free Cup",
-        "note": "Dispenses one free cup"
-      }
-    ]
-  }
-
-Mobile integration rule:
-
-Always call GET /commands and render the returned list. Do not hard-code role permissions or assume operate_make is always currently available. The response accounts for tenant grants and active defrost restrictions.
-
-
-10. MOBILE API: SEND COMMAND
------------------------------
-
-Request:
-
-  POST /api/softlife/machines/{machineUuid}/commands
-  Content-Type: application/json
-  Authorization: Bearer <Supabase access token>
-
-Body:
-
-  {
-    "command": "operate_make"
-  }
-
-Success response:
-
-  {
-    "ok": true,
-    "code": "200",
-    "message": "success"
-  }
-
-Relevant errors:
-
-  400  Invalid machine ID
-  401  Unauthorized
-  403  Forbidden, role lacks remote.basic
-  403  Command not allowed
-  404  Machine not found or not assigned to you
-  409  Machine is not available for remote control
-  409  Command blocked by an automated defrost or unresolved intervention
-  502  Huaxin rejected the command
-  502  Command result could not be confirmed
-  503  Backend or Huaxin configuration unavailable
-
-If the backend returns HTTP 502 with:
-
-  The command could not be confirmed. Do not retry automatically.
-
-the mobile app must not retry automatically. The machine may have received the command even though confirmation failed.
-
-
-11. DEFROST SAFETY
+1. RELEASE DECISION
 -------------------
 
-Only these commands are considered safe while an automated-defrost run is active:
+Do not start the Android/iOS EAS release builds yet.
 
-  operate_sellout
-  operate_closethawing
-  operate_openrefrigeration
-  operate_status
+The backend date-range route is deployed, and the mobile app typechecks, but
+the current mobile implementation has offline-queue, authorization-cache, and
+analytics-completeness issues that should be fixed before distribution.
 
-Franchisees can only receive the intersection of this safety list and their tenant permissions. operate_status is admin-only, so it is not exposed to franchisees.
-
-All non-safe commands, including operate_make, require an interactive command lease. The lease is refused while an automated run or unresolved intervention owns the machine.
+Release-blocking items are sections 2 through 6 below.
 
 
-12. AUDIT LOGGING
------------------
+2. BLOCKER: OFFLINE QUEUES OVER 50 RECORDS
+------------------------------------------
 
-Mobile command attempts are written to public.machine_change_log.
+Current mobile behavior:
 
-Success or confirmed Huaxin rejection:
+  src/lib/sync/SyncContext.tsx sends every pending service visit or refill in
+  one request.
 
-  action = remote_command
+Backend limits:
 
-Transport or unconfirmed failure:
+  POST /softlife/service-visits/sync accepts at most 50 records.
+  POST /softlife/reposicion/sync accepts at most 50 records.
 
-  action = remote_command_failed
+Failure mode:
 
-Audit metadata includes:
+  If 51 or more records accumulate offline, the backend returns HTTP 400.
+  Every retry sends the same oversized batch, so none of the records can ever
+  synchronize.
 
-  source = mobile
-  role = current user role
-  actor ID and email
-  machine ID and IMEI
-  command identifier
+Required mobile change:
+
+  - Split service visits into sequential chunks of at most 50.
+  - Split refill-only records into sequential chunks of at most 50.
+  - Apply accepted/rejected results after every successful chunk.
+  - Stop on a transient/network failure and leave only unsent records pending.
+  - A permanent rejection in one chunk must not corrupt accepted records.
+  - Add automatic retry with bounded backoff while the device remains online.
+
+Acceptance tests:
+
+  [ ] 51 refill-only records synchronize as 50 + 1.
+  [ ] 51 combined service visits synchronize as 50 + 1.
+  [ ] An error in the second chunk does not resend the accepted first chunk.
+  [ ] A transient failure retries without requiring another outbox change.
 
 
-13. TESTS AND VERIFICATION
+3. BLOCKER: CATALOG CACHE IS NOT SCOPE-VERSIONED
+------------------------------------------------
+
+Current mobile behavior:
+
+  HTTP response cache keys include scope_version.
+  SQLite machines and lots are keyed only by owner_user_id.
+  AuthContext clears the catalog when the user ID changes, but not when the
+  same user's scope_version, role, tenant, or capabilities change.
+
+Failure mode:
+
+  A user can lose a machine assignment, receive a newer scope_version, fail to
+  refresh while offline, and still see/use the machine and lots from the old
+  scope. The backend will eventually reject submitted work, but the mobile app
+  should not offer unauthorized cached operations in the first place.
+
+Required mobile change:
+
+  Choose one safe approach:
+
+  A. Store scope_version with machine/lot rows and query by user + scope; or
+  B. Clear machines, lots, and protected response caches before applying a
+     session where scope_version, role, tenant_id, or capabilities changed.
+
+  Do not retain old-scope catalog rows when the new-scope refresh fails.
+
+Acceptance tests:
+
+  [ ] Same user ID with incremented scope_version cannot read old machines.
+  [ ] Assignment removal while offline does not expose old machine actions.
+  [ ] Role/capability downgrade clears protected cached data.
+  [ ] Account switching never displays the previous account's data.
+
+
+4. BLOCKER: TERMINAL AUTHORIZATION FAILURES
+-------------------------------------------
+
+Current mobile behavior:
+
+  AuthContext treats refresh HTTP 401 as terminal but treats HTTP 403 as a
+  transient failure and restores/retains the cached session.
+
+Backend behavior:
+
+  POST /softlife/auth/refresh returns HTTP 403 when the Supabase user exists
+  but the SoftLife profile is missing or no longer valid.
+
+Failure mode:
+
+  A removed/disabled profile remains locally authenticated with its old role,
+  capabilities, token, and offline catalog.
+
+Required mobile change:
+
+  - Treat refresh HTTP 401 and 403 as terminal.
+  - Atomically clear SecureStore session, protected SQLite cache, and React
+    Query data on terminal authorization failure.
+  - For ordinary API 401 responses, attempt one single-flight token refresh
+    and retry the request once.
+  - If refresh fails with 401/403, log out atomically.
+  - Do not retry API 401/403 through React Query's generic retry policy.
+
+Acceptance tests:
+
+  [ ] Startup refresh 403 clears the local session.
+  [ ] Scheduled refresh 403 clears the local session.
+  [ ] Concurrent API 401 responses perform only one refresh request.
+  [ ] Failed refresh clears protected Query and SQLite data.
+
+
+5. BLOCKER: LOGOUT / IN-FLIGHT CACHE RACE
+-----------------------------------------
+
+Current mobile behavior:
+
+  Logout clears SQLite but does not cancel React Query requests or remove the
+  process-wide QueryClient data. A request that finishes after clearCatalog()
+  can write the old user's response back into SQLite.
+
+Required mobile change:
+
+  - Cancel active protected queries before clearing local data.
+  - Remove protected/all QueryClient data during logout and account switch.
+  - Add an auth/session generation check before fetchCached writes SQLite.
+  - Ensure a response belonging to an old session cannot update state/cache.
+
+Acceptance tests:
+
+  [ ] Logout racing an in-flight fleet request leaves no response cache rows.
+  [ ] Logout racing catalog refresh cannot repopulate machine/lot data.
+  [ ] Logging into another account cannot reveal the previous account's data.
+
+
+6. BLOCKER: ANALYTICS RANGE COMPLETENESS
+----------------------------------------
+
+Backend route now deployed:
+
+  GET /softlife/admin/orders?from=YYYY-MM-DD&to=YYYY-MM-DD
+
+Production verification:
+
+  Backend commit 84208e0 is deployed successfully.
+  The route exists and returns 401 without authentication.
+  Production currently stores 703 orders from 2026-07-01 onward.
+
+Important limitation:
+
+  The sync object returned by getOrders describes the latest fleet sync, not
+  guaranteed coverage of the selected analytics range.
+
+  Current production sync runs cover only yesterday and today. Pulling the
+  30-day view does not backfill all 30 days. Historical records already in the
+  database are returned, but late-uploaded historical sales may be missing.
+
+Current mobile problem:
+
+  The screen only checks sync.status and failedMachines. It can show a 7-day or
+  30-day range as complete even when sync.requestedFrom/requestedTo cover only
+  two days.
+
+Required mobile change now:
+
+  - Verify response date_from/date_to exactly match the requested range.
+  - If they do not match, do not calculate/display confident range totals.
+  - Compare sync.requestedFrom/requestedTo with the selected range.
+  - Show an explicit historical-coverage warning whenever the sync range does
+    not cover the selected range.
+  - Defensively filter returned orders to the requested Europe/Madrid dates.
+  - Do not claim that pull-to-refresh backfilled the selected historical range.
+
+Backend follow-up:
+
+  The platform should add explicit range coverage metadata and/or a controlled
+  historical backfill operation. Until then, the mobile warning is required.
+
+Acceptance tests:
+
+  [ ] Response range mismatch is detected and visibly reported.
+  [ ] 30-day selection with a two-day sync shows incomplete-coverage warning.
+  [ ] Orders outside the requested Madrid range do not affect metrics.
+  [ ] Madrid midnight and DST boundaries are covered by tests.
+
+
+7. PULL-TO-REFRESH MUST NOT RUN FULL FLEET SYNC
+-----------------------------------------------
+
+Current mobile behavior:
+
+  Pull-to-refresh on Analytics and Fleet calls POST /softlife/admin/sync.
+
+That endpoint performs a fleet-wide Huaxin operation: device status, menus,
+media, temperatures, coupons, orders, and alert notifications. It can take up
+to five minutes and currently synchronizes only yesterday/today orders.
+
+Required mobile change:
+
+  - Pull-to-refresh should call React Query refetch only.
+  - Keep full upstream synchronization as a separate, explicit, clearly
+    labeled admin action with confirmation/progress.
+  - Do not imply that full sync refreshes a selected 7/30-day historical range.
+
+
+8. CACHE RETRY, INVALIDATION, AND RETENTION
+-------------------------------------------
+
+Required improvements:
+
+  - Use a network-state listener rather than only 30-second polling so pending
+    writes and cached queries resume promptly on reconnect.
+  - Add bounded retry/backoff for transient outbox failures while online.
+  - After successful coupon create/delete, invalidate or update the disk cache
+    before fallback can restore the known-stale pre-mutation list.
+  - Add TTL/retention limits for cached_responses. Date-keyed analytics entries
+    currently accumulate indefinitely.
+  - Keep 401/403 excluded from offline fallback.
+
+Acceptance tests:
+
+  [ ] Reconnect triggers prompt query refetch and outbox synchronization.
+  [ ] Successful coupon deletion cannot reappear from stale disk cache.
+  [ ] Old date-range cache rows are evicted by documented policy.
+
+
+9. ANALYTICS PRESENTATION CORRECTIONS
+-------------------------------------
+
+Required mobile changes:
+
+  - Format order and sync timestamps using data.time_zone (Europe/Madrid), not
+    the phone's local timezone, or explicitly label them as device-local.
+  - Rename "Pedidos" to "Pedidos netos" because the metric excludes refunded
+    and admin-override completed orders; alternatively show separate counts.
+  - Zero-sales days should render zero-height/empty bars, not a 3-pixel sale.
+  - Do not group different machines by the same fallback display name when
+    device_imei is missing. Use a stable identifier when the API provides one,
+    or label those records as ungrouped.
+
+
+10. BACKEND RANGE CONTRACT NOTES
+--------------------------------
+
+Current supported requests:
+
+  GET /softlife/admin/orders?date=2026-08-15
+  GET /softlife/admin/orders?from=2026-08-09&to=2026-08-15
+
+The date range is inclusive, Europe/Madrid, and limited to 90 days.
+
+Mobile should always send both from and to for a range. Do not mix date with
+from/to and do not send only one range bound.
+
+Mobile should require:
+
+  response.date_from === requested from
+  response.date_to === requested to
+  response.time_zone === Europe/Madrid
+
+
+11. TEST COVERAGE REQUIRED
 --------------------------
 
-Verified on 2026-08-14:
+The mobile repository currently has no automated test suite or test script.
+Typecheck and Expo export are useful but do not verify cache/auth correctness.
 
-  npm run test:change-log
-  Result: 12 passed, 0 failed
+Add focused automated tests for:
 
-  npm run test:mobile-auth
-  Result: 1 passed, 0 failed
-
-  npm run build
-  Result: production build passed
-
-The current tests verify the 19-command backend catalog, the default franchisee command operate_make, and basic mobile role capabilities.
-
-Known test gaps:
-
-  - No route-level GET/POST command API tests.
-  - No server-action tests for permission assignment.
-  - No assignment-boundary tests.
-  - No deployed/undeployed authorization tests.
-  - No automated-defrost race or lease tests.
-  - No direct tests of audit-log failures.
+  - Batch chunking and partial synchronization.
+  - Terminal 401/403 handling and single-flight refresh.
+  - Logout/account-switch races.
+  - scope_version catalog isolation.
+  - fetchCached fallback and mutation invalidation.
+  - Cache TTL/eviction.
+  - Madrid date range generation and DST boundaries.
+  - Analytics range-response mismatch.
+  - Refund/admin-override metric semantics.
 
 
-14. DEPLOYMENT STATUS
----------------------
+12. DEPENDENCY AUDIT
+--------------------
 
-Confirmed:
+npm audit currently reports 16 high and 8 moderate findings, mainly through
+Expo/Metro build dependencies (including image-size, nanoid, shell-quote, and
+uuid chains).
 
-  - Relevant backend commits are on origin/main.
-  - Production Supabase has the remote_commands column.
-  - Production Supabase has the remote-permission and defrost-safety migrations.
-  - Current production franchisees default to operate_make only.
-  - The Vercel mobile commands route is live and enforcing authentication.
-  - Backend tests and the production build pass locally.
-
-Mobile integration can proceed against the deployed GET and POST commands endpoints.
+Do not run npm audit fix --force blindly because it proposes an Expo downgrade.
+Review supported Expo 56 dependency updates and document what can or cannot be
+resolved before release.
 
 
-15. KNOWN BACKEND CAVEATS
--------------------------
+13. VERIFIED DURING PLATFORM REVIEW
+-----------------------------------
 
-  - There is no dedicated franchisee_remote_permissions table; permissions are an array on tenants.
-  - There is no database CHECK constraint on tenants.remote_commands.
-  - Route-level permission tests are still missing.
-  - The web server action uses a UTC date for assignment checks, while mobile uses Europe/Madrid. This can differ briefly around midnight.
-  - The web command action does not explicitly recheck deployed=true, although the web page only lists deployed machines. The mobile API does enforce deployed=true.
-  - The mobile audit insert is best-effort; a command can succeed even if audit logging fails.
+  Mobile commit 4e18866:
+    npm run typecheck: passed
 
-END OF HANDOVER
+  Backend commit 84208e0:
+    Vercel deployment: Ready
+    Production unauthenticated range request: HTTP 401
+
+  Production order storage:
+    Earliest order: 2026-07-01
+    Stored orders at review time: 703
+
+  Production latest sync coverage at review time:
+    requested_from: 2026-08-14
+    requested_to: 2026-08-15
+    status: succeeded
+
+
+14. MOBILE RESPONSE REQUEST
+---------------------------
+
+Please update the mobile-owned handoff with:
+
+  - Commit SHA(s) addressing each blocker.
+  - Automated tests added and their results.
+  - Typecheck and Android/iOS Expo export results.
+  - Any blocker requiring a backend contract change.
+  - Whether EAS builds remain paused or have started.
+
+Do not start EAS release builds until sections 2 through 6 pass their
+acceptance criteria or the product owner explicitly accepts the residual risk.
+
+END OF PLATFORM NOTES

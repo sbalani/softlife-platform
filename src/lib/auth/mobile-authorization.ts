@@ -2,12 +2,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SessionProfile } from "./session.ts";
 import { ymd } from "../dates.ts";
 
-export type MobileCapability = "machines.read" | "service.refill" | "service.clean" | "alerts.read" | "recall.read" | "remote.basic";
+export type MobileCapability = "machines.read" | "analytics.read" | "service.refill" | "service.clean" | "alerts.read" | "recall.read" | "remote.basic";
 
 export const MOBILE_CAPABILITIES: Record<SessionProfile["role"], MobileCapability[]> = {
-  admin: ["machines.read", "service.refill", "service.clean", "alerts.read", "recall.read", "remote.basic"],
-  operator: ["machines.read", "service.refill", "service.clean", "alerts.read", "recall.read"],
-  franchisee: ["machines.read", "service.refill", "service.clean", "alerts.read", "recall.read", "remote.basic"],
+  admin: ["machines.read", "analytics.read", "service.refill", "service.clean", "alerts.read", "recall.read", "remote.basic"],
+  operator: ["machines.read", "analytics.read", "service.refill", "service.clean", "alerts.read", "recall.read"],
+  franchisee: ["machines.read", "analytics.read", "service.refill", "service.clean", "alerts.read", "recall.read", "remote.basic"],
 };
 
 export type MobileSession = {

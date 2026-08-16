@@ -31,7 +31,7 @@ export type Machine = {
 
 export type Source = "supabase" | "huaxin" | "sample";
 
-export async function getMachines(): Promise<{
+export async function getMachines(machineIds?: string[]): Promise<{
   machines: Machine[];
   source: "supabase";
   lastSyncedAt: string | null;
@@ -39,20 +39,27 @@ export async function getMachines(): Promise<{
   readError?: string;
 }> {
   if (!isSupabaseConfigured()) return { machines: [], source: "supabase", lastSyncedAt: null, staleMachines: 0, readError: "Supabase is not configured." };
+  if (machineIds?.length === 0) return { machines: [], source: "supabase", lastSyncedAt: null, staleMachines: 0 };
   try {
     const s = await createServiceClient();
     const rows: Machine[] = [];
     for (let offset = 0; ; offset += 1000) {
-      const { data, error } = await s.from("v_machines").select("*").order("name").order("id").range(offset, offset + 999);
+      let query = s.from("v_machines").select("*");
+      if (machineIds) query = query.in("id", machineIds);
+      const { data, error } = await query.order("name").order("id").range(offset, offset + 999);
       if (error) throw error;
       rows.push(...((data as Machine[]) ?? []));
       if (!data || data.length < 1000) break;
     }
-    const [{ data: names, error: namesError }, { data: statuses, error: statusesError }, { data: alerts, error: alertsError }] = await Promise.all([
-      s.from("machines").select("id,display_name,deployed"),
-      s.from("machine_status_snapshots").select("machine_id,field,value,observed_at").in("field", ["cup_empty", "material_empty", "material_out"]),
-      s.from("v_alerts").select("machine_id,change_field").is("resolved_at", null),
-    ]);
+    let namesQuery = s.from("machines").select("id,display_name,deployed");
+    let statusesQuery = s.from("machine_status_snapshots").select("machine_id,field,value,observed_at").in("field", ["cup_empty", "material_empty", "material_out"]);
+    let alertsQuery = s.from("v_alerts").select("machine_id,change_field").is("resolved_at", null);
+    if (machineIds) {
+      namesQuery = namesQuery.in("id", machineIds);
+      statusesQuery = statusesQuery.in("machine_id", machineIds);
+      alertsQuery = alertsQuery.in("machine_id", machineIds);
+    }
+    const [{ data: names, error: namesError }, { data: statuses, error: statusesError }, { data: alerts, error: alertsError }] = await Promise.all([namesQuery, statusesQuery, alertsQuery]);
     if (namesError) throw namesError;
     if (statusesError) throw statusesError;
     if (alertsError) throw alertsError;

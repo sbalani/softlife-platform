@@ -7,6 +7,7 @@ export type OrderProduct = { goodsName: string; price: string; position: number 
 
 export type Order = {
   id: string;
+  machine_id: string | null;
   order_time: string;
   machine_name: string | null;
   device_imei: string | null;
@@ -46,7 +47,7 @@ function shiftDay(value: string, days: number): string {
 }
 
 export function orderFromSupabaseRow(row: Record<string, unknown>): Order {
-  return storedOrderFromRow(row) as Order;
+  return { ...storedOrderFromRow(row), machine_id: (row.machine_id as string) ?? null } as Order;
 }
 
 export type OrderSyncSummary = {
@@ -67,11 +68,13 @@ export async function getOrders(filters?: {
   dateFrom?: string;
   dateTo?: string;
   timeZone?: string;
+  machineIds?: string[];
 }, client?: SupabaseClient): Promise<{ orders: Order[]; sync: OrderSyncSummary | null; readError?: string }> {
   const range = filters?.dateFrom && filters.dateTo && filters.timeZone
     ? { from: filters.dateFrom, to: filters.dateTo, timeZone: filters.timeZone }
     : { from: ymd(new Date(Date.now() - 30 * 86_400_000)), to: ymd(new Date()), timeZone: "UTC" };
   if (!isSupabaseConfigured()) return { orders: [], sync: null, readError: "Supabase is not configured." };
+  if (filters?.machineIds?.length === 0) return { orders: [], sync: null };
 
   try {
     const supabase = client ?? await createClient();
@@ -84,11 +87,13 @@ export async function getOrders(filters?: {
       .maybeSingle();
     const rows: Record<string, unknown>[] = [];
     for (let offset = 0; ; offset += 1000) {
-      const { data, error } = await supabase
+      let query = supabase
         .from("v_orders")
         .select("*")
         .gte("order_time", `${shiftDay(range.from, -1)}T00:00:00Z`)
-        .lte("order_time", `${shiftDay(range.to, 1)}T23:59:59Z`)
+        .lte("order_time", `${shiftDay(range.to, 1)}T23:59:59Z`);
+      if (filters?.machineIds) query = query.in("machine_id", filters.machineIds);
+      const { data, error } = await query
         .order("order_time", { ascending: false })
         .order("id", { ascending: false })
         .range(offset, offset + 999);

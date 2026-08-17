@@ -2,7 +2,7 @@ SOFTLIFE MOBILE MANUAL DEFROST HANDOFF
 ======================================
 
 Status date: 2026-08-17
-Platform implementation: deployed durable workflow; mobile API pending this release.
+Platform implementation: durable workflow and mobile API deployed in production.
 
 
 1. AUTHORIZATION

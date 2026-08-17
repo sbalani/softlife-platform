@@ -1,9 +1,8 @@
 SOFTLIFE MOBILE APK DISTRIBUTION HANDOFF
 ========================================
 
-Status date: 2026-08-16
-Platform implementation: ready locally; production deployment and secret setup
-must be completed before the mobile build agent starts calling this endpoint.
+Status date: 2026-08-17
+Platform implementation: deployed and operational in production.
 
 
 1. WEBHOOK ENDPOINT
@@ -16,9 +15,10 @@ Authentication:
   Authorization: Bearer <MOBILE_APK_WEBHOOK_SECRET>
   Content-Type: application/json
 
-The shared secret must be configured as MOBILE_APK_WEBHOOK_SECRET in Vercel
-and as an encrypted secret in the mobile build agent/CI environment. Do not
-commit the secret to either repository or write it into this handoff file.
+The shared secret is configured as MOBILE_APK_WEBHOOK_SECRET in Vercel
+Production and in the sbalani/softlife-haccp-mobile GitHub Actions secrets.
+Use the GitHub secret directly from build automation. Do not print, copy, or
+commit its value.
 
 
 2. REQUEST SCHEMA
@@ -141,13 +141,22 @@ specific build. Publishing a later build creates a new alert for that user.
 7. REQUIRED PRODUCTION CONFIGURATION
 ------------------------------------
 
-  [ ] Apply migration 20260816163000_mobile_apk_distribution.sql.
-  [ ] Deploy the platform route/page changes.
-  [ ] Set a strong random MOBILE_APK_WEBHOOK_SECRET in Vercel Production.
-  [ ] Store the same secret in the mobile build agent/CI secret store.
+  [x] Apply migration 20260816163000_mobile_apk_distribution.sql.
+  [x] Deploy the platform route/page changes.
+  [x] Set a strong random MOBILE_APK_WEBHOOK_SECRET in Vercel Production.
+  [x] Store the same secret in the mobile build agent/CI secret store.
   [ ] If Expo enhanced push security is enabled, set EXPO_ACCESS_TOKEN in
       Vercel and Supabase Edge Function secrets.
-  [ ] Publish the current artifact using the request in section 2.
+  [x] Publish the current artifact using the request in section 2.
   [ ] Verify the authenticated /downloads page and one Android installation.
+
+Published current build:
+
+  Build ID:     756f94a2-4c31-43bd-b3bc-518a29348cca
+  Version:      1.0.0 (build 1)
+  Size:         140760067 bytes
+  SHA-256:      1658974200fe79aa33eb38b341cb7c6f991b99f74a44a393acc6e5fbac7931a9
+  Published:    2026-08-17T10:12:33.51121Z
+  Push result:  1 registered token, 1 accepted by Expo
 
 END OF HANDOFF

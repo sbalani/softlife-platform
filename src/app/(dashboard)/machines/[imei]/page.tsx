@@ -471,7 +471,7 @@ export default async function MachineDetailPage({
                     <tr key={o.order_code}>
                       <td className="py-2 text-cocoa">{formatDateTime(o.order_time, tz)}</td>
                       <td className="py-2 font-mono text-xs text-taupe">{o.order_code}</td>
-                      <td className="py-2 text-cocoa">{o.product_name || "—"}</td>
+                      <td className="py-2 text-cocoa">{o.products.map((product) => product.goodsName).filter(Boolean).join(" + ") || o.product_name || "—"}</td>
                       <td className="py-2 text-right text-cocoa">€{o.price.toFixed(2)}</td>
                       <td className="py-2 text-right text-cocoa">{o.order_state}</td>
                     </tr>

@@ -32,7 +32,7 @@ export function orderRowFromHuaxin(order: HuaxinOrder, machine: MachineRef) {
     discount_price: order.discountPrice == null ? null : Number(order.discountPrice),
     re_price: order.rePrice == null ? null : Number(order.rePrice),
     amount: Number(order.amount ?? 1),
-    product_name: products[0]?.goodsName ?? order.goodsName ?? null,
+    product_name: products[0]?.goodsName ?? order.productName ?? order.goodsName ?? null,
     products,
     nums: Number(order.nums ?? 1),
     pay_type_raw: order.payType ?? null,

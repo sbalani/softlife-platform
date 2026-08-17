@@ -50,7 +50,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         units_today: sales.reduce((sum, order) => sum + order.nums, 0),
       },
       statuses,
-      orders: orders.slice(0, 50).map((order) => ({ id: order.id, order_time: order.order_time, order_code: order.order_code, product_name: order.product_name, state: order.order_state, price: order.price, units: order.nums, refunded: order.refund_status === "Refunded", admin_override: order.is_admin_override })),
+      orders: orders.slice(0, 50).map((order) => ({ id: order.id, order_time: order.order_time, order_code: order.order_code, product_name: order.product_name, products: order.products, state: order.order_state, price: order.price, units: order.nums, refunded: order.refund_status === "Refunded", admin_override: order.is_admin_override })),
     });
   } catch (error) {
     return Response.json({ error: { message: error instanceof Error ? error.message : String(error) } }, { status: 500 });

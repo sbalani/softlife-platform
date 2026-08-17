@@ -43,6 +43,13 @@ live against UAT). Set the five `HUAXIN_*` values in `.env.local`.
 > The Huaxin **UAT TLS certificate is expired**. Keep `HUAXIN_VERIFY_SSL=false`
 > for UAT and turn it back on for production.
 
+## Mobile push notifications
+
+Critical-alert pushes use Expo Push. If enhanced push security is enabled in
+Expo, set the same `EXPO_ACCESS_TOKEN` in Vercel and in the Supabase `defrost`
+Edge Function secrets. The mobile EAS project must also have valid APNs/FCM
+credentials and register its Expo token with `POST /api/softlife/push-token`.
+
 ## Project layout
 ```
 src/app/(dashboard)/        dashboard UI (sidebar shell + screens)

@@ -4,6 +4,7 @@ import { getDisplayTimezone } from "@/lib/timezone";
 import { analyticsRange, filterAnalyticsOrders, machineSalesReport, ordersInPeriod, type AnalyticsParams, type MachineSalesCadence } from "@/lib/analytics";
 import { getAccessibleMachineIds, getAccessibleMachines } from "@/lib/data/accessible-machines";
 import { createServiceClient } from "@/lib/supabase/server";
+import { orderProductLabel } from "@/lib/order-products";
 
 export const dynamic = "force-dynamic";
 
@@ -55,12 +56,12 @@ export async function GET(request: Request) {
     ], `softlife-${cadence}-machine-sales-${range.from}-${range.to}.csv`);
   }
   const rows = filtered.map((order) => {
-    const product = resolveProductName(order.product_name || order.products.map((item) => item.goodsName).filter(Boolean).join(" + "), aliasMap);
+    const product = orderProductLabel(order, (rawName) => resolveProductName(rawName, aliasMap));
     const refunded = order.refund_status === "Refunded";
     return [order.order_time, order.machine_name, order.device_imei, order.order_code, product, order.pay_type, order.order_state, order.nums, order.price.toFixed(2), refunded ? order.price.toFixed(2) : "0.00", order.order_state === "COMPLETE" && !order.is_admin_override && !refunded ? order.price.toFixed(2) : "0.00"];
   });
   return csvResponse([
-    ["UTC time", "Machine", "IMEI", "Order code", "Product", "Payment method", "State", "Units", "Gross EUR", "Refunded EUR", "Net EUR"],
+    ["UTC time", "Machine", "IMEI", "Order code", "Products", "Payment method", "State", "Units", "Gross EUR", "Refunded EUR", "Net EUR"],
     ...rows,
   ], `softlife-analytics-${range.from}-${range.to}.csv`);
 }

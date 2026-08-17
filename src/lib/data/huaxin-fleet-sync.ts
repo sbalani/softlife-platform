@@ -5,7 +5,7 @@ import { normalizeHuaxinTimestamp } from "@/lib/data/temperatures";
 import { ingestOrders, type OrderSyncTrigger } from "@/lib/data/order-sync";
 import { syncMachineMedia } from "@/lib/data/machine-media";
 import { syncCouponSnapshots } from "@/lib/data/coupons";
-import { sendPendingAlertNotifications } from "@/lib/data/alert-notifications";
+import { sendPendingAlertNotifications, type AlertNotificationResult } from "@/lib/data/alert-notifications";
 import { DEFAULT_TZ, ymd } from "@/lib/dates";
 
 export async function runHuaxinFleetSync(trigger: OrderSyncTrigger = "cron") {
@@ -92,8 +92,8 @@ async function executeFleetSync(
     console.error("[fleet-sync] Coupons failed:", error);
   }
   const orderSync = await ingestOrders(yesterday, today, [], trigger);
-  let notifications = 0;
-  try { notifications = await sendPendingAlertNotifications(supabase); } catch (error) { console.error("[fleet-sync] Alert push failed:", error); }
+  let notificationResult: AlertNotificationResult = { sent: 0, tokens: 0, claimed: 0, eligible: 0, failed: 0, status: "error" };
+  try { notificationResult = await sendPendingAlertNotifications(supabase); } catch (error) { console.error("[fleet-sync] Alert push failed:", error); }
 
   return {
     synced,
@@ -109,7 +109,12 @@ async function executeFleetSync(
     orderMachinesSucceeded: orderSync.succeededMachines,
     orderMachinesFailed: orderSync.failedMachines.length,
     orderSyncError: orderSync.error,
-    notifications,
+    notifications: notificationResult.sent,
+    notificationStatus: notificationResult.status,
+    notificationTokens: notificationResult.tokens,
+    notificationAlertsClaimed: notificationResult.claimed,
+    notificationRecipientsEligible: notificationResult.eligible,
+    notificationAlertsFailed: notificationResult.failed,
     devicesSeen: devices.length,
     stored: true,
   };

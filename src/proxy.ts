@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { canAccessWebPath } from "./lib/auth/web-authorization";
 
 /** /api/* is excluded on purpose — the mobile app and server-to-server
  *  callbacks (Huaxin webhook, Vercel cron) authenticate with their own
@@ -8,7 +9,7 @@ function isPublicPath(pathname: string) {
   return pathname === "/login" || pathname === "/set-password" || pathname === "/franchisee-intake" || pathname.startsWith("/auth/callback") || pathname.startsWith("/api");
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   let response = NextResponse.next({ request });
@@ -49,9 +50,8 @@ export async function middleware(request: NextRequest) {
   if (user && !isPublicPath(path)) {
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
     const role = profile?.role;
-    const franchiseePaths = ["/dashboard", "/analytics", "/alerts", "/remote-control", "/coupons"];
-    const machineService = path.startsWith("/machine/");
-    const allowed = role === "admin" || machineService || (role === "operator" && path.startsWith("/refills")) || (role === "franchisee" && franchiseePaths.some((prefix) => path === prefix || path.startsWith(`${prefix}/`)));
+    const normalizedRole = role === "admin" || role === "franchisee" ? role : "operator";
+    const allowed = canAccessWebPath(normalizedRole, path);
     if (!allowed) {
       const url = request.nextUrl.clone();
       url.pathname = role === "franchisee" ? "/dashboard" : "/refills";

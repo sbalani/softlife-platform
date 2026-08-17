@@ -41,6 +41,12 @@ test("a later pull intentionally emits the current Huaxin product name", () => {
   assert.equal(renamed.product_name, "Canonical Oreo");
 });
 
+test("a pull retains every product and falls back to the top-level product name", () => {
+  const products = [...source.products, { goodsName: "Pistachio", price: "0.5", position: 3 }];
+  assert.deepEqual(orderRowFromHuaxin({ ...source, products }, { id: "machine", tenantId: null, imei: "123" }).products, products);
+  assert.equal(orderRowFromHuaxin({ ...source, products: [], productName: "Vanilla", goodsName: undefined }, { id: "machine", tenantId: null, imei: "123" }).product_name, "Vanilla");
+});
+
 test("a sparse webhook preserves omissions instead of inventing defaults", () => {
   const patch = orderPatchFromWebhook({ responType: "order", data: { orderCode: "order-1", status: 3 } })!;
   assert.equal(patch.order_code, "order-1");

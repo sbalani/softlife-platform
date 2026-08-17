@@ -428,7 +428,11 @@ async function sendPendingAlertNotifications(s: SupabaseClient) {
         const chunk = eligible.slice(offset, offset + 100);
         const response = await fetch("https://exp.host/--/api/v2/push/send", {
           method: "POST",
-          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            ...(Deno.env.get("EXPO_ACCESS_TOKEN") ? { Authorization: `Bearer ${Deno.env.get("EXPO_ACCESS_TOKEN")}` } : {}),
+          },
           body: JSON.stringify(chunk.map((token) => ({ to: token.expo_push_token, sound: "default", title: `${alert.title} · ${alert.machine_name || "Machine alert"}`, body: alert.message, data: { machineId: alert.machine_id, alertId: alert.id }, channelId: "machine-alerts" }))),
         });
         if (!response.ok) throw new Error(`Expo push failed: ${response.status}`);

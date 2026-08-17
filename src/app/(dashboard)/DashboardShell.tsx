@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { SignOutButton } from "./SignOutButton";
+import { MobileBuildAlert, type MobileBuildAlertData } from "./MobileBuildAlert";
+import { canAccessWebPath } from "@/lib/auth/web-authorization";
 
 type Role = "admin" | "operator" | "franchisee";
-const FRANCHISEE_NAV = new Set(["/dashboard", "/analytics", "/alerts", "/remote-control", "/coupons"]);
-
 const NAV: { label: string; href?: string; soon?: boolean; adminOnly?: boolean; mobileOnly?: boolean; icon: ReactNode }[] = [
   { label: "Dashboard", href: "/dashboard", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM14 8h6V4h-6zM4 20h6v-3H4z"/></svg> },
   { label: "Machines", href: "/machines", icon: <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M9 16h6"/></svg> },
@@ -24,6 +24,7 @@ const NAV: { label: string; href?: string; soon?: boolean; adminOnly?: boolean; 
   { label: "Transfers", href: "/transfers", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 9h13M14 5l4 4-4 4M21 15H8M10 19l-4-4 4-4"/></svg> },
   { label: "Franchisees", href: "/franchisees", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0114 0"/></svg> },
   { label: "Promotions", href: "/coupons", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M20 12l-8 8-9-9V3h8z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg> },
+  { label: "App download", href: "/downloads", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 20h16"/></svg> },
   { label: "Advertising", href: "/advertising", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/></svg> },
   { label: "Odoo", href: "/odoo", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 17.5h7M17.5 14v7"/></svg> },
   { label: "Users", href: "/users", adminOnly: true, icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0113 0"/><path d="M17 5.5a3.5 3.5 0 010 7M22 20a6 6 0 00-4.5-8.5"/></svg> },
@@ -32,7 +33,7 @@ const NAV: { label: string; href?: string; soon?: boolean; adminOnly?: boolean; 
 
 type Profile = { role: Role; email: string | null; fullName: string | null };
 
-function TopBar({ onMenuClick, profile }: { onMenuClick: () => void; profile: Profile }) {
+function TopBar({ onMenuClick, profile, hasUpdate }: { onMenuClick: () => void; profile: Profile; hasUpdate: boolean }) {
   const displayName = profile.fullName || profile.email || "Signed in";
   const initial = displayName[0]?.toUpperCase() ?? "?";
   return (
@@ -45,10 +46,10 @@ function TopBar({ onMenuClick, profile }: { onMenuClick: () => void; profile: Pr
         <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
       </button>
       <div className="flex items-center gap-3 sm:gap-5">
-        <button title="Notifications" className="relative text-taupe hover:text-cocoa">
+        <Link href={hasUpdate ? "/downloads" : "/alerts"} title="Notifications" className="relative text-taupe hover:text-cocoa">
           <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 8a6 6 0 1112 0c0 7 3 7 3 9H3c0-2 3-2 3-9z"/><path d="M10 21a2 2 0 004 0"/></svg>
-          <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-danger" />
-        </button>
+          {hasUpdate && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-danger" />}
+        </Link>
         <button title="Language" className="hidden text-taupe hover:text-cocoa sm:block">
           <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>
         </button>
@@ -68,7 +69,7 @@ function TopBar({ onMenuClick, profile }: { onMenuClick: () => void; profile: Pr
 }
 
 function SidebarContent({ onNavigate, role, mobile }: { onNavigate: () => void; role: Role; mobile: boolean }) {
-  const roleNav = role === "admin" ? NAV : role === "franchisee" ? NAV.filter((item) => item.href && FRANCHISEE_NAV.has(item.href)) : NAV.filter((item) => item.href === "/refills");
+  const roleNav = NAV.filter((item) => item.href && canAccessWebPath(role, item.href));
   const visibleNav = roleNav.filter((item) => mobile || !item.mobileOnly);
   return (
     <>
@@ -114,7 +115,7 @@ function SidebarContent({ onNavigate, role, mobile }: { onNavigate: () => void; 
   );
 }
 
-export function DashboardShell({ children, profile }: { children: ReactNode; profile: Profile }) {
+export function DashboardShell({ children, profile, mobileBuildUpdate }: { children: ReactNode; profile: Profile; mobileBuildUpdate: MobileBuildAlertData | null }) {
   const [navOpen, setNavOpen] = useState(false);
 
   return (
@@ -139,9 +140,9 @@ export function DashboardShell({ children, profile }: { children: ReactNode; pro
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar onMenuClick={() => setNavOpen(true)} profile={profile} />
+        <TopBar onMenuClick={() => setNavOpen(true)} profile={profile} hasUpdate={!!mobileBuildUpdate} />
         <main className="min-w-0 flex-1 overflow-x-hidden">
-          <div className="mx-auto max-w-7xl min-w-0 px-4 py-6 sm:px-6 sm:py-8">{children}</div>
+          <div className="mx-auto max-w-7xl min-w-0 px-4 py-6 sm:px-6 sm:py-8">{mobileBuildUpdate && <MobileBuildAlert build={mobileBuildUpdate} />}{children}</div>
         </main>
       </div>
     </div>

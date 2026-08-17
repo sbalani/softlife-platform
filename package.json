@@ -11,13 +11,14 @@
     "test:order-time": "node --experimental-strip-types --test src/lib/huaxin/order-time.test.ts",
     "test:order-sync": "node --experimental-strip-types --test src/lib/data/order-sync-selection.test.ts src/lib/data/order-sync-status.test.ts",
     "test:order-persistence": "node --experimental-strip-types --test src/lib/data/order-persistence.test.ts src/lib/data/orders.test.ts",
-    "test:analytics": "node --experimental-strip-types --test src/lib/analytics.test.ts",
+    "test:analytics": "node --experimental-strip-types --test src/lib/analytics.test.ts src/lib/order-products.test.ts",
     "test:coupon-dates": "node --experimental-strip-types --test src/lib/coupon-dates.test.ts src/lib/huaxin/coupon-api.test.ts src/lib/data/coupons.test.ts",
     "test:coupon-content": "node --experimental-strip-types --test src/lib/coupon-content.test.ts",
     "test:fleet": "node --experimental-strip-types --test src/lib/data/fleet-freshness.test.ts",
     "test:service-history": "node --experimental-strip-types --test src/lib/data/clean-logs.test.ts src/lib/data/service-url.test.ts",
     "test:mobile-auth": "node --experimental-strip-types --test src/lib/auth/mobile-authorization.test.ts",
-    "test:mobile-status": "node --experimental-strip-types --test src/lib/data/mobile-machine-status.test.ts"
+    "test:mobile-status": "node --experimental-strip-types --test src/lib/data/mobile-machine-status.test.ts",
+    "test:mobile-builds": "node --experimental-strip-types --test src/lib/auth/web-authorization.test.ts src/lib/mobile-builds.test.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.5",

@@ -40,6 +40,7 @@ export async function GET(req: Request) {
         machine_name: order.machine_name,
         device_imei: order.device_imei,
         product_name: order.product_name,
+        products: order.products,
         state: order.order_state,
         price: order.price,
         units: order.nums,

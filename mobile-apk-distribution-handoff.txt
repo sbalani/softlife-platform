@@ -1,0 +1,153 @@
+SOFTLIFE MOBILE APK DISTRIBUTION HANDOFF
+========================================
+
+Status date: 2026-08-16
+Platform implementation: ready locally; production deployment and secret setup
+must be completed before the mobile build agent starts calling this endpoint.
+
+
+1. WEBHOOK ENDPOINT
+-------------------
+
+POST https://softlife-platform.vercel.app/api/webhooks/mobile-build
+
+Authentication:
+
+  Authorization: Bearer <MOBILE_APK_WEBHOOK_SECRET>
+  Content-Type: application/json
+
+The shared secret must be configured as MOBILE_APK_WEBHOOK_SECRET in Vercel
+and as an encrypted secret in the mobile build agent/CI environment. Do not
+commit the secret to either repository or write it into this handoff file.
+
+
+2. REQUEST SCHEMA
+-----------------
+
+Required JSON field:
+
+  artifact_url   string   Exact Expo EAS APK artifact URL.
+
+Optional JSON fields:
+
+  version        string   Human app version, maximum 64 characters.
+  build_number   string   Android/EAS build number, maximum 64 characters.
+  release_notes  string   User-facing release notes, maximum 2,000 characters.
+
+Accepted artifact URL format:
+
+  https://expo.dev/artifacts/eas/<artifact-id>.apk
+
+Example for the current build:
+
+  {
+    "artifact_url": "https://expo.dev/artifacts/eas/CKqD6EuCCnDH4EN5NIqKw6gAaW77pWD-wCizV5iXUGw.apk",
+    "version": "1.0.0",
+    "build_number": "1",
+    "release_notes": "Initial managed APK distribution build."
+  }
+
+Example curl request:
+
+  curl --fail-with-body --request POST \
+    --header "Authorization: Bearer $MOBILE_APK_WEBHOOK_SECRET" \
+    --header "Content-Type: application/json" \
+    --data '{"artifact_url":"https://expo.dev/artifacts/eas/CKqD6EuCCnDH4EN5NIqKw6gAaW77pWD-wCizV5iXUGw.apk","version":"1.0.0","build_number":"1"}' \
+    https://softlife-platform.vercel.app/api/webhooks/mobile-build
+
+
+3. SUCCESS RESPONSE
+-------------------
+
+New build: HTTP 201
+
+  {
+    "ok": true,
+    "duplicate": false,
+    "build": {
+      "id": "<uuid>",
+      "version": "1.0.0",
+      "build_number": "1",
+      "byte_size": 140760067,
+      "sha256": "<64-character lowercase SHA-256>",
+      "published_at": "<ISO-8601 timestamp>"
+    },
+    "retention_removed": 0,
+    "push": {
+      "tokens": 1,
+      "accepted": 1
+    }
+  }
+
+Repeated artifact_url: HTTP 200
+
+  {
+    "ok": true,
+    "duplicate": true,
+    "build": {
+      "id": "<existing uuid>",
+      "version": "1.0.0",
+      "published_at": "<ISO-8601 timestamp>"
+    }
+  }
+
+The mobile build agent should treat any 2xx response as success. It may safely
+retry after a network failure because artifact_url is idempotent.
+
+
+4. ERROR RESPONSES
+------------------
+
+  400  Invalid JSON, metadata, or artifact URL.
+  401  Missing or incorrect bearer secret.
+  413  Webhook JSON body exceeds 16 KiB.
+  502  Expo download, APK validation, Supabase upload, or metadata write failed.
+  503  MOBILE_APK_WEBHOOK_SECRET is not configured.
+
+For non-2xx responses, retain the Expo artifact URL and retry with bounded
+backoff. Do not substitute arbitrary CDN or storage URLs; send the stable
+expo.dev/artifacts/eas/*.apk URL returned by EAS.
+
+
+5. PLATFORM BEHAVIOR
+--------------------
+
+  - Downloads the APK as a stream from Expo and approved EAS redirect hosts.
+  - Rejects non-HTTPS/non-Expo source URLs, non-APK ZIP signatures, empty files,
+    and files larger than 200 MB.
+  - Stores the APK in the private Supabase bucket mobile-apks.
+  - Stores byte size and SHA-256 metadata.
+  - Keeps the newest five APK builds and removes older objects/records.
+  - Sends an Expo push to all registered mobile push tokens for a new build.
+  - Does not send another push for a duplicate artifact_url.
+
+
+6. USER DOWNLOAD FLOW
+---------------------
+
+Authenticated web page:
+
+  https://softlife-platform.vercel.app/downloads
+
+The page is available to every logged-in admin, operator, and franchisee. APK
+objects remain private. A download request records downloaded_at for that user
+and redirects to a short-lived signed Supabase URL.
+
+When the newest build has not been downloaded, the web app displays an update
+alert and notification indicator. The user may suppress that alert for the
+specific build. Publishing a later build creates a new alert for that user.
+
+
+7. REQUIRED PRODUCTION CONFIGURATION
+------------------------------------
+
+  [ ] Apply migration 20260816163000_mobile_apk_distribution.sql.
+  [ ] Deploy the platform route/page changes.
+  [ ] Set a strong random MOBILE_APK_WEBHOOK_SECRET in Vercel Production.
+  [ ] Store the same secret in the mobile build agent/CI secret store.
+  [ ] If Expo enhanced push security is enabled, set EXPO_ACCESS_TOKEN in
+      Vercel and Supabase Edge Function secrets.
+  [ ] Publish the current artifact using the request in section 2.
+  [ ] Verify the authenticated /downloads page and one Android installation.
+
+END OF HANDOFF

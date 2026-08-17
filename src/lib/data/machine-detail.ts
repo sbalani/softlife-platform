@@ -15,6 +15,7 @@ export type DetailOrder = {
   order_state: string;
   price: number;
   product_name: string;
+  products: { goodsName: string; price?: number | string; position?: number }[];
   is_admin_override: boolean;
 };
 export type MachineDetail = {
@@ -125,6 +126,7 @@ export async function getMachineDetail(
       order_state: order.order_state,
       price: order.price,
       product_name: order.product_name,
+      products: order.products,
       is_admin_override: order.is_admin_override,
     })),
     orders_synced_at: latestOrderSync?.finished_at ?? null,

@@ -13,14 +13,28 @@ type AlertRow = {
   machine_name: string | null;
 };
 
-export async function sendPendingAlertNotifications(s: SupabaseClient): Promise<number> {
+export type AlertNotificationResult = {
+  sent: number;
+  tokens: number;
+  claimed: number;
+  eligible: number;
+  failed: number;
+  status: "sent" | "partial_failure" | "no_tokens" | "no_alerts" | "no_eligible_recipients" | "delivery_failed" | "error";
+};
+
+async function updateAlert(s: SupabaseClient, alertId: string, values: Record<string, string | null>) {
+  const { error } = await s.from("alerts").update(values).eq("id", alertId);
+  if (error) throw error;
+}
+
+export async function sendPendingAlertNotifications(s: SupabaseClient): Promise<AlertNotificationResult> {
   const { data: tokens, error: tokenError } = await s.from("mobile_push_tokens").select("id,user_id,expo_push_token");
   if (tokenError) throw tokenError;
   const pushTokens = (tokens as PushToken[]) ?? [];
-  if (!pushTokens.length) return 0;
+  if (!pushTokens.length) return { sent: 0, tokens: 0, claimed: 0, eligible: 0, failed: 0, status: "no_tokens" };
   const { data: alerts, error: alertError } = await s.rpc("claim_pending_alert_pushes", { p_limit: 50 });
   if (alertError) throw alertError;
-  if (!alerts?.length) return 0;
+  if (!alerts?.length) return { sent: 0, tokens: pushTokens.length, claimed: 0, eligible: 0, failed: 0, status: "no_alerts" };
 
   const userIds = [...new Set(pushTokens.map((token) => token.user_id))];
   const { data: profiles, error: profileError } = await s.from("profiles").select("id,role,tenant_id,employer_kind").in("id", userIds);
@@ -40,6 +54,8 @@ export async function sendPendingAlertNotifications(s: SupabaseClient): Promise<
     }));
   }
   let sent = 0;
+  let eligibleRecipients = 0;
+  let failed = 0;
 
   for (const alert of alerts as unknown as AlertRow[]) {
     const eligible: PushToken[] = [];
@@ -51,17 +67,22 @@ export async function sendPendingAlertNotifications(s: SupabaseClient): Promise<
       if (alert.machine_id ? machineIds === null || machineIds.includes(alert.machine_id) : role === "admin") eligible.push(token);
     }
     if (!eligible.length) {
-      await s.from("alerts").update({ push_claimed_at: null }).eq("id", alert.id);
+      await updateAlert(s, alert.id, { push_claimed_at: null });
       continue;
     }
+    eligibleRecipients += eligible.length;
     const machine = alert.machine_name || "Machine alert";
+    let accepted = 0;
     try {
-      let accepted = 0;
       for (let offset = 0; offset < eligible.length; offset += 100) {
         const chunk = eligible.slice(offset, offset + 100);
         const response = await fetch("https://exp.host/--/api/v2/push/send", {
           method: "POST",
-          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            ...(process.env.EXPO_ACCESS_TOKEN ? { Authorization: `Bearer ${process.env.EXPO_ACCESS_TOKEN}` } : {}),
+          },
           body: JSON.stringify(chunk.map((token) => ({
             to: token.expo_push_token,
             sound: "default",
@@ -84,12 +105,14 @@ export async function sendPendingAlertNotifications(s: SupabaseClient): Promise<
       }
       if (!accepted) throw new Error("No active device accepted the alert notification");
     } catch (error) {
-      await s.from("alerts").update({ push_claimed_at: null }).eq("id", alert.id);
+      failed++;
+      await updateAlert(s, alert.id, { push_claimed_at: null });
       console.error(`[alert-push] Delivery failed for ${alert.id}:`, error);
       continue;
     }
-    await s.from("alerts").update({ push_notified_at: new Date().toISOString(), push_claimed_at: null }).eq("id", alert.id);
-    sent += eligible.length;
+    await updateAlert(s, alert.id, { push_notified_at: new Date().toISOString(), push_claimed_at: null });
+    sent += accepted;
   }
-  return sent;
+  const status = sent > 0 ? failed > 0 ? "partial_failure" : "sent" : failed > 0 ? "delivery_failed" : "no_eligible_recipients";
+  return { sent, tokens: pushTokens.length, claimed: alerts.length, eligible: eligibleRecipients, failed, status };
 }

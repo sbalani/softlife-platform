@@ -12,6 +12,7 @@ import { analyticsRange, datesBetween, filterAnalyticsOrders, ordersInPeriod, ty
 import { OrderDataNote } from "@/components/order-data-note";
 import { getAccessibleMachineIds } from "@/lib/data/accessible-machines";
 import { createServiceClient } from "@/lib/supabase/server";
+import { orderProductLabel } from "@/lib/order-products";
 
 export const dynamic = "force-dynamic";
 
@@ -120,8 +121,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
 
   const productStats = new Map<string, { revenue: number; units: number; orders: number }>();
   for (const order of sales) {
-    const rawName = order.product_name || order.products.map((item) => item.goodsName).filter(Boolean).join(" + ") || "Unknown";
-    const name = resolveProductName(rawName, aliasMap);
+    const name = orderProductLabel(order, (rawName) => resolveProductName(rawName, aliasMap)) || "Unknown";
     const row = productStats.get(name) ?? { revenue: 0, units: 0, orders: 0 };
     row.revenue += order.price;
     row.units += order.nums;
@@ -191,7 +191,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <section className="rounded-2xl border border-line bg-white p-5"><h2 className="mb-1 font-display text-lg font-bold text-cocoa">Average sales by weekday</h2><p className="mb-3 text-xs text-taupe">Average per occurrence, avoiding unequal-weekday bias</p><VBarChart data={weekdayData} color="#d47e54" formatValue={(value) => `€${value.toFixed(0)}`} /></section>
-        <section className="rounded-2xl border border-line bg-white p-5"><h2 className="mb-1 font-display text-lg font-bold text-cocoa">Top products</h2><p className="mb-3 text-xs text-taupe">Units sold after alias resolution</p><HBarChart data={productBars} color="#6fa98c" unit="×" /></section>
+        <section className="rounded-2xl border border-line bg-white p-5"><h2 className="mb-1 font-display text-lg font-bold text-cocoa">Top product combinations</h2><p className="mb-3 text-xs text-taupe">Units sold after alias resolution</p><HBarChart data={productBars} color="#6fa98c" unit="×" /></section>
       </div>
 
       <section className="mt-6 rounded-2xl border border-line bg-white p-5">
@@ -206,7 +206,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
       </section>
 
       <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <section className="rounded-2xl border border-line bg-white p-5"><h2 className="mb-3 font-display text-lg font-bold text-cocoa">Product performance</h2><div className="overflow-x-auto"><table className="w-full min-w-[520px] text-sm"><thead className="text-left text-[11px] uppercase text-taupe"><tr><th className="py-2">Product</th><th className="text-right">Orders</th><th className="text-right">Units</th><th className="text-right">Net sales</th></tr></thead><tbody className="divide-y divide-line">{productRows.map((row) => <tr key={row.name}><td className="py-2 font-semibold text-cocoa">{row.name}</td><td className="text-right">{row.orders}</td><td className="text-right">{row.units}</td><td className="text-right font-bold">€{row.revenue.toFixed(2)}</td></tr>)}</tbody></table></div></section>
+        <section className="rounded-2xl border border-line bg-white p-5"><h2 className="mb-3 font-display text-lg font-bold text-cocoa">Product combination performance</h2><div className="overflow-x-auto"><table className="w-full min-w-[520px] text-sm"><thead className="text-left text-[11px] uppercase text-taupe"><tr><th className="py-2">Products</th><th className="text-right">Orders</th><th className="text-right">Units</th><th className="text-right">Net sales</th></tr></thead><tbody className="divide-y divide-line">{productRows.map((row) => <tr key={row.name}><td className="py-2 font-semibold text-cocoa">{row.name}</td><td className="text-right">{row.orders}</td><td className="text-right">{row.units}</td><td className="text-right font-bold">€{row.revenue.toFixed(2)}</td></tr>)}</tbody></table></div></section>
         <section className="rounded-2xl border border-line bg-white p-5"><h2 className="mb-3 font-display text-lg font-bold text-cocoa">Payment methods</h2><div className="overflow-x-auto"><table className="w-full min-w-[420px] text-sm"><thead className="text-left text-[11px] uppercase text-taupe"><tr><th className="py-2">Method</th><th className="text-right">Orders</th><th className="text-right">Net sales</th></tr></thead><tbody className="divide-y divide-line">{paymentRows.map((row) => <tr key={row.name}><td className="py-2 font-semibold text-cocoa">{row.name}</td><td className="text-right">{row.orders}</td><td className="text-right font-bold">€{row.revenue.toFixed(2)}</td></tr>)}</tbody></table></div></section>
       </div>
 

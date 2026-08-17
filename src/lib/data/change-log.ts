@@ -16,6 +16,10 @@ export type ChangeLogFilters = {
   machine?: string;
   source?: string;
   field?: string;
+  action?: string;
+  actor?: string;
+  channel?: string;
+  outcome?: string;
 };
 
 export type ChangeLogRow = {
@@ -373,12 +377,41 @@ export async function recordCouponExchange(
   if (error) throw new Error(`Could not write coupon API log: ${error.message}`);
 }
 
+export async function recordRemoteCommand(
+  s: SupabaseClient,
+  machine: { id: string; device_imei: string; name: string | null; display_name?: string | null },
+  command: string,
+  result: { outcome: "accepted" | "rejected" | "ambiguous"; code?: string; message?: string; error?: string },
+  actor: Pick<SessionProfile, "id" | "email" | "role">,
+  channel: "web" | "mobile",
+) {
+  const { error } = await s.from("machine_change_log").insert({
+    machine_id: machine.id,
+    device_imei: machine.device_imei,
+    machine_name: machine.display_name || machine.name,
+    source: "platform",
+    action: result.outcome === "ambiguous" ? "remote_command_failed" : "remote_command",
+    entity_type: "machine",
+    entity_key: machine.id,
+    field: command,
+    new_value: { code: result.code ?? null, message: result.message ?? null },
+    actor_id: actor.id,
+    actor_email: actor.email,
+    metadata: { channel, source: channel, role: actor.role, outcome: result.outcome, error: result.error ?? null },
+  });
+  if (error) throw new Error(`Could not write remote command log: ${error.message}`);
+}
+
 export async function getChangeLog(s: SupabaseClient, filters: ChangeLogFilters): Promise<ChangeLogRow[]> {
   let query = s.from("machine_change_log").select("*").order("created_at", { ascending: false }).limit(500);
   if (filters.dateFrom) query = query.gte("created_at", `${filters.dateFrom}T00:00:00`);
   if (filters.dateTo) query = query.lte("created_at", `${filters.dateTo}T23:59:59.999`);
   if (filters.source) query = query.eq("source", filters.source);
   if (filters.field) query = query.ilike("field", `%${filters.field}%`);
+  if (filters.action) query = query.ilike("action", `%${filters.action}%`);
+  if (filters.actor) query = query.ilike("actor_email", `%${filters.actor}%`);
+  if (filters.channel) query = query.or(`metadata->>channel.eq.${filters.channel},metadata->>source.eq.${filters.channel}`);
+  if (filters.outcome) query = query.eq("metadata->>outcome", filters.outcome);
   if (filters.machine) query = query.or(`machine_name.ilike.%${filters.machine}%,device_imei.ilike.%${filters.machine}%`);
   const { data, error } = await query;
   if (error) throw new Error(error.message);

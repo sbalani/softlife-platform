@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { alertStatusSignals, diffSnapshots, menuFromSnapshot, menuProductIdMap, menuSnapshot } from "./change-log.ts";
+import { alertStatusSignals, diffSnapshots, menuFromSnapshot, menuProductIdMap, menuSnapshot, recordRemoteCommand } from "./change-log.ts";
 import { faultStatusSignal, iceCreamFormationPct, materialRemainingStatus, operatingStatusSignals, resourceStatusSignal, statusDisplayRank } from "../huaxin/status-signals.ts";
 import { FRANCHISEE_REMOTE_COMMANDS, HUAXIN_REMOTE_COMMANDS } from "../huaxin/remote-commands.ts";
 
@@ -132,6 +132,26 @@ test("remote command catalog covers every documented Huaxin operation", () => {
     "operate_switch_three", "operate_switch_coupon", "operate_switch_theme", "operate_clearwarn",
   ]));
   assert.deepEqual(FRANCHISEE_REMOTE_COMMANDS.map((item) => item.command), ["operate_make"]);
+});
+
+test("remote command audit records actor, channel, and outcome", async () => {
+  const inserted: Record<string, unknown>[] = [];
+  const client = {
+    from: () => ({
+      insert: async (row: Record<string, unknown>) => {
+        inserted.push(row);
+        return { error: null };
+      },
+    }),
+  };
+  await recordRemoteCommand(client as never, {
+    id: "machine-1", device_imei: "861", name: "Test", display_name: "Test machine",
+  }, "operate_status", { outcome: "accepted", code: "200", message: "success" }, {
+    id: "admin-1", email: "admin@example.com", role: "admin",
+  }, "web");
+  assert.deepEqual(inserted[0].metadata, { channel: "web", source: "web", role: "admin", outcome: "accepted", error: null });
+  assert.equal(inserted[0].actor_email, "admin@example.com");
+  assert.equal(inserted[0].machine_name, "Test machine");
 });
 
 test("menu events use the currently observed product assignment", () => {

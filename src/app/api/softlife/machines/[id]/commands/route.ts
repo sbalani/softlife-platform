@@ -89,7 +89,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         new_value: { code, message },
         actor_id: result.session.id,
         actor_email: result.session.email,
-        metadata: { source: "mobile", role: result.session.role },
+        metadata: { source: "mobile", channel: "mobile", role: result.session.role, outcome: code === "200" ? "accepted" : "rejected" },
       });
       if (code !== "200") return Response.json({ error: { message: message || "Command rejected" }, code }, { status: 502 });
       return Response.json({ ok: true, code, message: message || "success" });
@@ -105,7 +105,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         field: command,
         actor_id: result.session.id,
         actor_email: result.session.email,
-        metadata: { source: "mobile", role: result.session.role, error: error instanceof Error ? error.message : String(error) },
+        metadata: { source: "mobile", channel: "mobile", role: result.session.role, outcome: "ambiguous", error: error instanceof Error ? error.message : String(error) },
       });
       return Response.json({ error: { message: "The command could not be confirmed. Do not retry automatically." } }, { status: 502 });
     } finally {

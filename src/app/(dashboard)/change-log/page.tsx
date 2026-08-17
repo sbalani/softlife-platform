@@ -33,8 +33,8 @@ export default async function ChangeLogPage({ searchParams }: { searchParams: Pr
   return (
     <div>
       <header className="mb-6">
-        <h1 className="font-display text-3xl font-bold text-cocoa">Change Log</h1>
-        <p className="mt-1 text-sm text-taupe">Machine syncs, platform pushes, coupon API exchanges, and ingredient changes. Showing the latest {rows.length} records.</p>
+        <h1 className="font-display text-3xl font-bold text-cocoa">Action Report</h1>
+        <p className="mt-1 text-sm text-taupe">Durable machine changes, remote commands, API exchanges, and automated actions. Showing the latest {rows.length} records.</p>
       </header>
 
       <form className="mb-4 flex flex-wrap items-end gap-3">
@@ -42,6 +42,10 @@ export default async function ChangeLogPage({ searchParams }: { searchParams: Pr
         <label><span className={label}>To</span><input name="dateTo" type="date" defaultValue={filters.dateTo} className={input} /></label>
         <label><span className={label}>Machine</span><input name="machine" defaultValue={filters.machine} placeholder="Name or IMEI" className={`w-44 ${input}`} /></label>
         <label><span className={label}>Source</span><select name="source" defaultValue={filters.source ?? ""} className={input}><option value="">All</option><option value="machine_sync">Machine sync</option><option value="platform">Platform</option><option value="odoo">Odoo</option></select></label>
+        <label><span className={label}>Action</span><input name="action" defaultValue={filters.action} placeholder="remote command" className={`w-40 ${input}`} /></label>
+        <label><span className={label}>Actor</span><input name="actor" defaultValue={filters.actor} placeholder="Email" className={`w-40 ${input}`} /></label>
+        <label><span className={label}>Channel</span><select name="channel" defaultValue={filters.channel ?? ""} className={input}><option value="">All</option><option value="web">Web</option><option value="mobile">Mobile</option><option value="scheduler">Scheduler</option></select></label>
+        <label><span className={label}>Outcome</span><select name="outcome" defaultValue={filters.outcome ?? ""} className={input}><option value="">All</option><option value="accepted">Accepted</option><option value="rejected">Rejected</option><option value="ambiguous">Ambiguous</option></select></label>
         <label><span className={label}>Field</span><input name="field" defaultValue={filters.field} placeholder="price, sku, image…" className={`w-44 ${input}`} /></label>
         <button className="rounded-lg bg-cocoa px-4 py-2 text-sm font-bold text-white hover:opacity-90">Filter</button>
         <Link href="/change-log" className="text-sm font-semibold text-terracotta hover:underline">Clear</Link>
@@ -57,11 +61,13 @@ export default async function ChangeLogPage({ searchParams }: { searchParams: Pr
               const productName = typeof row.metadata?.product_name === "string" ? row.metadata.product_name : null;
               const before = displayValue(row.old_value);
               const after = displayValue(row.new_value);
+              const channel = typeof row.metadata?.channel === "string" ? row.metadata.channel : typeof row.metadata?.source === "string" ? row.metadata.source : null;
+              const outcome = typeof row.metadata?.outcome === "string" ? row.metadata.outcome : null;
               return (
                 <tr key={row.id} className="align-top hover:bg-cream/50">
                   <td className="whitespace-nowrap px-4 py-3 text-cocoa">{formatDateTime(row.created_at, tz)}</td>
                   <td className="px-4 py-3"><div className="font-semibold text-cocoa">{row.machine_name ?? productName ?? row.entity_type}</div><div className="font-mono text-[10px] text-taupe">{row.device_imei ?? row.entity_key ?? "—"}{row.device_imei && row.entity_key ? ` · ${row.entity_key}` : ""}</div></td>
-                  <td className="px-4 py-3"><span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold ${SOURCE_TONE[row.source] ?? "bg-cream text-taupe"}`}>{SOURCE_LABEL[row.source] ?? row.source}</span><div className="mt-1 text-[10px] text-taupe">{row.action.replaceAll("_", " ")}</div></td>
+                  <td className="px-4 py-3"><span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold ${SOURCE_TONE[row.source] ?? "bg-cream text-taupe"}`}>{SOURCE_LABEL[row.source] ?? row.source}</span><div className="mt-1 text-[10px] text-taupe">{row.action.replaceAll("_", " ")}</div>{(channel || outcome) && <div className="mt-1 text-[10px] font-semibold text-cocoa">{[channel, outcome].filter(Boolean).join(" · ")}</div>}</td>
                   <td className="px-4 py-3 font-semibold text-cocoa">{row.field ?? "—"}</td>
                   <td className="max-w-64 break-all px-4 py-3 text-taupe" title={before}>{before}</td>
                   <td className="max-w-64 break-all px-4 py-3 text-cocoa" title={after}>{after}</td>

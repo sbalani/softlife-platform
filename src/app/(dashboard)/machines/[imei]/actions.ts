@@ -6,7 +6,7 @@ import { getConfigFromEnv, editDeviceMedia, listDeviceProducts, pushDeviceSettin
 import type { DiyPushItem } from "@/lib/huaxin/client";
 import { generateAllergenComposite } from "@/lib/allergens/composite";
 import { getSessionProfile } from "@/lib/auth/session";
-import { recordMachinePush, recordMachineSync, recordProductChange } from "@/lib/data/change-log";
+import { recordMachinePush, recordMachineSync, recordProductChange, recordRemoteCommand } from "@/lib/data/change-log";
 import { syncMachineMedia } from "@/lib/data/machine-media";
 import { recordMachineClean } from "@/lib/data/clean-logs";
 import { cleanDay } from "@/lib/data/service-history-utils";
@@ -374,7 +374,7 @@ export async function sendMachineCommand(
     const remoteCommands = new Set<string>(((tenant?.remote_commands as string[] | null) ?? ["operate_make"]));
     if (!configurableCommands.has(command) || !remoteCommands.has(command)) return { ok: false, error: "This control is not enabled for your franchise account." };
   }
-  const { data: machine } = await service.from("machines").select("id").eq("device_imei", imei).maybeSingle();
+  const { data: machine } = await service.from("machines").select("id,name,display_name,device_imei").eq("device_imei", imei).maybeSingle();
   if (!machine) return { ok: false, error: "Machine not found or not assigned to you." };
   const { data: activeDefrost, error: defrostError } = await service.from("machine_defrost_runs").select("id,state").eq("machine_id", machine.id).in("state", ["scheduled", "thawing", "thaw_closed", "refrigeration_check", "forming", "sales_check", "recovery"]).maybeSingle();
   if (defrostError) return { ok: false, error: "Could not verify automated defrost state." };
@@ -408,10 +408,21 @@ export async function sendMachineCommand(
     const result = await sendCommand(cfg, imei, command);
     const code = String(result.code);
     const msg = result.msg ?? "";
+    try {
+      await recordRemoteCommand(service, machine, command, { outcome: code === "200" ? "accepted" : "rejected", code, message: msg }, session, "web");
+    } catch (logError) {
+      console.error("[remote-command] Could not write web command log:", logError);
+    }
     if (code === "200") return { ok: true, huaxinCode: code, huaxinMsg: msg || "success" };
     return { ok: false, error: msg || "Command rejected", huaxinCode: code, huaxinMsg: msg };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    const error = e instanceof Error ? e.message : String(e);
+    try {
+      await recordRemoteCommand(service, machine, command, { outcome: "ambiguous", error }, session, "web");
+    } catch (logError) {
+      console.error("[remote-command] Could not write web command failure log:", logError);
+    }
+    return { ok: false, error };
   } finally {
     if (commandLease) await service.rpc("release_interactive_machine_command", { p_machine_id: machine.id, p_owner: commandOwner });
   }

@@ -515,8 +515,18 @@ async function processRun(s: SupabaseClient, cfg: HuaxinConfig, run: DefrostRun,
       await transitionRun(s, run, owner, "sales_check", `sales_retry_${nextAttempt}`, { sales_attempts: nextAttempt, final_sales_value: telemetry.operating, last_status_observed_at: telemetry.observedAt, next_action_at: new Date(Date.now() + POLL_INTERVAL_MS).toISOString() });
     }
   } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (run.state === "scheduled") {
+      const { count, error: attemptsError } = await s.from("machine_command_attempts").select("id", { count: "exact", head: true }).eq("run_id", run.id);
+      if (attemptsError) throw attemptsError;
+      if (count === 0) {
+        const completedAt = new Date().toISOString();
+        await transitionRun(s, run, owner, "failed", "precheck_failed", { completed_at: completedAt, outcome: "failed", failure_detail: detail });
+        return;
+      }
+    }
     const recovery = await safeRecovery(s, cfg, run, typedMachine);
-    await recordFailure(s, run, owner, `${error instanceof Error ? error.message : String(error)} Safe recovery: ${recovery.detail}`, recovery.safe ? "manual_intervention" : "recovery");
+    await recordFailure(s, run, owner, `${detail} Safe recovery: ${recovery.detail}`, recovery.safe ? "manual_intervention" : "recovery");
   }
 }
 

@@ -58,6 +58,7 @@ const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(reso
 const COMMAND_DELAY_MS = 2_000;
 const POLL_INTERVAL_MS = 60_000;
 const CONFIRMATION_TIMEOUT_MS = 10 * 60_000;
+const HUAXIN_DEFROST_BRIDGE_URL = "https://softlife-platform.vercel.app/api/internal/huaxin-defrost";
 
 function env(name: string) {
   const value = Deno.env.get(name);
@@ -82,7 +83,7 @@ async function huaxinConfig(s: SupabaseClient): Promise<HuaxinConfig> {
 }
 
 async function huaxinCall(path: string, _cfg: HuaxinConfig, extra: Record<string, unknown>) {
-  const response = await fetch(env("HUAXIN_DEFROST_BRIDGE_URL"), {
+  const response = await fetch(HUAXIN_DEFROST_BRIDGE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-defrost-bridge-token": env("HUAXIN_DEFROST_BRIDGE_TOKEN") },
     body: JSON.stringify({ path, extra }),

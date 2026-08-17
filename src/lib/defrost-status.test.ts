@@ -17,6 +17,7 @@ test("recognizes live Spanish and English Huaxin switch values", () => {
 });
 
 test("distinguishes manual sales blocks from valid normal and night modes", () => {
+  assert.equal(isHuaxinSalesBlocked("[4]Control remoto"), true);
   assert.equal(isHuaxinSalesBlocked("[9]Cerrado"), true);
   assert.equal(isHuaxinSalesBlocked("[105]Cierre de refrigeración"), true);
   assert.equal(isHuaxinSalesReady("Normal"), true);

@@ -18,7 +18,7 @@ export function huaxinOperatingStateCode(value: string | null): string | null {
 }
 
 export function isHuaxinSalesBlocked(value: string | null): boolean {
-  return ["9", "105"].includes(huaxinOperatingStateCode(value) ?? "");
+  return ["4", "9", "105"].includes(huaxinOperatingStateCode(value) ?? "");
 }
 
 export function isHuaxinSalesReady(value: string | null): boolean {

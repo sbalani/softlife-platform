@@ -240,7 +240,7 @@ function operatingStateCode(value: string | null) {
 }
 
 function isSalesBlocked(value: string | null) {
-  return ["9", "105"].includes(operatingStateCode(value) ?? "");
+  return ["4", "9", "105"].includes(operatingStateCode(value) ?? "");
 }
 
 function isSalesReady(value: string | null) {
@@ -427,8 +427,7 @@ async function processRun(s: SupabaseClient, cfg: HuaxinConfig, run: DefrostRun,
     }
     if (run.state === "thaw_closed") {
       const stoppedTelemetry = await captureTelemetry(s, cfg, run, typedMachine, "before_refrigeration_on", 0);
-      if (!isClosed(stoppedTelemetry.defrost)) throw new Error(`Defrost did not report Cierre/Close after stop command (reported ${stoppedTelemetry.defrost ?? "missing"})`);
-      await confirmCommandEffect(s, run, "operate_closethawing", stoppedTelemetry.observedAt);
+      if (isClosed(stoppedTelemetry.defrost)) await confirmCommandEffect(s, run, "operate_closethawing", stoppedTelemetry.observedAt);
       const salesBlockedObserved = run.sales_blocked_observed || isSalesBlocked(stoppedTelemetry.operating) || !isOpen(stoppedTelemetry.sales);
       await issueCommand(s, cfg, run, typedMachine, "refrigeration_on_1", "operate_openrefrigeration", 1);
       const now = new Date();
@@ -439,15 +438,20 @@ async function processRun(s: SupabaseClient, cfg: HuaxinConfig, run: DefrostRun,
       const poll = Math.max(run.refrigeration_attempts, 1);
       const telemetry = await captureTelemetry(s, cfg, run, typedMachine, "refrigeration_check", poll);
       const salesBlockedObserved = run.sales_blocked_observed || isSalesBlocked(telemetry.operating) || !isOpen(telemetry.sales);
-      if (isOpen(telemetry.refrigeration)) {
+      if (isOpen(telemetry.refrigeration) && isClosed(telemetry.defrost)) {
+        await confirmCommandEffect(s, run, "operate_closethawing", telemetry.observedAt);
         await confirmCommandEffect(s, run, "operate_openrefrigeration", telemetry.observedAt);
         const resetObserved = telemetry.formation !== null && telemetry.formation < 100;
         await transitionRun(s, run, owner, "forming", "refrigeration_confirmed", { formation_started_at: telemetry.observedAt, formation_reset_observed: resetObserved, formation_poll_count: 0, sales_blocked_observed: salesBlockedObserved, last_formation_pct: telemetry.formation, last_status_observed_at: telemetry.observedAt, final_refrigeration_value: telemetry.refrigeration, next_action_at: new Date(Date.now() + POLL_INTERVAL_MS).toISOString() });
         return;
       }
       const startedAt = new Date(run.refrigeration_started_at ?? telemetry.observedAt).getTime();
-      if (Date.now() - startedAt >= CONFIRMATION_TIMEOUT_MS || run.refrigeration_attempts >= 10) throw new Error("Refrigeration did not report Abrir/Open within 10 minutes");
+      if (Date.now() - startedAt >= CONFIRMATION_TIMEOUT_MS || run.refrigeration_attempts >= 10) throw new Error("Defrost off and refrigeration on could not both be confirmed within 10 minutes");
       const nextAttempt = run.refrigeration_attempts + 1;
+      if (!isClosed(telemetry.defrost)) {
+        await issueCommand(s, cfg, run, typedMachine, `thaw_off_confirm_${nextAttempt}`, "operate_closethawing", nextAttempt);
+        await delay(COMMAND_DELAY_MS);
+      }
       await issueCommand(s, cfg, run, typedMachine, `refrigeration_on_${nextAttempt}`, "operate_openrefrigeration", nextAttempt);
       await transitionRun(s, run, owner, "refrigeration_check", `refrigeration_retry_${nextAttempt}`, { refrigeration_attempts: nextAttempt, sales_blocked_observed: salesBlockedObserved, last_status_observed_at: telemetry.observedAt, final_refrigeration_value: telemetry.refrigeration, next_action_at: new Date(Date.now() + POLL_INTERVAL_MS).toISOString() });
       return;

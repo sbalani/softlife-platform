@@ -9,7 +9,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export const runtime = "nodejs";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SAFE_DURING_DEFROST = new Set(["operate_sellout", "operate_closethawing", "operate_openrefrigeration", "operate_status"]);
+const SAFE_DURING_DEFROST = new Set(["operate_sellout", "operate_status"]);
 
 async function commandsFor(s: SupabaseClient, session: MobileSession) {
   if (session.role === "admin") return HUAXIN_REMOTE_COMMANDS;
@@ -35,7 +35,7 @@ async function authorizedMachine(req: Request, rawId: string) {
   if (error) throw error;
   const machine = data as { id: string; name: string; display_name: string | null; device_imei: string | null } | null;
   if (!machine?.device_imei) return { response: Response.json({ error: { message: "Machine is not available for remote control" } }, { status: 409 }) };
-  const { data: activeDefrost, error: defrostError } = await service.from("machine_defrost_runs").select("id,state").eq("machine_id", id).in("state", ["scheduled", "thawing", "thaw_closed", "forming", "recovery"]).maybeSingle();
+  const { data: activeDefrost, error: defrostError } = await service.from("machine_defrost_runs").select("id,state").eq("machine_id", id).in("state", ["scheduled", "thawing", "thaw_closed", "refrigeration_check", "forming", "sales_check", "recovery"]).maybeSingle();
   if (defrostError) throw defrostError;
   return { session, service, machine, activeDefrost };
 }

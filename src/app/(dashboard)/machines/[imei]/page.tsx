@@ -32,6 +32,7 @@ import { translateLocation } from "@/lib/i18n/huaxin";
 import { getRefillHistory } from "@/lib/data/refills";
 import { getMachineCleanHistory } from "@/lib/data/clean-logs";
 import { MachineServiceQr } from "@/components/MachineServiceQr";
+import { DefrostRunPanel } from "./DefrostRunPanel";
 import { faultStatusSignal, materialRemainingStatus, resourceStatusSignal, statusDisplayRank } from "@/lib/huaxin/status-signals";
 
 export const dynamic = "force-dynamic";
@@ -171,6 +172,7 @@ export default async function MachineDetailPage({
         {config ? (
           <>
             <MachineConfigForm config={config} imei={imei} today={defaultTo} lastCleanDate={config.lastFullClean ? ymd(new Date(config.lastFullClean), tz) : ""} />
+            {config.machineId && config.defrostSchedule && <DefrostRunPanel machineId={config.machineId} machineName={config.displayName || config.name} imei={imei} deployed={config.deployed} durationMinutes={config.defrostSchedule.defrostMinutes} requiresIntervention={config.defrostSchedule.requiresIntervention} runs={config.defrostRuns} />}
             {config.machineId && (
               <div className="mt-5 border-t border-line pt-4">
                 <h3 className="mb-3 text-[11px] uppercase tracking-wide text-taupe">Franchisee assignment &amp; profit share</h3>

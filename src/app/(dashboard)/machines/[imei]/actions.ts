@@ -376,9 +376,9 @@ export async function sendMachineCommand(
   }
   const { data: machine } = await service.from("machines").select("id").eq("device_imei", imei).maybeSingle();
   if (!machine) return { ok: false, error: "Machine not found or not assigned to you." };
-  const { data: activeDefrost, error: defrostError } = await service.from("machine_defrost_runs").select("id,state").eq("machine_id", machine.id).in("state", ["scheduled", "thawing", "thaw_closed", "forming", "recovery"]).maybeSingle();
+  const { data: activeDefrost, error: defrostError } = await service.from("machine_defrost_runs").select("id,state").eq("machine_id", machine.id).in("state", ["scheduled", "thawing", "thaw_closed", "refrigeration_check", "forming", "sales_check", "recovery"]).maybeSingle();
   if (defrostError) return { ok: false, error: "Could not verify automated defrost state." };
-  const safeDuringDefrost = new Set(["operate_sellout", "operate_closethawing", "operate_openrefrigeration", "operate_status"]);
+  const safeDuringDefrost = new Set(["operate_sellout", "operate_status"]);
   if (activeDefrost && !safeDuringDefrost.has(command)) return { ok: false, error: `Command blocked while automated defrost is ${activeDefrost.state}.` };
   if (session.role === "franchisee") {
     if (!session.tenant_id) return { ok: false, error: "No franchisee account assigned." };

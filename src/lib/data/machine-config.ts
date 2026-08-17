@@ -4,6 +4,20 @@ import type { Source } from "./machines";
 
 export type ProductOpt = { id: string; name: string; type: string };
 export type OdooWarehouseOpt = { odoo_id: number; name: string; code: string | null };
+export type DefrostRunSummary = {
+  id: string;
+  state: string;
+  triggerKind: string;
+  scheduledFor: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  nextActionAt: string;
+  lastFormationPct: number | null;
+  refrigerationAttempts: number;
+  salesAttempts: number;
+  failureDetail: string | null;
+  outcome: string | null;
+};
 
 export type MachineConfig = {
   machineId: string | null;
@@ -23,6 +37,7 @@ export type MachineConfig = {
   deployed: boolean;
   defrostSchedule: { enabled: boolean; localStartTime: string; defrostMinutes: number; requiresIntervention: boolean } | null;
   latestDefrostRun: { state: string; scheduledFor: string; lastFormationPct: number | null; failureDetail: string | null } | null;
+  defrostRuns: DefrostRunSummary[];
   odooWarehouses: OdooWarehouseOpt[];
   ingredients: { position: string; product_id: string | null; product_type: string; current_lot_name: string | null; last_loaded_date: string | null }[];
   bases: ProductOpt[];
@@ -59,17 +74,36 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
       const [ingredientResult, scheduleResult, runResult] = await Promise.all([
         s.from("machine_ingredients").select("position,product_id,product_type,current_lot_name,last_loaded_date").eq("machine_id", machine.id as string),
         s.from("machine_defrost_schedules").select("enabled,local_start_time,defrost_seconds,requires_intervention").eq("machine_id", machine.id as string).maybeSingle(),
-        s.from("machine_defrost_runs").select("state,scheduled_for,last_formation_pct,failure_detail").eq("machine_id", machine.id as string).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+        s.from("machine_defrost_runs").select("id,state,trigger_kind,scheduled_for,started_at,completed_at,next_action_at,last_formation_pct,refrigeration_attempts,sales_attempts,failure_detail,outcome").eq("machine_id", machine.id as string).order("created_at", { ascending: false }).limit(10),
       ]);
       if (ingredientResult.error) throw ingredientResult.error;
       if (scheduleResult.error) throw scheduleResult.error;
       if (runResult.error) throw runResult.error;
       const { data: ings } = ingredientResult;
       const { data: schedule } = scheduleResult;
-      const { data: run } = runResult;
+      const runRows = (runResult.data as Record<string, unknown>[]) ?? [];
       ingredients = (ings as MachineConfig["ingredients"]) ?? [];
       if (schedule) defrostSchedule = { enabled: Boolean(schedule.enabled), localStartTime: String(schedule.local_start_time).slice(0, 5), defrostMinutes: Number(schedule.defrost_seconds) / 60, requiresIntervention: Boolean(schedule.requires_intervention) };
+      const run = runRows[0];
       if (run) latestDefrostRun = { state: String(run.state), scheduledFor: String(run.scheduled_for), lastFormationPct: run.last_formation_pct == null ? null : Number(run.last_formation_pct), failureDetail: (run.failure_detail as string) ?? null };
+      const defrostRuns: DefrostRunSummary[] = runRows.map((row) => ({
+        id: String(row.id), state: String(row.state), triggerKind: String(row.trigger_kind), scheduledFor: String(row.scheduled_for),
+        startedAt: (row.started_at as string) ?? null, completedAt: (row.completed_at as string) ?? null, nextActionAt: String(row.next_action_at),
+        lastFormationPct: row.last_formation_pct == null ? null : Number(row.last_formation_pct), refrigerationAttempts: Number(row.refrigeration_attempts ?? 0),
+        salesAttempts: Number(row.sales_attempts ?? 0), failureDetail: (row.failure_detail as string) ?? null, outcome: (row.outcome as string) ?? null,
+      }));
+      return {
+        machineId: (machine?.id as string) ?? null, name: (machine?.name as string) ?? imei,
+        location: (machine?.location_override as string) || translateLocation(machine?.location as string) || null,
+        locationOverride: (machine?.location_override as string) ?? null, latitude: (machine?.latitude as number) ?? null, longitude: (machine?.longitude as number) ?? null,
+        baseProductId: (machine?.base_product_id as string) ?? null, profile: (machine?.profile as string) ?? null,
+        lastFullClean: (machine?.last_full_clean_date as string) ?? null, paymentModel: (machine?.payment_model as string) ?? null,
+        customerId: (machine?.customer_id as string) ?? null, nayaxId: (machine?.nayax_id as string) ?? null,
+        displayName: (machine?.display_name as string) ?? null, odooWarehouseId: (machine?.odoo_warehouse_id as number) ?? null,
+        deployed: machine?.deployed !== false, defrostSchedule, latestDefrostRun, defrostRuns,
+        odooWarehouses: (warehouseRows as OdooWarehouseOpt[]) ?? [], ingredients,
+        bases: products.filter((p) => p.type === "base"), toppings: products.filter((p) => p.type === "topping"), sauces: products.filter((p) => p.type === "sauce"), source: "supabase",
+      };
     }
 
     return {
@@ -90,6 +124,7 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
       deployed: machine?.deployed !== false,
       defrostSchedule,
       latestDefrostRun,
+      defrostRuns: [],
       odooWarehouses: (warehouseRows as OdooWarehouseOpt[]) ?? [],
       ingredients,
       bases: products.filter((p) => p.type === "base"),

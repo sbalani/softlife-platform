@@ -43,7 +43,9 @@ live against UAT). Set the five `HUAXIN_*` values in `.env.local`.
 > Huaxin has confirmed it will not renew the expired **UAT TLS certificate**.
 > Keep `HUAXIN_VERIFY_SSL=false` for UAT. The web and defrost clients deliberately
 > bypass certificate validation only for `uatapi.huaxinvending.com`; production
-> Huaxin endpoints must continue to verify TLS.
+> Huaxin endpoints must continue to verify TLS. The Supabase defrost worker calls
+> the authenticated `/api/internal/huaxin-defrost` Node bridge because Supabase's
+> Edge runtime cannot apply this per-host UAT exception itself.
 
 ## Mobile push notifications
 

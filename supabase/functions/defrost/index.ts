@@ -1,5 +1,4 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { Agent, fetch as undiciFetch } from "npm:undici";
 
 type HuaxinConfig = {
   baseUrl: string;
@@ -59,10 +58,6 @@ const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(reso
 const COMMAND_DELAY_MS = 2_000;
 const POLL_INTERVAL_MS = 60_000;
 const CONFIRMATION_TIMEOUT_MS = 10 * 60_000;
-const HUAXIN_UAT_HOST = "uatapi.huaxinvending.com";
-
-let huaxinSession: { auth: string; jsid: string; at: number } | null = null;
-const huaxinUatAgent = new Agent({ connect: { rejectUnauthorized: false } });
 
 function env(name: string) {
   const value = Deno.env.get(name);
@@ -86,56 +81,21 @@ async function huaxinConfig(s: SupabaseClient): Promise<HuaxinConfig> {
   return { baseUrl: row.base_url, mchId: row.mch_id, mchSecret: row.mch_secret, sign: row.sign, nonceStr: row.nonce_str, timeStamp: row.time_stamp, notifyUrl: row.notify_url };
 }
 
-async function huaxinRequest(path: string, cfg: HuaxinConfig, extra: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
-  const url = new URL(path, `${cfg.baseUrl.replace(/\/$/, "")}/`);
-  const request = {
+async function huaxinCall(path: string, _cfg: HuaxinConfig, extra: Record<string, unknown>) {
+  const response = await fetch(env("HUAXIN_DEFROST_BRIDGE_URL"), {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...headers },
-    body: JSON.stringify({
-      mch_id: cfg.mchId,
-      mch_secret: cfg.mchSecret,
-      nonce_str: cfg.nonceStr,
-      time_Stamp: cfg.timeStamp,
-      create_ip: "127.0.0.1",
-      notify_url: cfg.notifyUrl,
-      sign: cfg.sign,
-      ...extra,
-    }),
+    headers: { "Content-Type": "application/json", "x-defrost-bridge-token": env("HUAXIN_DEFROST_BRIDGE_TOKEN") },
+    body: JSON.stringify({ path, extra }),
     signal: AbortSignal.timeout(30_000),
-  };
-  // Huaxin has confirmed its UAT certificate will remain expired. Keep this
-  // exception scoped to their exact UAT hostname; production still verifies TLS.
-  const response = url.hostname === HUAXIN_UAT_HOST
-    ? await undiciFetch(url, { ...request, dispatcher: huaxinUatAgent })
-    : await fetch(url, request);
+  });
   const text = await response.text();
-  let data: Envelope;
+  let data: Envelope & { error?: string };
   try {
-    data = JSON.parse(text) as Envelope;
+    data = JSON.parse(text) as Envelope & { error?: string };
   } catch {
-    throw new Error(`Huaxin ${path} returned HTTP ${response.status} with a non-JSON response`);
+    throw new Error(`Huaxin bridge returned HTTP ${response.status} with a non-JSON response`);
   }
-  if (!response.ok) throw new Error(`Huaxin ${path} returned HTTP ${response.status}: ${data.msg ?? response.statusText}`);
-  return data;
-}
-
-async function authorizeHuaxin(cfg: HuaxinConfig) {
-  const data = await huaxinRequest("/machine/cloud/api/authorize", cfg);
-  if (String(data.code) !== "200") throw new Error(`Huaxin authorize failed: ${data.msg ?? "unknown"}`);
-  const auth = (data.data as { authorization?: string } | null)?.authorization;
-  if (!auth || !data.jsessionId) throw new Error("Huaxin authorize returned no session");
-  huaxinSession = { auth, jsid: data.jsessionId, at: Date.now() };
-  return huaxinSession;
-}
-
-async function huaxinCall(path: string, cfg: HuaxinConfig, extra: Record<string, unknown>) {
-  const session = huaxinSession && Date.now() - huaxinSession.at < 15 * 60_000 ? huaxinSession : await authorizeHuaxin(cfg);
-  const headers = { Authorization: session.auth, Cookie: `JSESSIONID=${session.jsid};SESSION=${session.jsid}`, jsessionId: session.jsid };
-  const data = await huaxinRequest(path, cfg, extra, headers);
-  if (String(data.code) === "208" && (data.msg ?? "").toLowerCase().includes("auth")) {
-    const refreshed = await authorizeHuaxin(cfg);
-    return huaxinRequest(path, cfg, extra, { Authorization: refreshed.auth, Cookie: `JSESSIONID=${refreshed.jsid};SESSION=${refreshed.jsid}`, jsessionId: refreshed.jsid });
-  }
+  if (!response.ok) throw new Error(`Huaxin bridge returned HTTP ${response.status}: ${data.error ?? data.msg ?? response.statusText}`);
   return data;
 }
 

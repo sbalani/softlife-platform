@@ -1,0 +1,171 @@
+SOFTLIFE MOBILE MANUAL DEFROST HANDOFF
+======================================
+
+Status date: 2026-08-17
+Platform implementation: deployed durable workflow; mobile API pending this release.
+
+
+1. AUTHORIZATION
+----------------
+
+Use the existing Supabase access token:
+
+  Authorization: Bearer <access_token>
+  Content-Type: application/json
+
+Only users whose session includes the `defrost.run` capability may use these
+endpoints. The capability is currently admin-only. Do not infer access from
+`remote.basic`; franchisees can have remote-control access but cannot run
+defrost.
+
+The mobile app must never call Supabase `request_manual_defrost` directly and
+must never contain a service-role key, Huaxin credentials, bridge token, or cron
+token.
+
+
+2. READ STATUS AND HISTORY
+--------------------------
+
+GET https://softlife-platform.vercel.app/api/softlife/machines/<machine-uuid>/defrost
+
+Successful response: HTTP 200
+
+  {
+    "machine_id": "<machine-uuid>",
+    "schedule": {
+      "defrost_seconds": 240,
+      "formation_timeout_seconds": 5400,
+      "requires_intervention": false
+    },
+    "active_run": null,
+    "runs": [
+      {
+        "id": "<run-uuid>",
+        "state": "completed",
+        "trigger_kind": "manual",
+        "scheduled_for": "<ISO-8601>",
+        "started_at": "<ISO-8601|null>",
+        "completed_at": "<ISO-8601|null>",
+        "next_action_at": "<ISO-8601>",
+        "last_formation_pct": 100,
+        "refrigeration_attempts": 2,
+        "sales_attempts": 1,
+        "failure_detail": null,
+        "outcome": "completed"
+      }
+    ]
+  }
+
+The endpoint returns the newest ten runs. Poll every 10 seconds while
+`active_run` is not null. Stop polling when the run reaches a terminal state.
+
+
+3. START A MANUAL CYCLE
+-----------------------
+
+POST https://softlife-platform.vercel.app/api/softlife/machines/<machine-uuid>/defrost
+
+Request:
+
+  {
+    "request_id": "<client-generated UUID>"
+  }
+
+Generate `request_id` once when the user confirms the action. If the HTTP result
+is ambiguous because of a timeout or connection loss, retry with the same UUID.
+Never generate a second UUID automatically.
+
+New run: HTTP 202
+
+  {
+    "ok": true,
+    "duplicate": false,
+    "run": { "id": "<run-uuid>", "state": "scheduled", "...": "..." }
+  }
+
+Repeated request_id: HTTP 200
+
+  {
+    "ok": true,
+    "duplicate": true,
+    "run": { "id": "<same-run-uuid>", "state": "...", "...": "..." }
+  }
+
+
+4. RUN STATES
+-------------
+
+Active states:
+
+  scheduled             queued and awaiting the durable worker
+  thawing               defrost is running for the saved duration
+  thaw_closed           defrost-off accepted; command spacing in progress
+  refrigeration_check   verifying defrost off and refrigeration on
+  forming               refrigeration confirmed; waiting for fresh 100%
+  sales_check            sales-resume command sent and being confirmed
+  recovery              automated safe-state recovery in progress
+
+Terminal states:
+
+  completed             refrigeration, formation, and sales all confirmed
+  failed                failed before machine state changed
+  manual_intervention   inspect the machine before any further operation
+
+Display `last_formation_pct`, attempt counters, and `failure_detail` when present.
+Do not treat a Huaxin command acceptance as completion; only the terminal run
+state is authoritative.
+
+
+5. USER EXPERIENCE AND SAFETY
+-----------------------------
+
+Before POST, show a destructive confirmation explaining that the cycle will:
+
+  1. Disable sales.
+  2. Stop refrigeration.
+  3. Run defrost for the saved duration.
+  4. Restart and verify refrigeration.
+  5. Wait for formation to freshly reach 100%.
+  6. Resume and verify sales.
+
+Disable the start button when `active_run` is not null or when
+`schedule.requires_intervention` is true. Intervention clearing remains an
+admin web action because it includes an explicit physical-inspection
+attestation.
+
+Never expose raw defrost-on or defrost-off as the normal workflow. During an
+active cycle, other remote commands can be fenced with HTTP 409. Do not retry
+raw Huaxin commands from mobile.
+
+Huaxin UAT permanently uses an expired certificate by agreement with Huaxin.
+The platform handles that server-side through the authenticated Node bridge.
+Mobile requires no TLS exception and must call only the SoftLife HTTPS API.
+
+
+6. ERRORS
+---------
+
+  400  Invalid machine UUID, request_id, or JSON.
+  401  Missing, expired, or invalid access token.
+  403  Authenticated user does not have `defrost.run`.
+  404  Machine does not exist or is outside the caller's scope.
+  409  Machine undeployed, missing IMEI/schedule, intervention latched,
+       another command leased, or another cycle active.
+  500  Unexpected persistence error.
+  503  Platform backend is not configured.
+
+For 401, use the normal refresh-token flow. Treat refresh 401 or 403 as terminal
+and return to login. For 409, show the server message and refresh GET status.
+
+
+7. MOBILE ACCEPTANCE CHECKLIST
+------------------------------
+
+  [ ] Feature is visible only when `defrost.run` is present.
+  [ ] Confirmation is required before POST.
+  [ ] One UUID is retained across ambiguous retries.
+  [ ] Active state is polled every 10 seconds and survives app restart.
+  [ ] Formation percentage and current state are visible.
+  [ ] Terminal failure/intervention detail is visible.
+  [ ] Start is disabled for active runs and intervention latches.
+  [ ] Mobile sends no direct Huaxin or raw defrost commands.

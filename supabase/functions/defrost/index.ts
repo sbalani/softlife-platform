@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { Agent, fetch as undiciFetch } from "npm:undici";
 
 type HuaxinConfig = {
   baseUrl: string;
@@ -58,8 +59,10 @@ const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(reso
 const COMMAND_DELAY_MS = 2_000;
 const POLL_INTERVAL_MS = 60_000;
 const CONFIRMATION_TIMEOUT_MS = 10 * 60_000;
+const HUAXIN_UAT_HOST = "uatapi.huaxinvending.com";
 
 let huaxinSession: { auth: string; jsid: string; at: number } | null = null;
+const huaxinUatAgent = new Agent({ connect: { rejectUnauthorized: false } });
 
 function env(name: string) {
   const value = Deno.env.get(name);
@@ -84,7 +87,8 @@ async function huaxinConfig(s: SupabaseClient): Promise<HuaxinConfig> {
 }
 
 async function huaxinRequest(path: string, cfg: HuaxinConfig, extra: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
-  const response = await fetch(cfg.baseUrl.replace(/\/$/, "") + path, {
+  const url = new URL(path, `${cfg.baseUrl.replace(/\/$/, "")}/`);
+  const request = {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify({
@@ -98,7 +102,12 @@ async function huaxinRequest(path: string, cfg: HuaxinConfig, extra: Record<stri
       ...extra,
     }),
     signal: AbortSignal.timeout(30_000),
-  });
+  };
+  // Huaxin has confirmed its UAT certificate will remain expired. Keep this
+  // exception scoped to their exact UAT hostname; production still verifies TLS.
+  const response = url.hostname === HUAXIN_UAT_HOST
+    ? await undiciFetch(url, { ...request, dispatcher: huaxinUatAgent })
+    : await fetch(url, request);
   const text = await response.text();
   let data: Envelope;
   try {

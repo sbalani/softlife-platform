@@ -40,8 +40,10 @@ live against UAT). Set the five `HUAXIN_*` values in `.env.local`.
   and upserts machines. Wire it up in `vercel.json` as a daily cron and protect
   it with `CRON_SECRET`.
 
-> The Huaxin **UAT TLS certificate is expired**. Keep `HUAXIN_VERIFY_SSL=false`
-> for UAT and turn it back on for production.
+> Huaxin has confirmed it will not renew the expired **UAT TLS certificate**.
+> Keep `HUAXIN_VERIFY_SSL=false` for UAT. The web and defrost clients deliberately
+> bypass certificate validation only for `uatapi.huaxinvending.com`; production
+> Huaxin endpoints must continue to verify TLS.
 
 ## Mobile push notifications
 

@@ -51,17 +51,17 @@ export async function getActionReportLots(warehouseIds: number[]): Promise<Actio
     .map((lot) => ({ odooId: lot.odooId, name: lot.name, productName: lot.productName, available: lot.available, warehouseId: lot.warehouseId }));
 }
 
-export async function getActionReportHistory(filters: { machineIds?: string[]; tenantId?: string }): Promise<ActionReportHistoryItem[]> {
+export async function getActionReportHistory(filters: { machineIds?: string[]; tenantId?: string; actorId?: string }): Promise<ActionReportHistoryItem[]> {
   if (!isSupabaseConfigured() || (!filters.tenantId && filters.machineIds?.length === 0)) return [];
   const s = await createServiceClient();
   let query = s.from("service_action_reports")
-    .select("id,action_kind,occurred_at,status,provenance_status,notes,machines(name,display_name),service_action_refill_lines(quantity,unit,observed_lot_code,product_name,provenance_status)")
+    .select("id,operator_id,action_kind,occurred_at,status,provenance_status,notes,machines(name,display_name),service_action_refill_lines(quantity,unit,observed_lot_code,product_name,provenance_status)")
     .order("occurred_at", { ascending: false }).limit(50);
   if (filters.tenantId) query = query.eq("tenant_id", filters.tenantId);
   else if (filters.machineIds) query = query.in("machine_id", filters.machineIds);
   const { data, error } = await query;
   if (error) throw error;
-  const canonical = ((data as Record<string, unknown>[]) ?? []).map((row) => {
+  const canonical = ((data as Record<string, unknown>[]) ?? []).filter((row) => row.status !== "draft" || !filters.actorId || row.operator_id === filters.actorId).map((row) => {
     const machine = row.machines as { name: string; display_name: string | null } | null;
     const lines = (row.service_action_refill_lines as Record<string, unknown>[]) ?? [];
     return {
@@ -136,13 +136,14 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
     .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt)).slice(0, 50);
 }
 
-export async function getActionReportDraft(id: string, tenantId?: string): Promise<ActionReportDraft | null> {
+export async function getActionReportDraft(id: string, tenantId?: string, actorId?: string): Promise<ActionReportDraft | null> {
   if (!isSupabaseConfigured() || !/^[0-9a-f-]{36}$/i.test(id)) return null;
   const s = await createServiceClient();
   let query = s.from("service_action_reports")
     .select("id,client_uuid,machine_id,occurred_at,action_kind,notes,cleaning_material_used,water_bucket_count,service_action_refill_lines(odoo_lot_id:observed_odoo_lot_id,lot_code:observed_lot_code,product_name,quantity,unit,line_number)")
     .eq("id", id).eq("status", "draft");
   if (tenantId) query = query.eq("tenant_id", tenantId);
+  if (actorId) query = query.eq("operator_id", actorId);
   const { data, error } = await query.maybeSingle();
   if (error) throw error;
   if (!data) return null;

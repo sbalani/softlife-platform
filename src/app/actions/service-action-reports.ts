@@ -1,9 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { getSessionProfile } from "@/lib/auth/session";
 import { canAccessMachine } from "@/lib/data/service-access";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { authorizedActionReport } from "@/lib/data/action-report-access";
+import { actionReportExtractionSchema } from "@/lib/action-report-ai-schema";
 
 export type ActionReportResult = {
   ok: boolean;
@@ -76,6 +79,30 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
   try {
     const s = await createServiceClient();
     if (!await canAccessMachine(s, actor, machineId, new Date(occurredMs).toISOString())) return { ok: false, error: "You do not have access to this machine at the action time." };
+    const { data: existingOwnedReport } = await s.from("service_action_reports").select("id,operator_id,status").eq("client_uuid", clientUuid).maybeSingle();
+    if (existingOwnedReport && actor.role !== "admin" && existingOwnedReport.operator_id !== actor.id) return { ok: false, error: "You do not own this draft." };
+    if (status === "confirmed") {
+      const { data: existingReport } = await s.from("service_action_reports").select("id").eq("client_uuid", clientUuid).maybeSingle();
+      if (existingReport) {
+        const { data: aiJobs, error: aiError } = await s.from("service_action_ai_jobs").select("id,status,reviewed_at").eq("report_id", existingReport.id);
+        if (aiError) throw aiError;
+        const jobs = aiJobs ?? [];
+        if (jobs.some((job) => job.status === "processing" && !job.reviewed_at)) return { ok: false, error: "Voice AI processing is active. Wait for it to finish before confirming." };
+        const unreviewed = jobs.filter((job) => !job.reviewed_at && ["queued", "retry_wait", "complete"].includes(job.status));
+        if (unreviewed.length && String(formData.get("ignore_ai") ?? "") !== "yes") return { ok: false, error: "Review the voice AI suggestions or choose to continue manually before confirming." };
+        if (unreviewed.length) {
+          const now = new Date().toISOString();
+          const { error: reviewError } = await s.from("service_action_ai_jobs").update({ reviewed_by: actor.id, reviewed_at: now, status: "failed", last_error: "Discarded in favor of manual review" }).in("id", unreviewed.filter((job) => job.status !== "complete").map((job) => job.id));
+          if (reviewError) throw reviewError;
+          const completeIds = unreviewed.filter((job) => job.status === "complete").map((job) => job.id);
+          if (completeIds.length) {
+            const { error: completeReviewError } = await s.from("service_action_ai_jobs").update({ reviewed_by: actor.id, reviewed_at: now }).in("id", completeIds);
+            if (completeReviewError) throw completeReviewError;
+          }
+          await s.from("service_action_questions").update({ status: "dismissed" }).eq("report_id", existingReport.id).eq("status", "open");
+        }
+      }
+    }
     const { data, error } = await s.rpc("record_service_action_report", {
       p_client_uuid: clientUuid,
       p_machine_id: machineId,
@@ -148,4 +175,62 @@ export async function submitWebActionReport(previous: ActionReportResult | null,
 
 export async function submitQrActionReport(previous: ActionReportResult | null, formData: FormData) {
   return submitActionReport("machine_qr", previous, formData);
+}
+
+export async function applyActionReportAiProposal(_previous: ActionReportResult | null, formData: FormData): Promise<ActionReportResult> {
+  if (!isSupabaseConfigured()) return { ok: false, error: "Service is not configured." };
+  const actor = await getSessionProfile();
+  if (!actor) return { ok: false, error: "Sign in again." };
+  const reportId = String(formData.get("report_id") ?? "");
+  const jobId = String(formData.get("job_id") ?? "");
+  if (!UUID.test(reportId) || !UUID.test(jobId)) return { ok: false, error: "Invalid AI review." };
+  try {
+    const s = await createServiceClient();
+    const report = await authorizedActionReport(s, actor, reportId, true);
+    if (!report) return { ok: false, error: "Draft not found." };
+    const [{ data: job, error: jobError }, { data: currentLines, error: lineError }] = await Promise.all([
+      s.from("service_action_ai_jobs").select("id,status,extraction").eq("id", jobId).eq("report_id", reportId).maybeSingle(),
+      s.from("service_action_refill_lines").select("quantity,unit,product_name,observed_lot_code,observed_odoo_lot_id,line_number").eq("report_id", reportId).order("line_number"),
+    ]);
+    if (jobError) throw jobError;
+    if (lineError) throw lineError;
+    if (!job || job.status !== "complete") return { ok: false, error: "AI extraction is not ready." };
+    const extraction = actionReportExtractionSchema.parse(job.extraction);
+    let refillLines = ((currentLines as Record<string, unknown>[]) ?? []).map((line) => ({ quantity: Number(line.quantity), unit: line.unit, product_name: line.product_name, lot_code: line.observed_lot_code, odoo_lot_id: line.observed_odoo_lot_id }));
+    if (extraction.refillLines.length && refillLines.length === 0) {
+      refillLines = extraction.refillLines.flatMap((line) => {
+        if (!line.quantity) return [];
+        return [{ quantity: line.quantity, unit: line.unit ?? "unit", product_name: line.productName, lot_code: line.observedLotCode, odoo_lot_id: null }];
+      });
+    }
+    const actionKind = report.action_kind;
+    const hasCleaning = actionKind === "cleaning" || actionKind === "both";
+    const aiNotes = [extraction.notes, ...extraction.otherActions].filter(Boolean).join("\n");
+    const notes = [report.notes, aiNotes].filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join("\n") || null;
+    const { error } = await s.rpc("record_service_action_report", {
+      p_client_uuid: report.client_uuid,
+      p_machine_id: report.machine_id,
+      p_operator_id: report.operator_id,
+      p_occurred_at: report.occurred_at,
+      p_action_kind: actionKind,
+      p_status: "draft",
+      p_notes: notes,
+      p_cleaning_material_used: hasCleaning ? report.cleaning_material_used ?? extraction.cleaning.materialUsed : null,
+      p_water_bucket_count: hasCleaning ? report.water_bucket_count ?? extraction.cleaning.waterBucketCount : null,
+      p_refill_lines: actionKind === "refill" || actionKind === "both" ? refillLines : [],
+      p_source: report.source,
+    });
+    if (error) throw error;
+    const { count: openQuestions, error: questionError } = await s.from("service_action_questions").select("id", { count: "exact", head: true }).eq("ai_job_id", jobId).eq("status", "open");
+    if (questionError) throw questionError;
+    if (!openQuestions) {
+      const { error: reviewError } = await s.from("service_action_ai_jobs").update({ reviewed_by: actor.id, reviewed_at: new Date().toISOString() }).eq("id", jobId);
+      if (reviewError) throw reviewError;
+    }
+    revalidatePath("/refills");
+    revalidatePath(`/machine/${report.machine_id}`);
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+  redirect(`/refills?draft=${reportId}#action-report-form`);
 }

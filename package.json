@@ -20,7 +20,7 @@
     "test:mobile-status": "node --experimental-strip-types --test src/lib/data/mobile-machine-status.test.ts",
     "test:mobile-builds": "node --experimental-strip-types --test src/lib/auth/web-authorization.test.ts src/lib/mobile-builds.test.ts",
     "test:defrost": "node --experimental-strip-types --test src/lib/defrost-status.test.ts",
-    "test:action-reports": "node --experimental-strip-types --test src/lib/data/recall.test.ts"
+    "test:action-reports": "node --experimental-strip-types --test src/lib/data/recall.test.ts src/lib/action-report-ai.test.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.5",

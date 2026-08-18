@@ -31,9 +31,10 @@ export default async function RefillsPage({ searchParams }: { searchParams: Prom
     getActionReportHistory({
       machineIds: allowedIds ?? undefined,
       tenantId,
+      actorId: session?.role === "admin" ? undefined : session?.id,
     }),
     getDisplayTimezone(),
-    draftId ? getActionReportDraft(draftId, tenantId) : Promise.resolve(null),
+    draftId ? getActionReportDraft(draftId, tenantId, session?.role === "admin" ? undefined : session?.id) : Promise.resolve(null),
   ]);
   const draft = requestedDraft && machines.some((machine) => machine.id === requestedDraft.machineId) ? requestedDraft : null;
 

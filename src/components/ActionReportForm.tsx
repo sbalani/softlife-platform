@@ -7,6 +7,7 @@ import {
   type ActionReportResult,
 } from "@/app/actions/service-action-reports";
 import type { ActionReportDraft } from "@/lib/data/action-reports";
+import { ActionReportVoice } from "@/components/ActionReportVoice";
 
 export type ActionReportMachine = { id: string; name: string; warehouseId: number | null };
 export type ActionReportLot = {
@@ -56,6 +57,7 @@ export function ActionReportForm({
   const availableLots = lots.filter((lot) => machine?.warehouseId === lot.warehouseId);
   const hasCleaning = kind === "cleaning" || kind === "both";
   const hasRefill = kind === "refill" || kind === "both";
+  const draftReportId = result?.status === "draft" ? result.reportId : initialDraft?.id;
 
   return (
     <form id="action-report-form" action={formAction} className="space-y-5">
@@ -144,6 +146,8 @@ export function ActionReportForm({
         <label className="block"><span className={label}>Notes</span><textarea name="notes" rows={4} defaultValue={initialDraft?.notes ?? ""} required={kind === "other"} placeholder={kind === "other" ? "Describe what was done" : "Optional context"} className={`w-full ${input}`} /></label>
         <label className="block"><span className={label}>General evidence photos</span><input name="evidence_photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic" capture="environment" multiple className={`w-full ${input} text-xs`} /><span className="mt-1 block text-xs text-taupe">Private evidence. Maximum 4 MB per image and 5 MB per submission.</span></label>
       </div>
+
+      {draftReportId ? <ActionReportVoice reportId={draftReportId} /> : <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-taupe">Save this report as a draft to record a private voice note and generate reviewable suggestions.</p>}
 
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" name="intent" value="confirmed" disabled={pending || !machineId || result?.status === "confirmed"} className="rounded-lg bg-terracotta px-4 py-2 text-sm font-bold text-white hover:bg-terracotta-dark disabled:opacity-60">{pending ? "Saving..." : "Confirm action"}</button>

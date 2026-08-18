@@ -33,34 +33,30 @@ export async function getMachineService(machineId: string, session: SessionProfi
   const warehouseId = (machine.odoo_warehouse_id as number) ?? null;
   let lots: ServiceLot[] = [];
   if (warehouseId) {
-    const [{ data: stockRows, error: stockError }, { data: legacyLotRows, error: lotError }, { data: mirrorState, error: stateError }, { data: usageRows, error: usageError }] = await Promise.all([
-      s.from("odoo_lot_stock").select("odoo_lot_id,qty")
-        .eq("odoo_warehouse_id", warehouseId).gt("qty", 0),
+    const [{ data: stockRows, error: stockError }, { data: legacyLotRows, error: lotError }, { data: mirrorState, error: stateError }] = await Promise.all([
+      s.from("warehouse_lot_effective_balances").select("odoo_lot_id,effective_quantity")
+        .eq("odoo_warehouse_id", warehouseId).gt("effective_quantity", 0),
       s.from("odoo_lots").select("odoo_id,name,product_name,qty,expiration_date")
         .eq("odoo_warehouse_id", warehouseId).gt("qty", 0),
       s.from("odoo_mirror_state").select("key").eq("key", "lot_stock").maybeSingle(),
-      s.rpc("pending_odoo_lot_usage", { p_warehouse_id: warehouseId }),
     ]);
     if (stockError) throw stockError;
     if (lotError) throw lotError;
     if (stateError) throw stateError;
-    if (usageError) throw usageError;
-    const reserved = new Map<number, number>();
-    for (const usage of (usageRows as { odoo_lot_id: number; quantity: number }[]) ?? []) reserved.set(usage.odoo_lot_id, Number(usage.quantity ?? 0));
     let lotRows = mirrorState ? [] : (legacyLotRows as Record<string, unknown>[]) ?? [];
     if (mirrorState && stockRows?.length) {
-      const stock = stockRows as { odoo_lot_id: number; qty: number }[];
+      const stock = stockRows as { odoo_lot_id: number; effective_quantity: number }[];
       const { data: masterRows, error: masterError } = await s.from("odoo_lots")
         .select("odoo_id,name,product_name,expiration_date").in("odoo_id", stock.map((row) => row.odoo_lot_id));
       if (masterError) throw masterError;
       const masters = new Map(((masterRows as Record<string, unknown>[]) ?? []).map((row) => [row.odoo_id as number, row]));
-      lotRows = stock.flatMap((row) => masters.has(row.odoo_lot_id) ? [{ ...masters.get(row.odoo_lot_id)!, qty: row.qty }] : []);
+      lotRows = stock.flatMap((row) => masters.has(row.odoo_lot_id) ? [{ ...masters.get(row.odoo_lot_id)!, qty: row.effective_quantity }] : []);
     }
     lots = lotRows.map((lot) => ({
       odoo_id: lot.odoo_id as number,
       name: lot.name as string,
       product_name: (lot.product_name as string) ?? "Unknown product",
-      available: Math.max(0, Number(lot.qty ?? 0) - (reserved.get(lot.odoo_id as number) ?? 0)),
+      available: Math.max(0, Number(lot.qty ?? 0)),
       expiration_date: (lot.expiration_date as string) ?? null,
     })).filter((lot) => lot.available > 0)
       .sort((a, b) => (a.expiration_date ?? "9999").localeCompare(b.expiration_date ?? "9999") || a.name.localeCompare(b.name));

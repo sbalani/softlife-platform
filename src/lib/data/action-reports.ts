@@ -34,25 +34,18 @@ export type ActionReportDraft = {
 export async function getActionReportLots(warehouseIds: number[]): Promise<ActionReportLotOption[]> {
   if (!isSupabaseConfigured() || warehouseIds.length === 0) return [];
   const s = await createServiceClient();
-  const [{ data: stock, error: stockError }, pendingResults] = await Promise.all([
-    s.from("odoo_lot_stock").select("odoo_lot_id,odoo_warehouse_id,qty").in("odoo_warehouse_id", warehouseIds).gt("qty", 0),
-    Promise.all(warehouseIds.map(async (warehouseId) => {
-      const { data, error } = await s.rpc("pending_odoo_lot_usage", { p_warehouse_id: warehouseId });
-      if (error) throw error;
-      return { warehouseId, rows: (data as { odoo_lot_id: number; quantity: number }[]) ?? [] };
-    })),
-  ]);
+  const { data: stock, error: stockError } = await s.from("warehouse_lot_effective_balances")
+    .select("odoo_lot_id,odoo_warehouse_id,effective_quantity").in("odoo_warehouse_id", warehouseIds).gt("effective_quantity", 0);
   if (stockError) throw stockError;
-  const rows = (stock as { odoo_lot_id: number; odoo_warehouse_id: number; qty: number }[]) ?? [];
+  const rows = (stock as { odoo_lot_id: number; odoo_warehouse_id: number; effective_quantity: number }[]) ?? [];
   if (!rows.length) return [];
   const { data: lots, error: lotError } = await s.from("odoo_lots")
     .select("odoo_id,name,product_name,expiration_date").in("odoo_id", [...new Set(rows.map((row) => row.odoo_lot_id))]);
   if (lotError) throw lotError;
   const lotById = new Map(((lots as { odoo_id: number; name: string; product_name: string | null; expiration_date: string | null }[]) ?? []).map((lot) => [lot.odoo_id, lot]));
-  const pending = new Map(pendingResults.flatMap((result) => result.rows.map((row) => [`${result.warehouseId}:${row.odoo_lot_id}`, Number(row.quantity)] as const)));
   return rows.flatMap((row) => {
     const lot = lotById.get(row.odoo_lot_id);
-    const available = Math.max(0, Number(row.qty) - (pending.get(`${row.odoo_warehouse_id}:${row.odoo_lot_id}`) ?? 0));
+    const available = Math.max(0, Number(row.effective_quantity));
     return lot && available > 0 ? [{ odooId: lot.odoo_id, name: lot.name, productName: lot.product_name ?? "Unknown product", available, warehouseId: row.odoo_warehouse_id, expiration: lot.expiration_date }] : [];
   }).sort((a, b) => (a.expiration ?? "9999").localeCompare(b.expiration ?? "9999") || a.name.localeCompare(b.name))
     .map((lot) => ({ odooId: lot.odooId, name: lot.name, productName: lot.productName, available: lot.available, warehouseId: lot.warehouseId }));

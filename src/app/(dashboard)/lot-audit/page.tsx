@@ -5,6 +5,7 @@ import { getDisplayTimezone } from "@/lib/timezone";
 import { getSessionProfile } from "@/lib/auth/session";
 import { accessibleMachineIds } from "@/lib/data/service-access";
 import { createServiceClient } from "@/lib/supabase/server";
+import { AllocationForm } from "@/components/AllocationForm";
 
 export const dynamic = "force-dynamic";
 
@@ -43,10 +44,10 @@ export default async function LotAuditPage({ searchParams }: { searchParams: Pro
           <Link href="/refills" className="text-sm font-bold text-terracotta hover:underline">Open Action Report</Link>
         </div>
         <div className="overflow-x-auto rounded-2xl border border-line bg-white">
-          <table className="w-full min-w-[720px] text-sm">
-            <thead className="bg-sand/60 text-left text-[11px] uppercase tracking-wide text-taupe"><tr><th className="px-4 py-3">Date</th><th className="px-4 py-3">Machine</th><th className="px-4 py-3">Product / lot</th><th className="px-4 py-3">Quantity</th><th className="px-4 py-3">Gap</th><th className="px-4 py-3">State</th></tr></thead>
+          <table className="w-full min-w-[980px] text-sm">
+            <thead className="bg-sand/60 text-left text-[11px] uppercase tracking-wide text-taupe"><tr><th className="px-4 py-3">Occurred / recorded</th><th className="px-4 py-3">Machine / operator</th><th className="px-4 py-3">Warehouse</th><th className="px-4 py-3">Product / lot</th><th className="px-4 py-3">Physical / allocated</th><th className="px-4 py-3">Gap and reconciliation</th></tr></thead>
             <tbody className="divide-y divide-line">
-              {gaps.map((gap) => <tr key={gap.id}><td className="px-4 py-3 text-cocoa">{formatDateTime(gap.occurred_at, tz)}</td><td className="px-4 py-3 font-semibold text-cocoa">{gap.machine_name}</td><td className="px-4 py-3 text-cocoa">{gap.product_name ?? "Unknown product"}<span className="ml-2 font-mono text-xs text-taupe">{gap.lot_code ?? "lot unknown"}</span></td><td className="px-4 py-3 text-cocoa">{gap.quantity} {gap.unit}</td><td className="px-4 py-3 text-warning">{(gap.reason ?? "other").replaceAll("_", " ")}</td><td className="px-4 py-3"><span className="rounded-full bg-warning/10 px-2 py-1 text-[10px] font-bold uppercase text-warning">{gap.status.replaceAll("_", " ")}</span></td></tr>)}
+              {gaps.map((gap) => <tr key={gap.id} className="align-top"><td className="px-4 py-3 text-cocoa">{formatDateTime(gap.occurred_at, tz)}<span className="mt-1 block text-xs text-taupe">Recorded {formatDateTime(gap.recorded_at, tz)}</span></td><td className="px-4 py-3 font-semibold text-cocoa">{gap.machine_name}<span className="mt-1 block text-xs font-normal text-taupe">{gap.operator_name ?? "Unknown operator"}</span><Link href={`/refills#${gap.report_id}`} className="mt-1 block text-xs text-terracotta hover:underline">Report {gap.report_id.slice(0, 8)}</Link></td><td className="px-4 py-3 text-cocoa">{gap.warehouse_name ?? "Unassigned"}</td><td className="px-4 py-3 text-cocoa">{gap.product_name ?? "Unknown product"}<span className="ml-2 font-mono text-xs text-taupe">{gap.lot_code ?? "lot unknown"}</span></td><td className="px-4 py-3 text-cocoa">{gap.quantity} {gap.unit}<span className="mt-1 block text-xs text-taupe">{gap.allocated_quantity} allocated · {gap.outstanding_quantity} outstanding</span></td><td className="px-4 py-3 text-warning"><span className="rounded-full bg-warning/10 px-2 py-1 text-[10px] font-bold uppercase text-warning">{gap.status.replaceAll("_", " ")}</span><span className="ml-2 text-xs">{(gap.reason ?? "other").replaceAll("_", " ")}</span>{gap.assigned_warehouse_id !== null && gap.outstanding_quantity > 0 && <AllocationForm lineId={gap.id} warehouseId={gap.assigned_warehouse_id} physicalUnit={gap.unit} outstanding={gap.outstanding_quantity} candidates={gap.candidates} />}</td></tr>)}
               {gaps.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-taupe">No unresolved provenance gaps.</td></tr>}
             </tbody>
           </table>

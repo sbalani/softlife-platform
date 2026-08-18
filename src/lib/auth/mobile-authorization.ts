@@ -49,6 +49,11 @@ export function hasMobileCapability(session: MobileSession, capability: MobileCa
   return session.capabilities.includes(capability);
 }
 
+export function canReceiveMobileAlert(role: MobileSession["role"], machineIds: string[] | null | undefined, machineId: string | null) {
+  if (!machineId) return role === "admin";
+  return machineIds === null || machineIds?.includes(machineId) === true;
+}
+
 export async function mobileMachineIds(s: SupabaseClient, session: MobileSession, eventTime = new Date().toISOString()): Promise<string[] | null> {
   if (session.role === "admin") return null;
   const day = ymd(new Date(eventTime));

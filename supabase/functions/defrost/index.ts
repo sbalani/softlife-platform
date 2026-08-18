@@ -548,7 +548,8 @@ async function sendPendingAlertNotifications(s: SupabaseClient) {
     const eligible = tokens.filter((token) => {
       const profile = profiles.get(token.user_id);
       if (!profile) return false;
-      const machineIds = scope.get(profile.id) ?? [];
+      const machineIds = scope.get(profile.id);
+      if (machineIds === undefined) return false;
       return alert.machine_id ? machineIds === null || machineIds.includes(alert.machine_id) : profile.role === "admin";
     });
     if (!eligible.length) { await s.from("alerts").update({ push_claimed_at: null }).eq("id", alert.id); continue; }

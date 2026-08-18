@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { MOBILE_CAPABILITIES, mobileMachineIds, normalizeMobileRole } from "@/lib/auth/mobile-authorization";
+import { MOBILE_CAPABILITIES, canReceiveMobileAlert, mobileMachineIds, normalizeMobileRole } from "@/lib/auth/mobile-authorization";
 
 type PushToken = { id: string; user_id: string; expo_push_token: string };
 type Profile = { id: string; role: string; tenant_id: string | null; employer_kind: string };
@@ -63,8 +63,7 @@ export async function sendPendingAlertNotifications(s: SupabaseClient): Promise<
       const profile = profileById.get(token.user_id);
       if (!profile) continue;
       const role = normalizeMobileRole(profile.role);
-      const machineIds = machineIdsByUser.get(profile.id) ?? [];
-      if (alert.machine_id ? machineIds === null || machineIds.includes(alert.machine_id) : role === "admin") eligible.push(token);
+      if (canReceiveMobileAlert(role, machineIdsByUser.get(profile.id), alert.machine_id)) eligible.push(token);
     }
     if (!eligible.length) {
       await updateAlert(s, alert.id, { push_claimed_at: null });

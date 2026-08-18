@@ -1,9 +1,13 @@
 SOFTLIFE PLATFORM NOTES FOR MOBILE DEVELOPER
 ============================================
 
-Status date: 2026-08-15
+Status date: 2026-08-18
 Reviewed mobile commit: 4e18866 Add offline data and sales analytics
 Reviewed backend commit: 84208e0 Add mobile analytics date ranges
+
+Action Report V2 contract: see mobile-action-report-handoff.md. It supersedes
+the refill/full-cleaning write guidance in this file; existing routes remain
+compatible during migration.
 
 Communication ownership
 -----------------------

@@ -1,6 +1,7 @@
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getApiSession } from "@/lib/auth/api-session";
 import { canAccessMobileMachine, hasMobileCapability } from "@/lib/auth/mobile-authorization";
+import { persistMobileActionReport, preserveLegacyBatchPhotos } from "@/lib/mobile-action-reports";
 
 export const runtime = "nodejs";
 
@@ -47,6 +48,9 @@ export async function POST(req: Request) {
         rejected.push({ client_uuid: clientUuid, reason: "Machine access denied" });
         continue;
       }
+      if (!await canAccessMobileMachine(s, session, submittedMachineId, new Date().toISOString())) {
+        rejected.push({ client_uuid: clientUuid, reason: "Current machine access denied" }); continue;
+      }
       const rawLines = Array.isArray(r.lines) ? r.lines as Record<string, unknown>[] : [];
       if (rawLines.length > 20 || rawLines.some((line) => !line || typeof line !== "object")) {
         rejected.push({ client_uuid: clientUuid, reason: "Invalid refill lines" }); continue;
@@ -70,20 +74,17 @@ export async function POST(req: Request) {
         rejected.push({ client_uuid: clientUuid, reason: "Invalid refill lines" });
         continue;
       }
-      const { error } = await s.rpc("record_machine_service", {
-        p_visit_uuid: clientUuid,
-        p_machine_id: submittedMachineId,
-        p_operator_id: session.id,
-        p_device_event_time: eventTime,
-        p_cleaning_material_used: null,
-        p_water_bucket_count: null,
-        p_refill_lines: lines,
-      });
-      if (error) {
-        rejected.push({ client_uuid: clientUuid, reason: error.message });
+      const { data: existingLegacy } = await s.from("reposiciones").select("id,service_action_report_id").eq("client_uuid", clientUuid).maybeSingle();
+      if (existingLegacy && !existingLegacy.service_action_report_id) {
+        const { error } = await s.rpc("record_machine_service", { p_visit_uuid: clientUuid, p_machine_id: submittedMachineId, p_operator_id: session.id, p_device_event_time: eventTime, p_cleaning_material_used: null, p_water_bucket_count: null, p_refill_lines: lines });
+        if (error) rejected.push({ client_uuid: clientUuid, reason: error.message }); else accepted.push(clientUuid);
         continue;
       }
-      accepted.push(clientUuid);
+      try {
+        const result = await persistMobileActionReport(s, session, { client_uuid: clientUuid, machine_id: submittedMachineId, occurred_at: eventTime, status: "confirmed", revision: 0, action_kind: "refill", refill_lines: lines.map((line) => ({ odoo_lot_id: line.odoo_lot_id, quantity: line.quantity_used, unit: "unit" })) });
+        await preserveLegacyBatchPhotos(s, result.id, rawLines);
+        accepted.push(clientUuid);
+      } catch (error) { rejected.push({ client_uuid: clientUuid, reason: error instanceof Error ? error.message : String(error) }); }
     }
 
     return Response.json({ accepted, rejected });

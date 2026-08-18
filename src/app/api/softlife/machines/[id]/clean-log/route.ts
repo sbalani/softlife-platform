@@ -2,6 +2,7 @@ import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server
 import { getApiSession } from "@/lib/auth/api-session";
 import { canAccessMobileMachine, hasMobileCapability } from "@/lib/auth/mobile-authorization";
 import { recordMachineClean } from "@/lib/data/clean-logs";
+import { persistMobileActionReport } from "@/lib/mobile-action-reports";
 
 export const runtime = "nodejs";
 
@@ -26,21 +27,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!await canAccessMobileMachine(s, session, id, eventTime)) {
       return Response.json({ error: { message: "Machine access denied" } }, { status: 403 });
     }
+    if (!await canAccessMobileMachine(s, session, id, new Date().toISOString())) return Response.json({ error: { message: "Current machine access denied" } }, { status: 403 });
     if (kind === "partial" || !hasEvidenceFields) {
       await recordMachineClean(s, { machineId: id, clientUuid, operatorId: session.id, kind, eventTime });
       return Response.json({ ok: true, server_receipt_time: new Date().toISOString() });
     }
     if (materialUsed === null || !Number.isInteger(waterBuckets) || waterBuckets < 0 || waterBuckets > 20) return Response.json({ error: { message: "Invalid cleaning evidence" } }, { status: 400 });
-    const { error } = await s.rpc("record_machine_service", {
-      p_visit_uuid: clientUuid,
-      p_machine_id: id,
-      p_operator_id: session.id,
-      p_device_event_time: eventTime,
-      p_cleaning_material_used: materialUsed,
-      p_water_bucket_count: waterBuckets,
-      p_refill_lines: [],
-    });
-    if (error) throw error;
+    const { data: existingLegacy } = await s.from("clean_logs").select("id,service_action_report_id").eq("client_uuid", clientUuid).maybeSingle();
+    if (existingLegacy && !existingLegacy.service_action_report_id) {
+      const { error } = await s.rpc("record_machine_service", { p_visit_uuid: clientUuid, p_machine_id: id, p_operator_id: session.id, p_device_event_time: eventTime, p_cleaning_material_used: materialUsed, p_water_bucket_count: waterBuckets, p_refill_lines: [] });
+      if (error) throw error;
+      return Response.json({ ok: true, server_receipt_time: new Date().toISOString() });
+    }
+    await persistMobileActionReport(s, session, { client_uuid: clientUuid, machine_id: id, occurred_at: eventTime, status: "confirmed", action_kind: "cleaning", cleaning: { cleaning_material_used: materialUsed, water_bucket_count: waterBuckets } });
     return Response.json({ ok: true, server_receipt_time: new Date().toISOString() });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

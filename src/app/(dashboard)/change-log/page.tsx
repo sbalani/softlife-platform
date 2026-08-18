@@ -33,7 +33,7 @@ export default async function ChangeLogPage({ searchParams }: { searchParams: Pr
   return (
     <div>
       <header className="mb-6">
-        <h1 className="font-display text-3xl font-bold text-cocoa">Action Report</h1>
+        <h1 className="font-display text-3xl font-bold text-cocoa">Change Log</h1>
         <p className="mt-1 text-sm text-taupe">Durable machine changes, remote commands, API exchanges, and automated actions. Showing the latest {rows.length} records.</p>
       </header>
 

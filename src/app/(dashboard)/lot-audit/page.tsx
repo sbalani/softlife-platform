@@ -1,7 +1,10 @@
 import Link from "next/link";
-import { getLotUsages } from "@/lib/data/lot-audit";
+import { getLotUsages, getProvenanceGaps } from "@/lib/data/lot-audit";
 import { formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
+import { getSessionProfile } from "@/lib/auth/session";
+import { accessibleMachineIds } from "@/lib/data/service-access";
+import { createServiceClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -15,8 +18,14 @@ const TYPE_TONE: Record<string, string> = {
 
 export default async function LotAuditPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
-  const usages = await getLotUsages(sp);
-  const tz = await getDisplayTimezone();
+  const session = await getSessionProfile();
+  const machineIds = session ? await accessibleMachineIds(await createServiceClient(), session) : [];
+  const tenantId = session?.role === "admin" ? undefined : session?.tenant_id ?? "no-tenant";
+  const [usages, gaps, tz] = await Promise.all([
+    getLotUsages(sp, { machineIds: machineIds ?? undefined, tenantId }),
+    getProvenanceGaps({ machineIds: machineIds ?? undefined, tenantId }),
+    getDisplayTimezone(),
+  ]);
 
   const input = "rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa focus:border-terracotta focus:outline-none";
   const label = "mb-1 block text-[11px] uppercase tracking-wide text-taupe";
@@ -25,8 +34,24 @@ export default async function LotAuditPage({ searchParams }: { searchParams: Pro
     <div>
       <header className="mb-6">
         <h1 className="font-display text-3xl font-bold text-cocoa">Lot Audit</h1>
-        <p className="mt-1 text-sm text-taupe">{usages.length} lot load / usage record{usages.length === 1 ? "" : "s"} from refills and manual hopper updates</p>
+        <p className="mt-1 text-sm text-taupe">{usages.length} resolved lot load / usage record{usages.length === 1 ? "" : "s"} from Action Reports and manual hopper updates</p>
       </header>
+
+      <section className="mb-7">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <div><h2 className="font-display text-xl font-bold text-cocoa">Provenance Gaps</h2><p className="text-sm text-taupe">Physical refills that were preserved but still need a warehouse, transfer, lot, or stock allocation.</p></div>
+          <Link href="/refills" className="text-sm font-bold text-terracotta hover:underline">Open Action Report</Link>
+        </div>
+        <div className="overflow-x-auto rounded-2xl border border-line bg-white">
+          <table className="w-full min-w-[720px] text-sm">
+            <thead className="bg-sand/60 text-left text-[11px] uppercase tracking-wide text-taupe"><tr><th className="px-4 py-3">Date</th><th className="px-4 py-3">Machine</th><th className="px-4 py-3">Product / lot</th><th className="px-4 py-3">Quantity</th><th className="px-4 py-3">Gap</th><th className="px-4 py-3">State</th></tr></thead>
+            <tbody className="divide-y divide-line">
+              {gaps.map((gap) => <tr key={gap.id}><td className="px-4 py-3 text-cocoa">{formatDateTime(gap.occurred_at, tz)}</td><td className="px-4 py-3 font-semibold text-cocoa">{gap.machine_name}</td><td className="px-4 py-3 text-cocoa">{gap.product_name ?? "Unknown product"}<span className="ml-2 font-mono text-xs text-taupe">{gap.lot_code ?? "lot unknown"}</span></td><td className="px-4 py-3 text-cocoa">{gap.quantity} {gap.unit}</td><td className="px-4 py-3 text-warning">{(gap.reason ?? "other").replaceAll("_", " ")}</td><td className="px-4 py-3"><span className="rounded-full bg-warning/10 px-2 py-1 text-[10px] font-bold uppercase text-warning">{gap.status.replaceAll("_", " ")}</span></td></tr>)}
+              {gaps.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-taupe">No unresolved provenance gaps.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       {/* Filters */}
       <form className="mb-4 flex flex-wrap items-end gap-3">

@@ -1,4 +1,3 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SessionProfile } from "@/lib/auth/session";
 import { canAccessMachine } from "@/lib/data/service-access";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
@@ -77,26 +76,4 @@ export async function getMachineService(machineId: string, session: SessionProfi
     lastFullClean: (machine.last_full_clean_date as string) ?? null,
     lots,
   };
-}
-
-export async function recordMachineService(s: SupabaseClient, values: {
-  visitUuid: string;
-  machineId: string;
-  operatorId: string;
-  eventTime: string;
-  cleaningMaterialUsed: boolean | null;
-  waterBucketCount: number | null;
-  refillLines: { odoo_lot_id: number; quantity_used: number }[];
-}) {
-  const { data, error } = await s.rpc("record_machine_service", {
-    p_visit_uuid: values.visitUuid,
-    p_machine_id: values.machineId,
-    p_operator_id: values.operatorId,
-    p_device_event_time: values.eventTime,
-    p_cleaning_material_used: values.cleaningMaterialUsed,
-    p_water_bucket_count: values.waterBucketCount,
-    p_refill_lines: values.refillLines,
-  });
-  if (error) throw error;
-  return data;
 }

@@ -4,7 +4,7 @@ import { getSessionProfile } from "@/lib/auth/session";
 import { getMachineService } from "@/lib/data/machine-service";
 import { formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
-import { ServiceVisitForm } from "./ServiceVisitForm";
+import { ActionReportForm } from "@/components/ActionReportForm";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +27,18 @@ export default async function MachineServicePage({ params }: { params: Promise<{
           <p className="mt-1 text-xs text-white/60">Last full clean: {machine.lastFullClean ? formatDateTime(machine.lastFullClean, tz) : "never recorded"}</p>
           <div className="mt-4 flex flex-wrap gap-3"><a href={appUrl} className="rounded-lg bg-white px-4 py-2 text-sm font-bold text-cocoa">Open in SoftLife HACCP app</a>{session.role === "admin" && machine.imei && <Link href={`/machines/${machine.imei}`} className="rounded-lg border border-white/30 px-4 py-2 text-sm font-bold text-white">Machine dashboard</Link>}</div>
         </header>
-        <ServiceVisitForm machineId={machine.id} visitUuid={crypto.randomUUID()} eventTime={new Date().toISOString()} lots={machine.lots} warehouseAssigned={machine.warehouseId !== null} />
+        <ActionReportForm
+          machines={[{ id: machine.id, name: machine.name, warehouseId: machine.warehouseId }]}
+          lots={machine.lots.map((lot) => ({
+            odooId: lot.odoo_id,
+            name: lot.name,
+            productName: lot.product_name,
+            available: lot.available,
+            warehouseId: machine.warehouseId!,
+          }))}
+          source="machine_qr"
+          initialEventTime={new Date().toISOString()}
+        />
         <p className="mt-6 text-center text-xs text-taupe">Signed in as {session.full_name ?? session.email ?? "operator"}</p>
       </div>
     </main>

@@ -10,7 +10,7 @@ type Role = "admin" | "operator" | "franchisee";
 const NAV: { label: string; href?: string; soon?: boolean; adminOnly?: boolean; mobileOnly?: boolean; icon: ReactNode }[] = [
   { label: "Dashboard", href: "/dashboard", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 13h6V4H4zM14 20h6v-9h-6zM14 8h6V4h-6zM4 20h6v-3H4z"/></svg> },
   { label: "Machines", href: "/machines", icon: <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M9 16h6"/></svg> },
-  { label: "Refills", href: "/refills", icon: <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.8"><path d="M12 2v13M8 6l4-4 4 4"/><path d="M4 14a8 8 0 0016 0"/></svg> },
+  { label: "Action Report", href: "/refills", icon: <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.8"><path d="M12 2v13M8 6l4-4 4 4"/><path d="M4 14a8 8 0 0016 0"/></svg> },
   { label: "Orders", href: "/orders", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 6h15l-1.5 9h-12z"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/></svg> },
   { label: "Analytics", href: "/analytics", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg> },
   { label: "Alerts", href: "/alerts", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 3l9 16H3z"/><path d="M12 10v4"/></svg> },

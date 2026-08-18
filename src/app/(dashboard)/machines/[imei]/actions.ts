@@ -12,6 +12,8 @@ import { recordMachineClean } from "@/lib/data/clean-logs";
 import { cleanDay } from "@/lib/data/service-history-utils";
 import { ymd } from "@/lib/dates";
 import { FRANCHISEE_CONFIGURABLE_COMMANDS, HUAXIN_REMOTE_COMMANDS } from "@/lib/huaxin/remote-commands";
+import { geocodeAddress } from "@/lib/geocode";
+import { translateLocation } from "@/lib/i18n/huaxin";
 
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
@@ -45,11 +47,30 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
     const defrostEnabled = fd.get("defrost_enabled") === "on";
     const defrostTime = String(fd.get("defrost_time") ?? "03:00");
     const defrostMinutes = Number(fd.get("defrost_minutes") ?? 4);
+    const locationOverride = String(fd.get("location_override") ?? "").trim() || null;
     if (warehouseValue && (!Number.isInteger(odooWarehouseId) || Number(odooWarehouseId) <= 0)) return { ok: false, error: "Invalid warehouse." };
     if (lastClean && lastClean > ymd(new Date())) return { ok: false, error: "Cleaning date cannot be in the future." };
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(defrostTime)) return { ok: false, error: "Invalid defrost start time." };
     if (!Number.isInteger(defrostMinutes) || defrostMinutes < 1 || defrostMinutes > 30) return { ok: false, error: "Defrost duration must be between 1 and 30 minutes." };
     if (defrostEnabled && !deployed) return { ok: false, error: "Deploy the machine before enabling its defrost schedule." };
+
+    const { data: currentLocation, error: locationError } = await s
+      .from("machines")
+      .select("location,latitude,longitude,geocoded_from")
+      .eq("id", machineId)
+      .maybeSingle();
+    if (locationError) return { ok: false, error: locationError.message };
+
+    const effectiveLocation = locationOverride || translateLocation(currentLocation?.location as string | null);
+    const cachedCoordinates = currentLocation?.geocoded_from === effectiveLocation
+      && currentLocation.latitude != null
+      && currentLocation.longitude != null
+      ? { lat: Number(currentLocation.latitude), lng: Number(currentLocation.longitude) }
+      : null;
+    let coordinates = cachedCoordinates;
+    if (effectiveLocation && !coordinates) {
+      try { coordinates = await geocodeAddress(effectiveLocation); } catch { /* Address still saves and can be retried by fleet sync. */ }
+    }
 
     // base_product_id is NOT touched here — it's set from the Base hopper
     // card in the product menu section (updateBaseHopper), which is the one
@@ -61,11 +82,11 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
         display_name: String(fd.get("display_name") ?? "").trim() || null,
         nayax_id: String(fd.get("nayax_id") ?? "").trim() || null,
         payment_model: String(fd.get("payment_model") ?? "automatic"),
-        location_override: String(fd.get("location_override") ?? "").trim() || null,
+        location_override: locationOverride,
         odoo_warehouse_id: odooWarehouseId,
-        // Address may have changed — clear the geocode cache marker so the
-        // next sync re-geocodes coordinates for the map views.
-        geocoded_from: null,
+        latitude: coordinates?.lat ?? null,
+        longitude: coordinates?.lng ?? null,
+        geocoded_from: coordinates ? effectiveLocation : null,
       })
       .eq("id", machineId)
       .select("id,last_full_clean_date")

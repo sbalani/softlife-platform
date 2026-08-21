@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { MobileSession } from "@/lib/auth/mobile-authorization";
 import { canAccessMobileMachine } from "@/lib/auth/mobile-authorization";
+import { legacyKindFromModes, parseActionReportModes } from "@/lib/action-report-modes";
 
 const UUID = /^[0-9a-f-]{36}$/i;
 
@@ -12,13 +13,14 @@ export async function persistMobileActionReport(s: SupabaseClient, session: Mobi
   const occurredAt = String(record.occurred_at ?? record.device_event_time ?? "");
   if (record.status !== "draft" && record.status !== "confirmed") throw new Error("Invalid Action Report status");
   const status = record.status;
-  const actionKind = String(record.action_kind ?? "");
-  if (!UUID.test(clientUuid) || !UUID.test(machineId) || !["cleaning", "refill", "both", "other"].includes(actionKind)
+  const actionModes = parseActionReportModes(record.action_modes, record.action_kind);
+  if (!actionModes || !UUID.test(clientUuid) || !UUID.test(machineId)
     || !Number.isFinite(Date.parse(occurredAt)) || Date.parse(occurredAt) < Date.parse("2020-01-01") || Date.parse(occurredAt) > Date.now() + 5 * 60_000) throw new Error("Invalid Action Report");
+  const actionKind = legacyKindFromModes(actionModes);
   if (!await canAccessMobileMachine(s, session, machineId, occurredAt)) throw new Error("Machine access denied");
   if (!await canAccessMobileMachine(s, session, machineId, new Date().toISOString())) throw new Error("Current machine access denied");
-  const hasCleaning = actionKind === "cleaning" || actionKind === "both";
-  const hasRefill = actionKind === "refill" || actionKind === "both";
+  const hasCleaning = actionModes.includes("cleaning");
+  const hasRefill = actionModes.includes("refill");
   const cleaning = record.cleaning && typeof record.cleaning === "object" ? record.cleaning as Record<string, unknown> : record;
   const materialUsed = typeof cleaning.cleaning_material_used === "boolean" ? cleaning.cleaning_material_used : typeof cleaning.material_used === "boolean" ? cleaning.material_used : null;
   const bucketRaw = cleaning.water_bucket_count ?? cleaning.water_buckets;
@@ -33,12 +35,12 @@ export async function persistMobileActionReport(s: SupabaseClient, session: Mobi
   }).filter((line) => status === "confirmed" || line.quantity > 0) : [];
   if (status === "confirmed" && hasRefill && (!lines.length || lines.some((line) => !Number.isFinite(line.quantity) || line.quantity <= 0))) throw new Error("Valid refill lines are required");
   const notes = String(record.notes ?? "").trim().slice(0, 5000) || null;
-  if (status === "confirmed" && actionKind === "other" && !notes) throw new Error("Notes are required for other actions");
+  if (status === "confirmed" && actionModes.includes("other") && !notes) throw new Error("Notes are required for other actions");
   const expectedRevision = Number(record.revision ?? 0);
   if (!Number.isInteger(expectedRevision) || expectedRevision < 0) throw new Error("Invalid draft revision");
   const mobilePayload = {
     client_uuid: clientUuid, machine_id: machineId, occurred_at: new Date(occurredAt).toISOString(), status,
-    revision: expectedRevision, action_kind: actionKind, notes,
+    revision: expectedRevision, action_kind: actionKind, action_modes: actionModes, notes,
     cleaning: { material_used: hasCleaning ? materialUsed : null, water_buckets: hasCleaning ? waterBuckets : null },
     refill_lines: hasRefill ? rawLines.map((line) => ({
       quantity: line.quantity ?? line.quantity_used ?? null,
@@ -54,6 +56,7 @@ export async function persistMobileActionReport(s: SupabaseClient, session: Mobi
     p_notes: notes, p_cleaning_material_used: hasCleaning ? materialUsed : null,
     p_water_bucket_count: hasCleaning ? waterBuckets : null, p_refill_lines: lines,
     p_expected_revision: expectedRevision, p_mobile_payload: mobilePayload,
+    p_action_modes: actionModes,
   });
   if (error) throw error;
   return data as { id: string; status: string; provenance_status: string; revision: number; projection_error?: string | null };

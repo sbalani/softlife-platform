@@ -1,8 +1,10 @@
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { modesFromLegacyKind, parseActionReportModes, type ActionReportMode, type LegacyActionReportKind } from "@/lib/action-report-modes";
 
 export type ActionReportHistoryItem = {
   id: string;
   actionKind: string;
+  actionModes: ActionReportMode[];
   occurredAt: string;
   status: string;
   provenanceStatus: string;
@@ -24,7 +26,8 @@ export type ActionReportDraft = {
   clientUuid: string;
   machineId: string;
   occurredAt: string;
-  actionKind: "cleaning" | "refill" | "both" | "other";
+  actionKind: LegacyActionReportKind;
+  actionModes: ActionReportMode[];
   notes: string;
   cleaningMaterialUsed: boolean | null;
   waterBucketCount: number | null;
@@ -55,7 +58,7 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
   if (!isSupabaseConfigured() || (!filters.tenantId && filters.machineIds?.length === 0)) return [];
   const s = await createServiceClient();
   let query = s.from("service_action_reports")
-    .select("id,operator_id,action_kind,occurred_at,status,provenance_status,notes,machines(name,display_name),service_action_refill_lines(quantity,unit,observed_lot_code,product_name,provenance_status)")
+    .select("id,operator_id,action_kind,action_modes,occurred_at,status,provenance_status,notes,machines(name,display_name),service_action_refill_lines(quantity,unit,observed_lot_code,product_name,provenance_status)")
     .order("occurred_at", { ascending: false }).limit(50);
   if (filters.tenantId) query = query.eq("tenant_id", filters.tenantId);
   else if (filters.machineIds) query = query.in("machine_id", filters.machineIds);
@@ -67,6 +70,7 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
     return {
       id: row.id as string,
       actionKind: row.action_kind as string,
+      actionModes: parseActionReportModes(row.action_modes, row.action_kind) ?? modesFromLegacyKind(row.action_kind),
       occurredAt: row.occurred_at as string,
       status: row.status as string,
       provenanceStatus: row.provenance_status as string,
@@ -105,6 +109,7 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
     return {
       id: row.id as string,
       actionKind: "refill",
+      actionModes: ["refill"],
       occurredAt: row.device_event_time as string,
       status: row.status as string,
       provenanceStatus: "legacy",
@@ -124,6 +129,7 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
     return {
       id: row.id as string,
       actionKind: "cleaning",
+      actionModes: ["cleaning"],
       occurredAt: row.device_event_time as string,
       status: "confirmed",
       provenanceStatus: "legacy",
@@ -140,7 +146,7 @@ export async function getActionReportDraft(id: string, tenantId?: string, actorI
   if (!isSupabaseConfigured() || !/^[0-9a-f-]{36}$/i.test(id)) return null;
   const s = await createServiceClient();
   let query = s.from("service_action_reports")
-    .select("id,client_uuid,machine_id,occurred_at,action_kind,notes,cleaning_material_used,water_bucket_count,service_action_refill_lines(odoo_lot_id:observed_odoo_lot_id,lot_code:observed_lot_code,product_name,quantity,unit,line_number)")
+    .select("id,client_uuid,machine_id,occurred_at,action_kind,action_modes,notes,cleaning_material_used,water_bucket_count,service_action_refill_lines(odoo_lot_id:observed_odoo_lot_id,lot_code:observed_lot_code,product_name,quantity,unit,line_number)")
     .eq("id", id).eq("status", "draft");
   if (tenantId) query = query.eq("tenant_id", tenantId);
   if (actorId) query = query.eq("operator_id", actorId);
@@ -156,6 +162,7 @@ export async function getActionReportDraft(id: string, tenantId?: string, actorI
     machineId: row.machine_id as string,
     occurredAt: row.occurred_at as string,
     actionKind: row.action_kind as ActionReportDraft["actionKind"],
+    actionModes: parseActionReportModes(row.action_modes, row.action_kind) ?? modesFromLegacyKind(row.action_kind),
     notes: (row.notes as string | null) ?? "",
     cleaningMaterialUsed: row.cleaning_material_used as boolean | null,
     waterBucketCount: row.water_bucket_count as number | null,

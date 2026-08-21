@@ -8,6 +8,7 @@ import {
 } from "@/app/actions/service-action-reports";
 import type { ActionReportDraft } from "@/lib/data/action-reports";
 import { ActionReportVoice } from "@/components/ActionReportVoice";
+import { ACTION_REPORT_MODES, modesFromLegacyKind, type ActionReportMode } from "@/lib/action-report-modes";
 
 export type ActionReportMachine = { id: string; name: string; warehouseId: number | null };
 export type ActionReportLot = {
@@ -19,8 +20,6 @@ export type ActionReportLot = {
 };
 
 type LineDraft = { key: string; lotId: string; lotCode: string; productName: string; quantity: number | null; unit: string };
-type ActionKind = "cleaning" | "refill" | "both" | "other";
-
 const input = "rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa focus:border-terracotta focus:outline-none";
 const label = "mb-1 block text-[11px] font-bold uppercase tracking-wide text-taupe";
 
@@ -50,13 +49,18 @@ export function ActionReportForm({
   const [result, formAction, pending] = useActionState<ActionReportResult | null, FormData>(action, null);
   const [clientUuid] = useState(() => initialDraft?.clientUuid ?? crypto.randomUUID());
   const [machineId, setMachineId] = useState(initialDraft?.machineId ?? machines[0]?.id ?? "");
-  const [kind, setKind] = useState<ActionKind>(initialDraft?.actionKind ?? "both");
+  const [modes, setModes] = useState<ActionReportMode[]>(initialDraft?.actionModes ?? modesFromLegacyKind(initialDraft?.actionKind ?? "both"));
   const [occurredAt, setOccurredAt] = useState(initialDraft?.occurredAt ?? initialEventTime);
   const [lines, setLines] = useState<LineDraft[]>(() => initialDraft?.lines.length ? initialDraft.lines.map((line) => ({ key: crypto.randomUUID(), lotId: line.odooLotId ? String(line.odooLotId) : "", lotCode: line.lotCode, productName: line.productName, quantity: line.quantity, unit: line.unit })) : [newLine()]);
   const machine = machines.find((item) => item.id === machineId);
   const availableLots = lots.filter((lot) => machine?.warehouseId === lot.warehouseId);
-  const hasCleaning = kind === "cleaning" || kind === "both";
-  const hasRefill = kind === "refill" || kind === "both";
+  const hasCleaning = modes.includes("cleaning");
+  const hasRefill = modes.includes("refill");
+  const hasOther = modes.includes("other");
+  const toggleMode = (mode: ActionReportMode) => {
+    setModes((current) => current.includes(mode) ? current.filter((item) => item !== mode) : [...current, mode]);
+    if (mode === "refill" && !hasRefill && lines.length === 0) setLines([newLine()]);
+  };
   const draftReportId = result?.status === "draft" ? result.reportId : initialDraft?.id;
 
   return (
@@ -96,14 +100,15 @@ export function ActionReportForm({
 
       <fieldset>
         <legend className={label}>Action performed</legend>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {(["cleaning", "refill", "both", "other"] as const).map((value) => (
-            <label key={value} className={`cursor-pointer rounded-xl border px-3 py-2 text-center text-sm font-bold capitalize ${kind === value ? "border-terracotta bg-terracotta text-white" : "border-line bg-white text-cocoa"}`}>
-              <input type="radio" name="action_kind" value={value} checked={kind === value} onChange={() => setKind(value)} className="sr-only" />
-              {value}
+        <div className="grid grid-cols-3 gap-2">
+          {ACTION_REPORT_MODES.map((mode) => (
+            <label key={mode} className={`cursor-pointer rounded-xl border px-3 py-2 text-center text-sm font-bold capitalize ${modes.includes(mode) ? "border-terracotta bg-terracotta text-white" : "border-line bg-white text-cocoa"}`}>
+              <input type="checkbox" name="action_modes" value={mode} checked={modes.includes(mode)} onChange={() => toggleMode(mode)} className="sr-only" />
+              {mode}
             </label>
           ))}
         </div>
+        <p className="mt-2 text-xs text-taupe">Select every action performed during this activity.</p>
       </fieldset>
 
       {hasCleaning && (
@@ -143,15 +148,15 @@ export function ActionReportForm({
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block"><span className={label}>Notes</span><textarea name="notes" rows={4} defaultValue={initialDraft?.notes ?? ""} required={kind === "other"} placeholder={kind === "other" ? "Describe what was done" : "Optional context"} className={`w-full ${input}`} /></label>
+        <label className="block"><span className={label}>Notes</span><textarea name="notes" rows={4} defaultValue={initialDraft?.notes ?? ""} required={hasOther} placeholder={hasOther ? "Describe the other action" : "Optional context"} className={`w-full ${input}`} /></label>
         <label className="block"><span className={label}>General evidence photos</span><input name="evidence_photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic" capture="environment" multiple className={`w-full ${input} text-xs`} /><span className="mt-1 block text-xs text-taupe">Private evidence. Maximum 4 MB per image and 5 MB per submission.</span></label>
       </div>
 
       {draftReportId ? <ActionReportVoice reportId={draftReportId} /> : <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-taupe">Save this report as a draft to record a private voice note and generate reviewable suggestions.</p>}
 
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" name="intent" value="confirmed" disabled={pending || !machineId || result?.status === "confirmed"} className="rounded-lg bg-terracotta px-4 py-2 text-sm font-bold text-white hover:bg-terracotta-dark disabled:opacity-60">{pending ? "Saving..." : "Confirm action"}</button>
-        <button type="submit" name="intent" value="draft" formNoValidate disabled={pending || !machineId || result?.status === "confirmed"} className="rounded-lg border border-line bg-white px-4 py-2 text-sm font-bold text-cocoa disabled:opacity-60">Save draft</button>
+        <button type="submit" name="intent" value="confirmed" disabled={pending || !machineId || modes.length === 0 || result?.status === "confirmed"} className="rounded-lg bg-terracotta px-4 py-2 text-sm font-bold text-white hover:bg-terracotta-dark disabled:opacity-60">{pending ? "Saving..." : "Confirm action"}</button>
+        <button type="submit" name="intent" value="draft" formNoValidate disabled={pending || !machineId || modes.length === 0 || result?.status === "confirmed"} className="rounded-lg border border-line bg-white px-4 py-2 text-sm font-bold text-cocoa disabled:opacity-60">Save draft</button>
         {result?.ok && <span className={`text-sm font-semibold ${result.warning ? "text-warning" : "text-sage"}`}>{result.status === "draft" ? "Draft saved." : result.provenanceStatus === "resolved" ? "Action confirmed." : "Action confirmed with a provenance gap."} {result.warning}</span>}
         {result && !result.ok && <span className="text-sm font-semibold text-danger">{result.error}</span>}
         {result?.status === "confirmed" && <a href="/refills#action-report-form" className="text-sm font-bold text-terracotta hover:underline">Start another report</a>}

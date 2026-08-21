@@ -3,6 +3,7 @@ import { getMachines } from "@/lib/data/machines";
 import { getActionReportDraft, getActionReportHistory, getActionReportLots } from "@/lib/data/action-reports";
 import { ActionReportForm } from "@/components/ActionReportForm";
 import { formatDateTime } from "@/lib/dates";
+import { actionReportModesLabel } from "@/lib/action-report-modes";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { getSessionProfile } from "@/lib/auth/session";
 import { createServiceClient } from "@/lib/supabase/server";
@@ -68,7 +69,7 @@ export default async function RefillsPage({ searchParams }: { searchParams: Prom
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <span className="font-display text-base font-bold text-cocoa">{r.machineName}</span>
-                    <span className="ml-2 rounded-full bg-cream px-2 py-0.5 text-[10px] font-bold uppercase text-taupe">{r.actionKind}</span>
+                    <span className="ml-2 rounded-full bg-cream px-2 py-0.5 text-[10px] font-bold uppercase text-taupe">{actionReportModesLabel(r.actionModes)}</span>
                   </div>
                   <span className="text-xs text-taupe">{formatDateTime(r.occurredAt, tz)} · {r.status} · provenance {r.provenanceStatus.replace("_", " ")}</span>
                 </div>

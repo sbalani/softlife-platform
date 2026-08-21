@@ -37,7 +37,7 @@ export async function GET(request: Request) {
   const allowedIds = await mobileMachineIds(s, session);
   if (allowedIds?.length === 0) return Response.json({ records: [], scope_version: session.scopeVersion });
   let query = s.from("service_action_reports")
-    .select("id,client_uuid,machine_id,occurred_at,action_kind,status,notes,cleaning_material_used,water_bucket_count,provenance_status,revision,mobile_draft_payload,updated_at,service_action_refill_lines(id,line_number,quantity,unit,product_name,observed_lot_code,observed_odoo_lot_id,provenance_status,unresolved_reason),service_action_attachments(id,refill_line_id,kind,mime_type,size_bytes,created_at)")
+    .select("id,client_uuid,machine_id,occurred_at,action_kind,action_modes,status,notes,cleaning_material_used,water_bucket_count,provenance_status,revision,mobile_draft_payload,updated_at,service_action_refill_lines(id,line_number,quantity,unit,product_name,observed_lot_code,observed_odoo_lot_id,provenance_status,unresolved_reason),service_action_attachments(id,refill_line_id,kind,mime_type,size_bytes,created_at)")
     .eq("operator_id", session.id).eq("status", "draft").order("updated_at", { ascending: false }).limit(100);
   if (allowedIds) query = query.in("machine_id", allowedIds);
   const { data, error } = await query;
@@ -46,7 +46,7 @@ export async function GET(request: Request) {
     const serverLines = ((row.service_action_refill_lines as Record<string, unknown>[]) ?? []).sort((a, b) => Number(a.line_number) - Number(b.line_number));
     const payload = row.mobile_draft_payload && typeof row.mobile_draft_payload === "object" ? row.mobile_draft_payload as Record<string, unknown> : {
       client_uuid: row.client_uuid, machine_id: row.machine_id, occurred_at: row.occurred_at,
-      status: row.status, action_kind: row.action_kind, notes: row.notes,
+      status: row.status, action_kind: row.action_kind, action_modes: row.action_modes, notes: row.notes,
       cleaning: { material_used: row.cleaning_material_used, water_buckets: row.water_bucket_count },
       refill_lines: serverLines.map((line) => ({ server_line_id: line.id, quantity: line.quantity, unit: line.unit, product_name: line.product_name, lot_code: line.observed_lot_code, odoo_lot_id: line.observed_odoo_lot_id, provenance_status: line.provenance_status, unresolved_reason: line.unresolved_reason })),
     };
@@ -56,7 +56,7 @@ export async function GET(request: Request) {
       const serverLine = hasCanonicalLine ? serverLines[serverLineIndex++] : null;
       return { ...line, server_line_id: serverLine?.id ?? null, provenance_status: serverLine?.provenance_status ?? null, unresolved_reason: serverLine?.unresolved_reason ?? null };
     });
-    return { ...payload, refill_lines: refillLines, report_id: row.id, revision: row.revision, updated_at: row.updated_at, provenance_status: row.provenance_status, attachments: row.service_action_attachments };
+    return { ...payload, action_kind: row.action_kind, action_modes: row.action_modes, refill_lines: refillLines, report_id: row.id, revision: row.revision, updated_at: row.updated_at, provenance_status: row.provenance_status, attachments: row.service_action_attachments };
   });
   return Response.json({ records, scope_version: session.scopeVersion });
 }

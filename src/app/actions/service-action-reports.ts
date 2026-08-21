@@ -7,6 +7,7 @@ import { canAccessMachine } from "@/lib/data/service-access";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { authorizedActionReport } from "@/lib/data/action-report-access";
 import { actionReportExtractionSchema } from "@/lib/action-report-ai-schema";
+import { legacyKindFromModes, modesFromLegacyKind, parseActionReportModes } from "@/lib/action-report-modes";
 
 export type ActionReportResult = {
   ok: boolean;
@@ -35,17 +36,19 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
   const clientUuid = String(formData.get("client_uuid") ?? "");
   const machineId = String(formData.get("machine_id") ?? "");
   const occurredAt = String(formData.get("occurred_at") ?? "");
-  const actionKind = String(formData.get("action_kind") ?? "");
+  const actionModes = parseActionReportModes(formData.getAll("action_modes").map(String));
   const intent = String(formData.get("intent") ?? "confirmed");
   const status = intent === "draft" ? "draft" : "confirmed";
   const occurredMs = Date.parse(occurredAt);
   if (!UUID.test(clientUuid) || !UUID.test(machineId) || !Number.isFinite(occurredMs) || occurredMs < Date.parse("2020-01-01") || occurredMs > Date.now() + 5 * 60_000) {
     return { ok: false, error: "Choose a valid machine and action time." };
   }
-  if (!["cleaning", "refill", "both", "other"].includes(actionKind)) return { ok: false, error: "Choose an action type." };
+  if (!actionModes) return { ok: false, error: "Choose at least one valid action type." };
+  const actionKind = legacyKindFromModes(actionModes);
 
-  const hasCleaning = actionKind === "cleaning" || actionKind === "both";
-  const hasRefill = actionKind === "refill" || actionKind === "both";
+  const hasCleaning = actionModes.includes("cleaning");
+  const hasRefill = actionModes.includes("refill");
+  const hasOther = actionModes.includes("other");
   const materialValue = String(formData.get("cleaning_material_used") ?? "");
   const bucketValue = String(formData.get("water_bucket_count") ?? "");
   const waterBucketCount = bucketValue === "" ? null : Number(bucketValue);
@@ -54,7 +57,7 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
   if (status === "confirmed" && hasCleaning && (!Number.isInteger(waterBucketCount) || waterBucketCount === null || waterBucketCount < 0 || waterBucketCount > 20)) {
     return { ok: false, error: "Water buckets must be a whole number from 0 to 20." };
   }
-  if (status === "confirmed" && actionKind === "other" && !notes) return { ok: false, error: "Describe the action in notes." };
+  if (status === "confirmed" && hasOther && !notes) return { ok: false, error: "Describe the other action in notes." };
 
   const quantities = formData.getAll("quantity").map(String);
   const lotIds = formData.getAll("odoo_lot_id").map(String);
@@ -115,6 +118,7 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
       p_water_bucket_count: hasCleaning ? waterBucketCount : null,
       p_refill_lines: refillLines,
       p_source: source,
+      p_action_modes: actionModes,
     });
     if (error) return { ok: false, error: error.message };
 
@@ -203,8 +207,11 @@ export async function applyActionReportAiProposal(_previous: ActionReportResult 
         return [{ quantity: line.quantity, unit: line.unit ?? "unit", product_name: line.productName, lot_code: line.observedLotCode, odoo_lot_id: null }];
       });
     }
-    const actionKind = report.action_kind;
-    const hasCleaning = actionKind === "cleaning" || actionKind === "both";
+    const currentModes = parseActionReportModes(report.action_modes, report.action_kind) ?? modesFromLegacyKind(report.action_kind);
+    const proposedModes = modesFromLegacyKind(extraction.actionKind);
+    const actionModes = parseActionReportModes([...new Set([...currentModes, ...proposedModes, ...(extraction.otherActions.length ? ["other" as const] : [])])]) ?? currentModes;
+    const actionKind = legacyKindFromModes(actionModes);
+    const hasCleaning = actionModes.includes("cleaning");
     const aiNotes = [extraction.notes, ...extraction.otherActions].filter(Boolean).join("\n");
     const notes = [report.notes, aiNotes].filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join("\n") || null;
     const { error } = await s.rpc("record_service_action_report", {
@@ -217,8 +224,9 @@ export async function applyActionReportAiProposal(_previous: ActionReportResult 
       p_notes: notes,
       p_cleaning_material_used: hasCleaning ? report.cleaning_material_used ?? extraction.cleaning.materialUsed : null,
       p_water_bucket_count: hasCleaning ? report.water_bucket_count ?? extraction.cleaning.waterBucketCount : null,
-      p_refill_lines: actionKind === "refill" || actionKind === "both" ? refillLines : [],
+      p_refill_lines: actionModes.includes("refill") ? refillLines : [],
       p_source: report.source,
+      p_action_modes: actionModes,
     });
     if (error) throw error;
     const { count: openQuestions, error: questionError } = await s.from("service_action_questions").select("id", { count: "exact", head: true }).eq("ai_job_id", jobId).eq("status", "open");

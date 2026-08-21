@@ -51,6 +51,8 @@ export function ActionReportForm({
   const [machineId, setMachineId] = useState(initialDraft?.machineId ?? machines[0]?.id ?? "");
   const [modes, setModes] = useState<ActionReportMode[]>(initialDraft?.actionModes ?? modesFromLegacyKind(initialDraft?.actionKind ?? "both"));
   const [occurredAt, setOccurredAt] = useState(initialDraft?.occurredAt ?? initialEventTime);
+  const [notes, setNotes] = useState(initialDraft?.notes ?? "");
+  const [voicePending, setVoicePending] = useState(false);
   const [lines, setLines] = useState<LineDraft[]>(() => initialDraft?.lines.length ? initialDraft.lines.map((line) => ({ key: crypto.randomUUID(), lotId: line.odooLotId ? String(line.odooLotId) : "", lotCode: line.lotCode, productName: line.productName, quantity: line.quantity, unit: line.unit })) : [newLine()]);
   const machine = machines.find((item) => item.id === machineId);
   const availableLots = lots.filter((lot) => machine?.warehouseId === lot.warehouseId);
@@ -137,7 +139,7 @@ export function ActionReportForm({
                   <label className="block"><span className={label}>Product, if lot unknown</span><input name="product_name" value={line.productName} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, productName: event.target.value } : item))} placeholder="Product name" className={`w-full ${input}`} /></label>
                   <label className="block"><span className={label}>Quantity</span><input name="quantity" type="number" min="0.01" step="0.01" value={line.quantity ?? ""} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, quantity: event.target.value ? Number(event.target.value) : null } : item))} className={`w-full ${input}`} required /></label>
                   <label className="block"><span className={label}>Unit</span><select name="unit" className={`w-full ${input}`} value={line.unit} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, unit: event.target.value } : item))}><option value="unit">Units</option><option value="kg">kg</option><option value="l">litres</option><option value="bag">bags</option><option value="box">boxes</option></select></label>
-                  <label className="block sm:col-span-2"><span className={label}>Batch code photo</span><input name="line_photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic" capture="environment" className={`w-full ${input} text-xs`} /></label>
+                  <label className="block sm:col-span-2"><span className={label}>Batch code photo</span><input name="line_photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic" className={`w-full ${input} text-xs`} /></label>
                 </div>
               </div>
             );
@@ -148,14 +150,14 @@ export function ActionReportForm({
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block"><span className={label}>Notes</span><textarea name="notes" rows={4} defaultValue={initialDraft?.notes ?? ""} required={hasOther} placeholder={hasOther ? "Describe the other action" : "Optional context"} className={`w-full ${input}`} /></label>
-        <label className="block"><span className={label}>General evidence photos</span><input name="evidence_photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic" capture="environment" multiple className={`w-full ${input} text-xs`} /><span className="mt-1 block text-xs text-taupe">Private evidence. Maximum 4 MB per image and 5 MB per submission.</span></label>
+        <label className="block"><span className={label}>Notes</span><textarea name="notes" rows={4} value={notes} onChange={(event) => setNotes(event.target.value)} required={hasOther} placeholder={hasOther ? "Describe the other action" : "Optional context"} className={`w-full ${input}`} /></label>
+        <label className="block"><span className={label}>General evidence photos</span><input name="evidence_photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic" multiple className={`w-full ${input} text-xs`} /><span className="mt-1 block text-xs text-taupe">Choose camera or photo library. Private evidence, maximum 4 MB per image and 5 MB per submission.</span></label>
       </div>
 
-      {draftReportId ? <ActionReportVoice reportId={draftReportId} /> : <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-taupe">Save this report as a draft to record a private voice note and generate reviewable suggestions.</p>}
+      <ActionReportVoice reportId={draftReportId ?? null} notesLength={notes.length} onPendingChange={setVoicePending} onTranscript={(transcript) => setNotes((current) => [current.trim(), transcript.trim()].filter(Boolean).join("\n\n"))} />
 
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" name="intent" value="confirmed" disabled={pending || !machineId || modes.length === 0 || result?.status === "confirmed"} className="rounded-lg bg-terracotta px-4 py-2 text-sm font-bold text-white hover:bg-terracotta-dark disabled:opacity-60">{pending ? "Saving..." : "Confirm action"}</button>
+        <button type="submit" name="intent" value="confirmed" disabled={pending || voicePending || !machineId || modes.length === 0 || result?.status === "confirmed"} className="rounded-lg bg-terracotta px-4 py-2 text-sm font-bold text-white hover:bg-terracotta-dark disabled:opacity-60">{pending ? "Saving..." : voicePending ? "Attach or discard voice first" : "Confirm action"}</button>
         <button type="submit" name="intent" value="draft" formNoValidate disabled={pending || !machineId || modes.length === 0 || result?.status === "confirmed"} className="rounded-lg border border-line bg-white px-4 py-2 text-sm font-bold text-cocoa disabled:opacity-60">Save draft</button>
         {result?.ok && <span className={`text-sm font-semibold ${result.warning ? "text-warning" : "text-sage"}`}>{result.status === "draft" ? "Draft saved." : result.provenanceStatus === "resolved" ? "Action confirmed." : "Action confirmed with a provenance gap."} {result.warning}</span>}
         {result && !result.ok && <span className="text-sm font-semibold text-danger">{result.error}</span>}

@@ -19,7 +19,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const ctx = await context(request, reportId);
   if (!ctx) return Response.json({ error: { message: "Unauthorized or not found" } }, { status: 404 });
   const [{ data: job, error }, { data: questions, error: questionError }] = await Promise.all([
-    ctx.s.from("service_action_ai_jobs").select("id,attachment_id,status,transcript_text,transcript_language,duration_seconds,extraction,last_error,reviewed_at,updated_at").eq("report_id", reportId).maybeSingle(),
+    ctx.s.from("service_action_ai_jobs").select("id,attachment_id,purpose,status,transcript_text,transcript_language,duration_seconds,extraction,last_error,reviewed_at,updated_at").eq("report_id", reportId).maybeSingle(),
     ctx.s.from("service_action_questions").select("id,question_key,question,status,answer").eq("report_id", reportId).eq("source", "deterministic_ai_review").order("created_at"),
   ]);
   if (error || questionError) return Response.json({ error: { message: error?.message ?? questionError?.message } }, { status: 500 });

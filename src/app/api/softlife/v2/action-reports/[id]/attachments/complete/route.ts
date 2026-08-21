@@ -18,21 +18,33 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     const reportId = (await params).id;
     if (!/^[0-9a-f-]{36}$/i.test(reportId)) return Response.json({ error: { message: "Invalid report ID" } }, { status: 400 });
-    const body = await request.json() as { path?: unknown; mime_type?: unknown; refill_line_id?: unknown };
+    const body = await request.json() as { path?: unknown; mime_type?: unknown; refill_line_id?: unknown; purpose?: unknown };
     const path = typeof body.path === "string" ? body.path : "";
     const mimeType = typeof body.mime_type === "string" ? body.mime_type.split(";")[0] : "";
     const kind = TYPES[mimeType];
     const s = await createServiceClient();
     const report = await authorizedMobileActionReport(s, session, reportId);
     const prefix = `${report?.tenant_id ?? "platform"}/${reportId}/mobile/`;
-    if (!report || !kind || !path.startsWith(prefix) || (kind === "audio" && report.status !== "draft")) return Response.json({ error: { message: "Invalid attachment" } }, { status: 400 });
+    if (!report || !kind || !path.startsWith(prefix)) return Response.json({ error: { message: "Invalid attachment" } }, { status: 400 });
+    if (kind === "audio" && report.status !== "draft") {
+      await s.storage.from("service-action-evidence").remove([path]);
+      return Response.json({ error: { message: "Audio can only be attached to a draft" } }, { status: 400 });
+    }
     const { data: info, error: infoError } = await s.storage.from("service-action-evidence").info(path);
     if (infoError) throw infoError;
     const size = Number(info.size);
     const storedType = String(info.contentType ?? info.metadata?.mimetype ?? "").split(";")[0];
-    if (!Number.isFinite(size) || size <= 0 || size > 20 * 1024 * 1024 || storedType !== mimeType) return Response.json({ error: { message: "Stored attachment validation failed" } }, { status: 400 });
+    if (!Number.isFinite(size) || size <= 0 || size > 20 * 1024 * 1024 || storedType !== mimeType) {
+      await s.storage.from("service-action-evidence").remove([path]);
+      return Response.json({ error: { message: "Stored attachment validation failed" } }, { status: 400 });
+    }
     if (kind === "audio") {
-      const { data, error } = await s.rpc("finalize_service_action_audio", { p_report_id: reportId, p_storage_path: path, p_mime_type: mimeType, p_size_bytes: size, p_actor_id: session.id });
+      const purpose = body.purpose === "notes" ? "notes" : body.purpose === "report" || body.purpose === undefined ? "report" : null;
+      if (!purpose) {
+        await s.storage.from("service-action-evidence").remove([path]);
+        return Response.json({ error: { message: "Invalid voice purpose" } }, { status: 400 });
+      }
+      const { data, error } = await s.rpc("finalize_service_action_audio", { p_report_id: reportId, p_storage_path: path, p_mime_type: mimeType, p_size_bytes: size, p_actor_id: session.id, p_purpose: purpose });
       if (error) throw error;
       after(async () => { try { await runActionReportAiJobs(1); } catch (error) { console.error("[mobile-action-report-ai-after]", error); } });
       return Response.json(data);

@@ -3,7 +3,7 @@ import { generateText, Output, transcribe } from "ai";
 import { createServiceClient } from "@/lib/supabase/server";
 import { actionReportExtractionSchema, actionReportQuestions } from "@/lib/action-report-ai-schema";
 
-type ClaimedJob = { job_id: string; storage_path: string; mime_type: string; lease_token: string; attempt_count: number };
+type ClaimedJob = { job_id: string; storage_path: string; mime_type: string; purpose: "report" | "notes"; lease_token: string; attempt_count: number };
 
 export async function runActionReportAiJobs(limit = 2) {
   if (!process.env.OPENAI_API_KEY) throw new Error("OpenAI is not configured");
@@ -23,16 +23,20 @@ export async function runActionReportAiJobs(limit = 2) {
         audio: await audio.arrayBuffer(),
         abortSignal: AbortSignal.timeout(120_000),
       });
-      const generated = await generateText({
-        model: openai("gpt-4o-mini"),
-        output: Output.object({ schema: actionReportExtractionSchema }),
-        instructions: "Extract only physical service facts explicitly stated in the transcript. Never invent identifiers, lots, quantities, units, cleaning evidence, warehouses, machines, or users. Use null for missing or ambiguous values. Preserve spoken lot codes exactly.",
-        prompt: transcript.text,
-        abortSignal: AbortSignal.timeout(120_000),
-      });
-      if (!generated.output) throw new Error("AI extraction returned no output");
-      const extraction = generated.output;
-      const questions = actionReportQuestions(extraction);
+      let extraction = null;
+      let questions: ReturnType<typeof actionReportQuestions> = [];
+      if (job.purpose === "report") {
+        const generated = await generateText({
+          model: openai("gpt-4o-mini"),
+          output: Output.object({ schema: actionReportExtractionSchema }),
+          instructions: "Extract only physical service facts explicitly stated in the transcript. Never invent identifiers, lots, quantities, units, cleaning evidence, warehouses, machines, or users. Use null for missing or ambiguous values. Preserve spoken lot codes exactly.",
+          prompt: transcript.text,
+          abortSignal: AbortSignal.timeout(120_000),
+        });
+        if (!generated.output) throw new Error("AI extraction returned no output");
+        extraction = generated.output;
+        questions = actionReportQuestions(extraction);
+      }
       const { error: completeError } = await s.rpc("complete_service_action_ai_job", {
         p_job_id: job.job_id,
         p_worker: worker,
@@ -44,7 +48,7 @@ export async function runActionReportAiJobs(limit = 2) {
         p_extraction: extraction,
         p_questions: questions,
         p_transcription_model: "gpt-4o-mini-transcribe",
-        p_extraction_model: "gpt-4o-mini",
+        p_extraction_model: job.purpose === "report" ? "gpt-4o-mini" : null,
       });
       if (completeError) throw completeError;
       results.push({ jobId: job.job_id, status: "complete" });

@@ -15,24 +15,36 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!actor) return Response.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const reportId = (await params).id;
-    const body = await request.json() as { path?: unknown; mime_type?: unknown };
+    const body = await request.json() as { path?: unknown; mime_type?: unknown; purpose?: unknown };
     const path = typeof body.path === "string" ? body.path : "";
     const mimeType = typeof body.mime_type === "string" ? body.mime_type.split(";")[0] : "";
     const s = await createServiceClient();
-    const report = await authorizedActionReport(s, actor, reportId, true);
-    if (!report) return Response.json({ error: "Draft not found" }, { status: 404 });
+    const report = await authorizedActionReport(s, actor, reportId);
+    if (!report) return Response.json({ error: "Report not found" }, { status: 404 });
     const prefix = `${report.tenant_id ?? "platform"}/${reportId}/audio/`;
     if (!path.startsWith(prefix) || !TYPES.has(mimeType)) return Response.json({ error: "Invalid audio path" }, { status: 400 });
+    if (report.status !== "draft") {
+      await s.storage.from("service-action-evidence").remove([path]);
+      return Response.json({ error: "Audio can only be attached to a draft" }, { status: 400 });
+    }
     const { data: info, error: infoError } = await s.storage.from("service-action-evidence").info(path);
     if (infoError) throw infoError;
     const sizeBytes = Number(info.size);
-    if (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > 20 * 1024 * 1024) return Response.json({ error: "Invalid audio size" }, { status: 400 });
+    if (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > 20 * 1024 * 1024) {
+      await s.storage.from("service-action-evidence").remove([path]);
+      return Response.json({ error: "Invalid audio size" }, { status: 400 });
+    }
     const storedType = String(info.contentType ?? info.metadata?.mimetype ?? "").split(";")[0];
     if (storedType !== mimeType) {
       await s.storage.from("service-action-evidence").remove([path]);
       return Response.json({ error: "Stored audio type does not match the upload" }, { status: 400 });
     }
-    const { data, error } = await s.rpc("finalize_service_action_audio", { p_report_id: reportId, p_storage_path: path, p_mime_type: mimeType, p_size_bytes: sizeBytes, p_actor_id: actor.id });
+    const purpose = body.purpose === "notes" ? "notes" : body.purpose === "report" || body.purpose === undefined ? "report" : null;
+    if (!purpose) {
+      await s.storage.from("service-action-evidence").remove([path]);
+      return Response.json({ error: "Invalid voice purpose" }, { status: 400 });
+    }
+    const { data, error } = await s.rpc("finalize_service_action_audio", { p_report_id: reportId, p_storage_path: path, p_mime_type: mimeType, p_size_bytes: sizeBytes, p_actor_id: actor.id, p_purpose: purpose });
     if (error) throw error;
     after(async () => {
       try { await runActionReportAiJobs(1); }

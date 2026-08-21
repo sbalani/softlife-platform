@@ -13,7 +13,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const s = await createServiceClient();
     if (!await authorizedActionReport(s, actor, reportId)) return Response.json({ error: "Report not found" }, { status: 404 });
     const [{ data: job, error: jobError }, { data: questions, error: questionError }] = await Promise.all([
-      s.from("service_action_ai_jobs").select("id,attachment_id,status,transcript_text,extraction,last_error,reviewed_at,updated_at").eq("report_id", reportId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+      s.from("service_action_ai_jobs").select("id,attachment_id,purpose,status,transcript_text,extraction,last_error,reviewed_at,updated_at").eq("report_id", reportId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
       s.from("service_action_questions").select("id,question,question_key,status,answer").eq("report_id", reportId).eq("source", "deterministic_ai_review").order("created_at"),
     ]);
     if (jobError) throw jobError;

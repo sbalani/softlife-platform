@@ -139,7 +139,6 @@ export function BaseHopperCard({
   };
 
   const liveEsName = item ? localizedGoodsName(item) : "";
-  const internalName = item?.goodsName;
   const locales = item ? languagePackEntries(item) : [];
   const displayName = draftItem ? draftItem.goodsName : liveEsName || linkedBase?.name || "No base set";
   const displayPrice = draftItem ? draftItem.price : item?.price;

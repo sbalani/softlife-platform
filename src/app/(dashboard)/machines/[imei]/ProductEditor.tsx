@@ -166,7 +166,6 @@ export function ProductEditor({
 
   const label = HOPPER_LABELS[pos] ?? `Hopper ${item.position}`;
   const liveEsName = localizedGoodsName(item);
-  const internalName = item.goodsName;
   const locales = languagePackEntries(item);
   const displayName = draftItem ? draftItem.goodsName : liveEsName;
   const displayPrice = draftItem ? draftItem.price : item.price;

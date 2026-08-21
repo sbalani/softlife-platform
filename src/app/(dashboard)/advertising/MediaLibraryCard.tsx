@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Image from "next/image";
 import { assignToMachines } from "./actions";
 import type { MediaItem } from "@/lib/data/media";
 
@@ -42,7 +43,7 @@ export function MediaLibraryCard({ item, machines }: { item: MediaItem; machines
     <div className="rounded-2xl border border-line bg-white p-4">
       <div className="flex gap-3">
         {item.type === "image" ? (
-          <img src={item.url} alt={item.name ?? "media"} className="h-16 w-24 rounded-lg object-cover" />
+          <Image src={item.url} alt={item.name ?? "media"} width={96} height={64} className="h-16 w-24 rounded-lg object-cover" />
         ) : (
           <div className="flex h-16 w-24 items-center justify-center rounded-lg bg-cream text-taupe">Video</div>
         )}

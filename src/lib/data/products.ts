@@ -89,6 +89,7 @@ export const getAliasMap = cache(async (): Promise<AliasMap> => {
   const map: AliasMap = new Map();
   const prods = await getProducts();
   for (const p of prods) {
+    map.set(p.name.toLowerCase().trim(), { productId: p.id, productName: p.name });
     for (const a of p.aliases) {
       map.set(a.alias.toLowerCase().trim(), { productId: p.id, productName: p.name });
     }

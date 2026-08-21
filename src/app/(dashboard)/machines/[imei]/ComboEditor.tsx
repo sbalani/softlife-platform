@@ -106,7 +106,6 @@ export function ComboEditor({
   };
 
   const liveEsName = localizedGoodsName(item);
-  const internalName = item.goodsName;
   const locales = languagePackEntries(item);
   const displayName = draftItem ? draftItem.goodsName : liveEsName;
   const displayPrice = draftItem ? draftItem.price : item.price;

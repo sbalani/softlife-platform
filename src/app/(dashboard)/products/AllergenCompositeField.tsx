@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { generateAllergenPreview } from "./actions";
 
 const label = "mb-1 block text-[11px] uppercase tracking-wide text-taupe";
@@ -29,7 +30,7 @@ export function AllergenCompositeField({ initialUrl }: { initialUrl: string | nu
       <span className={label}>Allergen image (composite)</span>
       <div className="flex flex-wrap items-center gap-3">
         {url ? (
-          <img src={url} alt="Allergen composite" className="h-14 rounded-lg border border-line bg-white object-contain p-1" />
+          <Image src={url} alt="Allergen composite" width={56} height={56} className="h-14 w-auto rounded-lg border border-line bg-white object-contain p-1" />
         ) : (
           <div className="flex h-14 w-14 items-center justify-center rounded-lg border border-line bg-cream text-[10px] text-taupe">
             None yet

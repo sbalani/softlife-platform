@@ -390,7 +390,7 @@ export default async function MachineDetailPage({
                   {config?.machineId && <PushSolidToppingsButton imei={imei} />}
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {menu.diy.map((item, i) =>
+                  {menu.diy.map((item) =>
                     String(item.position) === "1" ? (
                       <BaseHopperCard
                         key={`base:${config?.baseProductId ?? "unlinked"}:${item.goodsName ?? ""}`}

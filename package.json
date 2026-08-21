@@ -20,7 +20,9 @@
     "test:mobile-status": "node --experimental-strip-types --test src/lib/data/mobile-machine-status.test.ts",
     "test:mobile-builds": "node --experimental-strip-types --test src/lib/auth/web-authorization.test.ts src/lib/mobile-builds.test.ts",
     "test:defrost": "node --experimental-strip-types --test src/lib/defrost-status.test.ts",
-    "test:action-reports": "node --experimental-strip-types --test src/lib/data/recall.test.ts src/lib/action-report-ai.test.ts"
+    "test:action-reports": "node --experimental-strip-types --test src/lib/data/recall.test.ts src/lib/action-report-ai.test.ts",
+    "test:payout": "node --experimental-strip-types --test src/lib/payout-report.test.ts",
+    "test:temperatures": "node --experimental-strip-types --test src/lib/temperature-explorer.test.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.5",
@@ -28,6 +30,7 @@
     "@supabase/supabase-js": "^2.110.0",
     "ai": "^7.0.11",
     "next": "16.2.12",
+    "pdf-lib": "^1.17.1",
     "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",

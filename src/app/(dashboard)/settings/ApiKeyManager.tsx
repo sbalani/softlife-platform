@@ -44,7 +44,7 @@ export function ApiKeyManager({ keys }: { keys: ApiKeyRow[] }) {
     <div className="space-y-4">
       {newKey && (
         <div className="rounded-xl border border-sage/40 bg-sage/5 p-4">
-          <p className="mb-2 text-xs font-bold text-sage">Key created — copy it now, it won't be shown again.</p>
+          <p className="mb-2 text-xs font-bold text-sage">Key created — copy it now, it won&apos;t be shown again.</p>
           <div className="flex items-center gap-2">
             <code className="flex-1 truncate rounded bg-white px-2 py-1.5 text-xs text-cocoa">
               {EDGE_URL}?key={newKey}

@@ -292,13 +292,6 @@ async function captureTelemetry(s: SupabaseClient, cfg: HuaxinConfig, run: Defro
   return { statuses, observedAt, ...values };
 }
 
-async function updateRun(s: SupabaseClient, run: DefrostRun, owner: string, values: Record<string, unknown>) {
-  const { data, error } = await s.from("machine_defrost_runs").update({ ...values, lease_owner: null, lease_until: null, updated_at: new Date().toISOString() })
-    .eq("id", run.id).eq("lease_owner", owner).select("id").maybeSingle();
-  if (error) throw error;
-  if (!data) throw new Error("Defrost run lease was lost before the state could be saved");
-}
-
 async function transitionRun(s: SupabaseClient, run: DefrostRun, owner: string, nextState: string, eventKey: string, values: Record<string, unknown> = {}, releaseLease = true) {
   const previousState = run.state;
   const { error } = await s.rpc("transition_defrost_run", {

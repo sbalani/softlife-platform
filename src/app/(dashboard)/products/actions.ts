@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { generateAllergenComposite } from "@/lib/allergens/composite";
 import { getSessionProfile } from "@/lib/auth/session";
@@ -8,7 +9,7 @@ import { recordProductChange } from "@/lib/data/change-log";
 
 export type ProductResult = { ok: boolean; error?: string };
 
-async function uploadImage(s: any, file: File): Promise<string | null> {
+async function uploadImage(s: SupabaseClient, file: File): Promise<string | null> {
   if (!file || !file.size) return null;
   const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
   const path = `products/${crypto.randomUUID()}.${ext}`;
@@ -55,7 +56,7 @@ export async function generateAllergenPreview(containsIds: string[], mayContainI
 }
 
 async function buildAllergenCompositeUrl(
-  s: any,
+  s: SupabaseClient,
   containsIds: string[],
   mayContainIds: string[],
   cacheKey: string,

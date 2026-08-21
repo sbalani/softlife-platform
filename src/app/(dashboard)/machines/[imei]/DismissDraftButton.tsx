@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import { dismissMenuDraft } from "./actions";
 
 export function DismissDraftButton({ imei, draftId }: { imei: string; draftId: string }) {

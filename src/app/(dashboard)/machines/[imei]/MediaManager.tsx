@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useActionState } from "react";
+import Image from "next/image";
 import { addDeviceMedia, removeDeviceMediaAction, type MediaResult } from "./actions";
 
 type MediaItem = { code?: string; imagePath?: string; duration?: number; intro?: string };
@@ -63,7 +64,7 @@ export function MediaManager({ imei, media }: { imei: string; media: MediaItem[]
           {media.map((m, i) => (
             <div key={m.code ?? i} className="rounded-xl border border-line p-2 text-center">
               {m.imagePath ? (
-                <img src={m.imagePath} alt={m.intro ?? `Media ${m.code}`} className="h-20 w-32 rounded-lg object-cover" />
+                <Image src={m.imagePath} alt={m.intro ?? `Media ${m.code}`} width={128} height={80} unoptimized className="h-20 w-32 rounded-lg object-cover" />
               ) : (
                 <div className="flex h-20 w-32 items-center justify-center rounded-lg bg-cream text-taupe">—</div>
               )}

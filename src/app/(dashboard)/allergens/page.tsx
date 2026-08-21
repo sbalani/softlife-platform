@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { getAllergens } from "@/lib/data/allergens";
 import { setAllergenLogo } from "./actions";
 
@@ -20,7 +21,7 @@ export default async function AllergensPage() {
           <div key={a.id} className="rounded-2xl border border-line bg-white p-4">
             <div className="flex items-center gap-3">
               {a.logo_url ? (
-                <img src={a.logo_url} alt={a.name} className="h-12 w-12 rounded-lg bg-cream object-contain p-1" />
+                <Image src={a.logo_url} alt={a.name} width={48} height={48} className="h-12 w-12 rounded-lg bg-cream object-contain p-1" />
               ) : (
                 <span className="flex h-12 w-12 items-center justify-center rounded-lg bg-cream text-lg font-bold text-taupe">{a.name[0]}</span>
               )}

@@ -7,6 +7,7 @@ import { listApiKeys } from "./api-key-actions";
 import { formatDateTime, tzAbbrev } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { getVatRates } from "@/lib/data/franchisee-profit";
+import { getSessionProfile } from "@/lib/auth/session";
 import { VatRateManager } from "./VatRateManager";
 import type { ReactNode } from "react";
 
@@ -51,13 +52,14 @@ type OrderMachineResult = { device_imei: string; machine_name: string | null; er
 export default async function SettingsPage() {
   const cfg = getConfigFromEnv();
   const tz = await getDisplayTimezone();
-  const [machines, temps, orders, faults, apiKeys, vatRates] = await Promise.all([
+  const [machines, temps, orders, faults, apiKeys, vatRates, profile] = await Promise.all([
     count("machines"),
     count("huaxin_temperatures"),
     count("huaxin_orders"),
     count("huaxin_faults"),
     listApiKeys(),
     getVatRates(),
+    getSessionProfile(),
   ]);
 
   let lastSync: string | null = null;
@@ -149,10 +151,10 @@ export default async function SettingsPage() {
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">
         <h2 className="font-display text-lg font-bold text-cocoa">MCP API keys</h2>
         <p className="mt-1 mb-4 max-w-2xl text-sm text-taupe">
-          Generate per-user keys to connect ChatGPT, Claude, or other AI tools to your SoftLife data.
-          Endpoint: <code className="rounded bg-cream px-1 text-xs">https://awsfqnymosevmhawbukf.supabase.co/functions/v1/softlife-mcp?key=YOUR_KEY</code>
+          Generate scoped keys to connect ChatGPT, Claude, or other AI tools to your SoftLife data and approved workflows.
+          Endpoint: <code className="rounded bg-cream px-1 text-xs">https://awsfqnymosevmhawbukf.supabase.co/functions/v1/softlife-mcp</code>. Configure the key as <code className="rounded bg-cream px-1 text-xs">Authorization: Bearer sl_mcp_...</code>.
         </p>
-        <ApiKeyManager keys={apiKeys} />
+        <ApiKeyManager keys={apiKeys} canCommand={profile?.role === "admin" || profile?.role === "franchisee"} />
       </section>
 
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">

@@ -23,6 +23,8 @@ export type Machine = {
   created_at: string | null;
   net_online: boolean;
   huaxin_last_sync: string | null;
+  last_online_at: string | null;
+  offline_since: string | null;
   oos: boolean;
   low_stock: boolean;
   active_alert_count: number;

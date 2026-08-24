@@ -25,6 +25,8 @@ export type MachineDetail = {
   location: string | null;
   online: boolean;
   machine_synced_at: string | null;
+  last_online_at: string | null;
+  offline_since: string | null;
   temperatures: DetailTemp[];
   temperature_observed_at: string | null;
   orders: DetailOrder[];
@@ -67,7 +69,7 @@ export async function getMachineDetail(
   const s = await createServiceClient();
   const { data: machine, error: machineError } = await s
     .from("machines")
-    .select("id,name,display_name,device_imei,device_id_huaxin,location,location_override,is_online,huaxin_last_sync")
+    .select("id,name,display_name,device_imei,device_id_huaxin,location,location_override,is_online,huaxin_last_sync,last_online_at,offline_since")
     .eq("device_imei", imei)
     .maybeSingle();
   if (machineError) throw machineError;
@@ -118,6 +120,8 @@ export async function getMachineDetail(
     location: machine.location_override || translateLocation(machine.location) || null,
     online: Boolean(machine.is_online),
     machine_synced_at: machine.huaxin_last_sync ?? null,
+    last_online_at: machine.last_online_at ?? null,
+    offline_since: machine.offline_since ?? null,
     temperatures: temperatureRows.map((row) => ({ time: row.reading_time, value: Number(row.value) })),
     temperature_observed_at: temperatureRows.at(-1)?.reading_time ?? null,
     orders: orderRows.map((order) => ({

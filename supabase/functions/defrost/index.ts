@@ -249,6 +249,15 @@ function isSalesReady(value: string | null) {
   return normalized === "normal" || operatingStateCode(value) === "11";
 }
 
+function isLowStock(rows: StatusRow[]) {
+  const value = normalizedStatus(statusValue(rows, "status_0_lackmaterial"));
+  return Boolean(value) && !["0", "false", "normal", "none", "available", "正常", "无"].includes(value);
+}
+
+function isCompressorOverheated(rows: StatusRow[]) {
+  return isOpen(statusValue(rows, "status_0_overhot")) || /^113\b/.test(statusValue(rows, "status_0_code") ?? "");
+}
+
 async function appendEvent(s: SupabaseClient, run: DefrostRun, eventKey: string, eventType: string, detail: Record<string, unknown> = {}, stateBefore?: string, stateAfter?: string) {
   const { error } = await s.rpc("append_defrost_event", {
     p_run_id: run.id,
@@ -367,6 +376,19 @@ async function safeRecovery(s: SupabaseClient, cfg: HuaxinConfig, run: DefrostRu
   try { await issueCommand(s, cfg, run, machine, `recovery_${attempt}_thaw_off`, "operate_closethawing", attempt); outcomes.push("defrost off accepted"); }
   catch (error) { safe = false; outcomes.push(`operate_closethawing unconfirmed: ${error instanceof Error ? error.message : String(error)}`); }
   await delay(COMMAND_DELAY_MS);
+  try {
+    const telemetry = await captureTelemetry(s, cfg, run, machine, "recovery_precheck", attempt);
+    if (isCompressorOverheated(telemetry.statuses)) {
+      const blocked = isSalesBlocked(telemetry.operating) || !isOpen(telemetry.sales);
+      outcomes.push("compressor overheat protection active; refrigeration left off");
+      if (!isClosed(telemetry.defrost)) { safe = false; outcomes.push(`defrost state is ${telemetry.defrost ?? "missing"}`); }
+      if (!blocked) { safe = false; outcomes.push(`sales-disabled state is unconfirmed (${telemetry.operating ?? "missing"})`); }
+      return { safe, detail: outcomes.join("; ") };
+    }
+  } catch (error) {
+    safe = false;
+    outcomes.push(`recovery precheck failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
   try { await issueCommand(s, cfg, run, machine, `recovery_${attempt}_refrigeration_on`, "operate_openrefrigeration"); outcomes.push("refrigeration on accepted"); }
   catch (error) { safe = false; outcomes.push(`refrigeration on unconfirmed: ${error instanceof Error ? error.message : String(error)}`); }
   await delay(COMMAND_DELAY_MS);
@@ -402,6 +424,16 @@ async function processRun(s: SupabaseClient, cfg: HuaxinConfig, run: DefrostRun,
     if (run.state === "scheduled") {
       const telemetry = await captureTelemetry(s, cfg, run, typedMachine, "precheck", 0);
       if (normalizedStatus(statusValue(telemetry.statuses, "status_0_online_status")) !== "online") throw new Error("Machine is not online at defrost precheck");
+      const skipReason = isCompressorOverheated(telemetry.statuses)
+        ? "Skipped: compressor overheat protection is active."
+        : isLowStock(telemetry.statuses)
+          ? "Skipped: machine is in low-stock mode."
+          : null;
+      if (skipReason) {
+        const completedAt = new Date().toISOString();
+        await transitionRun(s, run, owner, "skipped", "precheck_skipped", { completed_at: completedAt, outcome: "skipped", failure_detail: skipReason, last_status_observed_at: telemetry.observedAt });
+        return;
+      }
       await appendEvent(s, run, "precheck_passed", "precheck_passed", { refrigeration: telemetry.refrigeration, defrost: telemetry.defrost, formation: telemetry.formation, sales: telemetry.sales });
       await issueCommand(s, cfg, run, typedMachine, "sellout", "operate_sellout");
       await appendEvent(s, run, "delay_after_sellout", "command_delay", { milliseconds: COMMAND_DELAY_MS });

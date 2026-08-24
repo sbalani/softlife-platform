@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { defrostFormationPct, defrostStatusValue, isHuaxinClosed, isHuaxinOpen, isHuaxinSalesBlocked, isHuaxinSalesReady } from "./defrost-status.ts";
+import { defrostFormationPct, defrostStatusValue, isHuaxinClosed, isHuaxinCompressorOverheated, isHuaxinLowStock, isHuaxinOpen, isHuaxinSalesBlocked, isHuaxinSalesReady } from "./defrost-status.ts";
 
 const liveTestMachineStatuses = [
   { code: "status_0_ac", value: "Abrir" },
@@ -29,4 +29,12 @@ test("reads the stable formation percentage without accepting invalid values", (
   assert.equal(defrostFormationPct(liveTestMachineStatuses), 100);
   assert.equal(defrostFormationPct([{ code: "status_0_percent", value: "42%" }]), 42);
   assert.equal(defrostFormationPct([{ code: "status_0_percent", value: "unknown" }]), null);
+});
+
+test("detects low stock and compressor overheat defrost blockers", () => {
+  assert.equal(isHuaxinLowStock([{ code: "status_0_lackmaterial", value: "Liquid level low" }]), true);
+  assert.equal(isHuaxinLowStock([{ code: "status_0_lackmaterial", value: "normal" }]), false);
+  assert.equal(isHuaxinCompressorOverheated([{ code: "status_0_overhot", value: "Open" }]), true);
+  assert.equal(isHuaxinCompressorOverheated([{ code: "status_0_code", value: "113-Compressor Overheat Protection" }]), true);
+  assert.equal(isHuaxinCompressorOverheated([{ code: "status_0_overhot", value: "Close" }]), false);
 });

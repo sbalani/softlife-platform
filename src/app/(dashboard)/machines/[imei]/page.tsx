@@ -146,9 +146,12 @@ export default async function MachineDetailPage({
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <span className={`rounded-full px-3 py-1 text-xs font-bold ${online ? "bg-sage/15 text-sage" : "bg-taupe/15 text-taupe"}`}>
-            {online ? "Online" : "Offline"}
-          </span>
+          <div className="text-right">
+            <span className={`inline-block rounded-full px-3 py-1 text-xs font-bold ${online ? "bg-sage/15 text-sage" : "bg-taupe/15 text-taupe"}`}>
+              {online ? "Online" : "Offline"}
+            </span>
+            {!online && <p className="mt-1 text-[11px] text-taupe">{telemetry?.offline_since ? `Offline since ${formatDateTime(telemetry.offline_since, tz)}` : "Offline time unknown"}{telemetry?.last_online_at ? ` · Last online ${formatDateTime(telemetry.last_online_at, tz)}` : ""}</p>}
+          </div>
           <MachineSyncButton imei={imei} />
         </div>
       </header>

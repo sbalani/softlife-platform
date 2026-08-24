@@ -25,6 +25,15 @@ export function isHuaxinSalesReady(value: string | null): boolean {
   return value?.trim().toLowerCase() === "normal" || huaxinOperatingStateCode(value) === "11";
 }
 
+export function isHuaxinLowStock(rows: DefrostStatusRow[]): boolean {
+  const value = defrostStatusValue(rows, "status_0_lackmaterial")?.toLowerCase() ?? "";
+  return Boolean(value) && !["0", "false", "normal", "none", "available", "正常", "无"].includes(value);
+}
+
+export function isHuaxinCompressorOverheated(rows: DefrostStatusRow[]): boolean {
+  return isHuaxinOpen(defrostStatusValue(rows, "status_0_overhot")) || /^113\b/.test(defrostStatusValue(rows, "status_0_code") ?? "");
+}
+
 export function defrostFormationPct(rows: DefrostStatusRow[]): number | null {
   const raw = defrostStatusValue(rows, "status_0_percent");
   if (!raw) return null;

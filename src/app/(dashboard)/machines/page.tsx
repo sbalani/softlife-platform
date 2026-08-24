@@ -135,10 +135,11 @@ export default async function MachinesPage({
                   <td className="px-4 py-3 font-mono text-xs text-taupe">{m.device_imei ?? "—"}</td>
                   <td className="px-4 py-3 text-cocoa">{m.location ?? "—"}</td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                        <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${!m.deployed ? "bg-taupe/15 text-taupe" : m.oos ? "bg-danger/15 text-danger" : m.low_stock ? "bg-warning/15 text-warning" : "bg-sage/15 text-sage"}`}>{!m.deployed ? "Not deployed" : m.oos ? "OOS" : m.low_stock ? "Low stock" : "OK"}</span>
                        {m.deployed && <span className={`text-xs font-semibold ${m.net_online ? "text-sage" : "text-danger"}`}>{m.net_online ? "Online" : "Offline"}</span>}
                       {m.active_alert_count > 0 && <span title={`${m.active_alert_count} other active alert(s)`} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-warning text-xs font-black text-white">!</span>}
+                      {m.deployed && !m.net_online && <span className="basis-full text-[11px] text-taupe">{m.offline_since ? `Offline since ${formatDateTime(m.offline_since, tz)}` : "Offline time unknown"}{m.last_online_at ? ` · Last online ${formatDateTime(m.last_online_at, tz)}` : ""}</span>}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-cocoa">€{(salesByImei.get(m.device_imei ?? "") ?? 0).toFixed(2)}</td>

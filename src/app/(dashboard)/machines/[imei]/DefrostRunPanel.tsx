@@ -16,6 +16,7 @@ const STATE_LABELS: Record<string, string> = {
   sales_check: "Confirming sales",
   recovery: "Safe recovery",
   completed: "Completed",
+  skipped: "Skipped",
   failed: "Failed",
   manual_intervention: "Manual intervention",
 };

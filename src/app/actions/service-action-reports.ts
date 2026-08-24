@@ -7,6 +7,7 @@ import { canAccessMachine } from "@/lib/data/service-access";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { authorizedActionReport } from "@/lib/data/action-report-access";
 import { actionReportExtractionSchema } from "@/lib/action-report-ai-schema";
+import { captureActionReportStockSnapshot } from "@/lib/action-report-stock";
 import { legacyKindFromModes, modesFromLegacyKind, parseActionReportModes } from "@/lib/action-report-modes";
 
 export type ActionReportResult = {
@@ -16,18 +17,12 @@ export type ActionReportResult = {
   reportId?: string;
   status?: "draft" | "confirmed";
   provenanceStatus?: string;
+  stockSnapshotStatus?: "captured" | "needs_review" | "failed";
 };
 
 type ReportSource = "web" | "machine_qr";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const FILE_TYPES: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-  "image/heic": "heic",
-};
-
 async function submitActionReport(source: ReportSource, _previous: ActionReportResult | null, formData: FormData): Promise<ActionReportResult> {
   if (!isSupabaseConfigured()) return { ok: false, error: "Service is not configured." };
   const actor = await getSessionProfile();
@@ -82,7 +77,8 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
   try {
     const s = await createServiceClient();
     if (!await canAccessMachine(s, actor, machineId, new Date(occurredMs).toISOString())) return { ok: false, error: "You do not have access to this machine at the action time." };
-    const { data: existingOwnedReport } = await s.from("service_action_reports").select("id,operator_id,status").eq("client_uuid", clientUuid).maybeSingle();
+    const { data: existingOwnedReport, error: ownershipError } = await s.from("service_action_reports").select("id,operator_id,status").eq("client_uuid", clientUuid).maybeSingle();
+    if (ownershipError) throw ownershipError;
     if (existingOwnedReport && actor.role !== "admin" && existingOwnedReport.operator_id !== actor.id) return { ok: false, error: "You do not own this draft." };
     if (status === "confirmed") {
       const { data: existingReport } = await s.from("service_action_reports").select("id").eq("client_uuid", clientUuid).maybeSingle();
@@ -123,38 +119,15 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
     if (error) return { ok: false, error: error.message };
 
     const result = data as { id: string; status: "draft" | "confirmed"; provenance_status: string; projection_error?: string | null };
-    const files = [
-      ...formData.getAll("evidence_photo").map((file) => ({ file, lineIndex: null as number | null })),
-      ...formData.getAll("line_photo").map((file, lineIndex) => ({ file, lineIndex })),
-    ].filter((entry): entry is { file: File; lineIndex: number | null } => entry.file instanceof File && entry.file.size > 0);
     const warnings: string[] = result.projection_error ? ["The physical report was saved, but a legacy projection needs review."] : [];
-    const accepted = result.status === "confirmed" ? files.filter(({ file }) => FILE_TYPES[file.type] && file.size <= 4 * 1024 * 1024) : [];
-    if (result.status === "draft" && files.length) warnings.push("Photos are attached when the report is confirmed.");
-    else if (accepted.length !== files.length) warnings.push("Some photos were skipped because their type or size is unsupported.");
-
-    if (accepted.length) {
-      const { data: lineRows } = await s.from("service_action_refill_lines").select("id,line_number").eq("report_id", result.id).order("line_number");
-      const lineIds = new Map(((lineRows as { id: string; line_number: number }[]) ?? []).map((line) => [line.line_number - 1, line.id]));
-      for (const { file, lineIndex } of accepted) {
-        const bytes = await file.arrayBuffer();
-        const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-        const scope = lineIndex === null ? "report" : `line-${lineIndex + 1}`;
-        const path = `${actor.tenant_id ?? "platform"}/${result.id}/${scope}-${hash}.${FILE_TYPES[file.type]}`;
-        const { error: uploadError } = await s.storage.from("service-action-evidence").upload(path, bytes, { contentType: file.type, upsert: true });
-        if (uploadError) { warnings.push("A photo could not be uploaded; the physical report is still saved."); continue; }
-        const { error: metadataError } = await s.from("service_action_attachments").upsert({
-          report_id: result.id,
-          refill_line_id: lineIndex === null ? null : lineIds.get(lineIndex) ?? null,
-          kind: "photo",
-          storage_path: path,
-          mime_type: file.type,
-          size_bytes: file.size,
-          created_by: actor.id,
-        }, { onConflict: "storage_path", ignoreDuplicates: true });
-        if (metadataError) {
-          await s.storage.from("service-action-evidence").remove([path]);
-          warnings.push("A photo could not be attached; the physical report is still saved.");
-        }
+    let stockSnapshotStatus: ActionReportResult["stockSnapshotStatus"];
+    if (result.status === "confirmed" && hasRefill) {
+      try {
+        stockSnapshotStatus = (await captureActionReportStockSnapshot(s, result.id, actor.id)).status;
+      } catch (snapshotError) {
+        console.error("[action-report-stock-snapshot]", snapshotError);
+        stockSnapshotStatus = "failed";
+        warnings.push("The report was saved, but the Huaxin menu stock baseline could not be captured. Retry it from this page.");
       }
     }
 
@@ -166,6 +139,7 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
       reportId: result.id,
       status: result.status,
       provenanceStatus: result.provenance_status,
+      stockSnapshotStatus,
       warning: [...new Set(warnings)].join(" ") || undefined,
     };
   } catch (error) {

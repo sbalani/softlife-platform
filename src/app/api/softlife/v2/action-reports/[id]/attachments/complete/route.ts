@@ -54,8 +54,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const { data: line } = await s.from("service_action_refill_lines").select("id").eq("id", refillLineId).eq("report_id", reportId).maybeSingle();
       if (!line) return Response.json({ error: { message: "Refill line not found" } }, { status: 400 });
     }
-    const { data, error } = await s.from("service_action_attachments").upsert({ report_id: reportId, refill_line_id: refillLineId, kind: "photo", storage_path: path, mime_type: mimeType, size_bytes: size, created_by: session.id }, { onConflict: "storage_path" }).select("id").single();
+    const { data, error } = await s.rpc("finalize_unreserved_service_action_photo", { p_report_id: reportId, p_actor_id: session.id, p_storage_path: path, p_mime_type: mimeType, p_size_bytes: size, p_refill_line_id: refillLineId });
     if (error) throw error;
-    return Response.json({ attachment_id: data.id });
+    return Response.json({ attachment_id: data });
   } catch (error) { return Response.json({ error: { message: error instanceof Error ? error.message : String(error) } }, { status: 500 }); }
 }

@@ -11,6 +11,8 @@ export type ActionReportHistoryItem = {
   machineName: string;
   notes: string | null;
   refillLines: { quantity: number; unit: string; lotCode: string | null; productName: string | null; provenanceStatus: string }[];
+  stockSnapshot: { capturedAt: string; status: string; items: { menuKind: string; position: string; goodsName: string | null; stockCount: number | null }[] } | null;
+  canRetryStockSnapshot: boolean;
 };
 
 export type ActionReportLotOption = {
@@ -58,7 +60,7 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
   if (!isSupabaseConfigured() || (!filters.tenantId && filters.machineIds?.length === 0)) return [];
   const s = await createServiceClient();
   let query = s.from("service_action_reports")
-    .select("id,operator_id,action_kind,action_modes,occurred_at,status,provenance_status,notes,machines(name,display_name),service_action_refill_lines(quantity,unit,observed_lot_code,product_name,provenance_status)")
+    .select("id,operator_id,action_kind,action_modes,occurred_at,status,provenance_status,notes,machines(name,display_name),service_action_refill_lines(quantity,unit,observed_lot_code,product_name,provenance_status),service_action_stock_snapshots(captured_at,status,service_action_stock_snapshot_items(menu_kind,position,goods_name_raw,stock_count))")
     .order("occurred_at", { ascending: false }).limit(50);
   if (filters.tenantId) query = query.eq("tenant_id", filters.tenantId);
   else if (filters.machineIds) query = query.in("machine_id", filters.machineIds);
@@ -67,6 +69,9 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
   const canonical = ((data as Record<string, unknown>[]) ?? []).filter((row) => row.status !== "draft" || !filters.actorId || row.operator_id === filters.actorId).map((row) => {
     const machine = row.machines as { name: string; display_name: string | null } | null;
     const lines = (row.service_action_refill_lines as Record<string, unknown>[]) ?? [];
+    const snapshotRelation = row.service_action_stock_snapshots as Record<string, unknown> | Record<string, unknown>[] | null;
+    const snapshot = Array.isArray(snapshotRelation) ? snapshotRelation[0] : snapshotRelation;
+    const snapshotItems = (snapshot?.service_action_stock_snapshot_items as Record<string, unknown>[]) ?? [];
     return {
       id: row.id as string,
       actionKind: row.action_kind as string,
@@ -83,6 +88,12 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
         productName: line.product_name as string | null,
         provenanceStatus: line.provenance_status as string,
       })),
+      stockSnapshot: snapshot ? {
+        capturedAt: snapshot.captured_at as string,
+        status: snapshot.status as string,
+        items: snapshotItems.sort((a, b) => String(a.menu_kind).localeCompare(String(b.menu_kind)) || Number(a.position) - Number(b.position)).map((item) => ({ menuKind: item.menu_kind as string, position: item.position as string, goodsName: item.goods_name_raw as string | null, stockCount: item.stock_count === null ? null : Number(item.stock_count) })),
+      } : null,
+      canRetryStockSnapshot: !filters.actorId || row.operator_id === filters.actorId,
     };
   });
 
@@ -122,6 +133,8 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
         productName: String(line.product_name ?? "") || null,
         provenanceStatus: "legacy",
       })),
+      stockSnapshot: null,
+      canRetryStockSnapshot: false,
     };
   });
   const legacyCleanings: ActionReportHistoryItem[] = ((cleanings as Record<string, unknown>[]) ?? []).map((row) => {
@@ -136,6 +149,8 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
       machineName: machine?.display_name || machine?.name || "Unknown machine",
       notes: null,
       refillLines: [],
+      stockSnapshot: null,
+      canRetryStockSnapshot: false,
     };
   });
   return [...canonical, ...legacyRefills, ...legacyCleanings]

@@ -70,6 +70,20 @@ test("topping consumption includes standalone and combo servings but excludes ba
   ]);
 });
 
+test("topping consumption uses canonical product type before Huaxin position", () => {
+  const order = {
+    order_state: "COMPLETE", is_admin_override: false, refund_status: null, nums: 2, product_name: "Combo",
+    products: [{ goodsName: "White Chocolate", position: 1 }, { goodsName: "Vanilla", position: 2 }],
+  } as unknown as Order;
+  const aliases = new Map([
+    ["white chocolate", { productId: "topping-1", productName: "CHOCOLATE BLANCO", productType: "topping" }],
+    ["vanilla", { productId: "base-1", productName: "Soft Vainilla Nata", productType: "base" }],
+  ]);
+  assert.deepEqual(toppingConsumption([order], aliases), [
+    { name: "CHOCOLATE BLANCO", servings: 2, orders: 1 },
+  ]);
+});
+
 test("machine sales reports keep one stable machine across IMEI changes", () => {
   const orders = [
     { machine_id: "machine-1", order_time: "2026-08-05T10:00:00Z", order_state: "COMPLETE", is_admin_override: false, refund_status: null, device_imei: "old", machine_name: "Madrid", price: 5, nums: 1 },

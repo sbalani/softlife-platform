@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PDFDocument } from "pdf-lib";
 import type { Order } from "./data/orders.ts";
-import { authorizePayoutTenant, calculatePayoutRows, createPayoutPdf, validPayoutRange, type PayoutAssignment } from "./payout-report.ts";
+import { authorizePayoutTenant, calculatePayoutIva, calculatePayoutRows, createPayoutPdf, validPayoutRange, type PayoutAssignment } from "./payout-report.ts";
 
 const assignment = (overrides: Partial<PayoutAssignment> = {}): PayoutAssignment => ({
   id: "assignment-a", machine_id: "machine-a", tenant_id: "tenant-a", start_date: "2026-07-01", end_date: "2026-07-31",
@@ -26,6 +26,7 @@ test("payouts use Madrid order_time, stable machine IDs, effective VAT and clipp
   assert.equal(rows[0].gross, 11);
   assert.ok(Math.abs(rows[0].net - 10) < 0.000001);
   assert.ok(Math.abs(rows[0].payout - 2.5) < 0.000001);
+  assert.equal(calculatePayoutIva(rows[0].payout), 0.25);
 });
 
 test("payouts internally exclude incomplete, admin and refunded orders", () => {

@@ -79,12 +79,14 @@ export function toppingConsumption(orders: Order[], aliasMap: AliasMap): Topping
   const rows = new Map<string, ToppingConsumptionRow>();
   for (const order of orders) {
     if (order.order_state !== "COMPLETE" || order.is_admin_override || order.refund_status === "Refunded") continue;
-    const products = order.products.filter((product) => Number.isFinite(product.position) && product.position >= 2 && product.position <= 4);
     const orderNames = new Set<string>();
-    for (const product of products) {
+    for (const product of order.products) {
       const rawName = product.goodsName?.trim();
       if (!rawName) continue;
-      const name = aliasMap.get(rawName.toLowerCase())?.productName ?? rawName;
+      const resolved = aliasMap.get(rawName.toLowerCase());
+      const fallbackToppingPosition = Number.isFinite(product.position) && product.position >= 2 && product.position <= 4;
+      if (resolved?.productType ? resolved.productType !== "topping" : !fallbackToppingPosition) continue;
+      const name = resolved?.productName ?? rawName;
       const row = rows.get(name) ?? { name, servings: 0, orders: 0 };
       row.servings += Math.max(order.nums, 0);
       if (!orderNames.has(name)) {

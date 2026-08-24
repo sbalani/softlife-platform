@@ -83,15 +83,15 @@ async function _getProducts(): Promise<Product[]> {
 
 export const getProducts = cache(_getProducts);
 
-export type AliasMap = Map<string, { productId: string; productName: string }>;
+export type AliasMap = Map<string, { productId: string; productName: string; productType?: string }>;
 
 export const getAliasMap = cache(async (): Promise<AliasMap> => {
   const map: AliasMap = new Map();
   const prods = await getProducts();
   for (const p of prods) {
-    map.set(p.name.toLowerCase().trim(), { productId: p.id, productName: p.name });
+    map.set(p.name.toLowerCase().trim(), { productId: p.id, productName: p.name, productType: p.type });
     for (const a of p.aliases) {
-      map.set(a.alias.toLowerCase().trim(), { productId: p.id, productName: p.name });
+      map.set(a.alias.toLowerCase().trim(), { productId: p.id, productName: p.name, productType: p.type });
     }
   }
   return map;

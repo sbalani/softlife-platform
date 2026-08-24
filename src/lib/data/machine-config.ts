@@ -71,19 +71,21 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
     let defrostSchedule: MachineConfig["defrostSchedule"] = null;
     let latestDefrostRun: MachineConfig["latestDefrostRun"] = null;
     if (machine?.id) {
-      const [ingredientResult, scheduleResult, runResult] = await Promise.all([
+      const [ingredientResult, scheduleResult, runResult, interventionAlertResult] = await Promise.all([
         s.from("machine_ingredients").select("position,product_id,product_type,current_lot_name,last_loaded_date").eq("machine_id", machine.id as string),
         s.from("machine_defrost_schedules").select("enabled,local_start_time,defrost_seconds,requires_intervention").eq("machine_id", machine.id as string).maybeSingle(),
         s.from("machine_defrost_runs").select("id,state,trigger_kind,scheduled_for,started_at,completed_at,next_action_at,last_formation_pct,refrigeration_attempts,sales_attempts,failure_detail,outcome").eq("machine_id", machine.id as string).order("created_at", { ascending: false }).limit(10),
+        s.from("alerts").select("id").eq("machine_id", machine.id as string).eq("type", "defrost_automation_failed").is("resolved_at", null).limit(1),
       ]);
       if (ingredientResult.error) throw ingredientResult.error;
       if (scheduleResult.error) throw scheduleResult.error;
       if (runResult.error) throw runResult.error;
+      if (interventionAlertResult.error) throw interventionAlertResult.error;
       const { data: ings } = ingredientResult;
       const { data: schedule } = scheduleResult;
       const runRows = (runResult.data as Record<string, unknown>[]) ?? [];
       ingredients = (ings as MachineConfig["ingredients"]) ?? [];
-      if (schedule) defrostSchedule = { enabled: Boolean(schedule.enabled), localStartTime: String(schedule.local_start_time).slice(0, 5), defrostMinutes: Number(schedule.defrost_seconds) / 60, requiresIntervention: Boolean(schedule.requires_intervention) };
+      if (schedule) defrostSchedule = { enabled: Boolean(schedule.enabled), localStartTime: String(schedule.local_start_time).slice(0, 5), defrostMinutes: Number(schedule.defrost_seconds) / 60, requiresIntervention: Boolean(schedule.requires_intervention) || Boolean(interventionAlertResult.data?.length) };
       const run = runRows[0];
       if (run) latestDefrostRun = { state: String(run.state), scheduledFor: String(run.scheduled_for), lastFormationPct: run.last_formation_pct == null ? null : Number(run.last_formation_pct), failureDetail: (run.failure_detail as string) ?? null };
       const defrostRuns: DefrostRunSummary[] = runRows.map((row) => ({

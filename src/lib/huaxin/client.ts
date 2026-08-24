@@ -276,6 +276,7 @@ export type ProductDiyItem = {
   goodsName?: string;
   price?: string;
   imagePath?: string;
+  allergyPath?: string;
   enable?: number;
   stock?: string | number;
   marketPrice?: string;

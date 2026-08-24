@@ -1,6 +1,58 @@
 SOFTLIFE PLATFORM NOTES FOR MOBILE DEVELOPER
 ============================================
 
+MACHINE MENU READ API (ADDED 2026-08-24)
+----------------------------------------
+
+Endpoint:
+
+  GET /api/softlife/machines/{machine_id}/menu
+
+Authentication and authorization:
+
+  - Send the normal mobile Bearer token.
+  - The session must include machines.read.
+  - The machine must be in the current user's authorized scope.
+  - Missing and out-of-scope machines both return HTTP 404.
+
+The endpoint reads the last persisted Huaxin menu snapshot. It never triggers a
+live machine sync. A successful response has this shape:
+
+  {
+    "machine_id": "uuid",
+    "snapshot": {
+      "status": "fresh | stale | missing",
+      "synced_at": "ISO-8601 timestamp | null",
+      "age_seconds": "number | null"
+    },
+    "menu": {
+      "diy": [MENU_ITEM],
+      "unify": [MENU_ITEM]
+    }
+  }
+
+MENU_ITEM fields:
+
+  - id: stable "diy:{position}" or "unify:{position}" identity.
+  - kind: "diy" or "unify".
+  - position: Huaxin position encoded as a string.
+  - name.default: the raw/default Huaxin name, or null.
+  - name.translations: object keyed by Huaxin language code.
+  - stock: numeric machine counter, or null when absent/non-numeric.
+  - enabled: boolean, or null when Huaxin omitted the value.
+  - price and market_price: strings to preserve decimal representation, or null.
+  - image_url and allergen_url: strings or null.
+  - platform_product_id: explicitly persisted platform product UUID or null.
+
+platform_product_id is populated only from machines.base_product_id for DIY
+lane 1 and machine_ingredients.product_id for DIY lanes 2-7. It is never
+inferred from a menu name. Unified items currently have no persisted mapping.
+
+A missing snapshot returns HTTP 200 with status "missing" and empty arrays.
+Snapshots older than 26 hours have status "stale". Cache this response only
+within the authenticated identity and scope_version; clear it whenever user ID,
+scope_version, role, tenant_id, or capabilities change.
+
 Status date: 2026-08-18
 Reviewed mobile commit: 4e18866 Add offline data and sales analytics
 Reviewed backend commit: 84208e0 Add mobile analytics date ranges

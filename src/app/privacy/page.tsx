@@ -26,6 +26,10 @@ export default function PrivacyPage() {
           <h1 className="mt-2 font-display text-4xl font-bold text-cocoa sm:text-5xl">Política de privacidad</h1>
           <p className="mt-4 max-w-2xl text-sm leading-7 text-taupe">Esta política explica cómo se tratan los datos personales al utilizar la plataforma, las aplicaciones y los servicios operativos de SoftLife.</p>
           <p className="mt-2 text-xs font-semibold text-taupe">Última actualización: 25 de agosto de 2026</p>
+          <nav aria-label="Idioma" className="mt-5 flex items-center gap-2 text-xs font-bold">
+            <span aria-current="page" className="rounded-full bg-cocoa px-3 py-1.5 text-white">Español</span>
+            <Link href="/privacy/en" lang="en" className="rounded-full border border-line bg-white px-3 py-1.5 text-cocoa hover:border-terracotta">English</Link>
+          </nav>
         </header>
 
         <div className="space-y-4">

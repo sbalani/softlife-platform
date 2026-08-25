@@ -6,7 +6,7 @@ import { canAccessWebPath } from "./lib/auth/web-authorization";
  *  callbacks (Huaxin webhook, Vercel cron) authenticate with their own
  *  bearer tokens / shared secrets, not a browser cookie session. */
 function isPublicPath(pathname: string) {
-  return pathname === "/login" || pathname === "/privacy" || pathname === "/set-password" || pathname === "/franchisee-intake" || pathname.startsWith("/auth/callback") || pathname.startsWith("/api");
+  return pathname === "/login" || pathname === "/privacy" || pathname.startsWith("/privacy/") || pathname === "/set-password" || pathname === "/franchisee-intake" || pathname.startsWith("/auth/callback") || pathname.startsWith("/api");
 }
 
 export async function proxy(request: NextRequest) {

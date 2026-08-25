@@ -84,8 +84,11 @@ export function toppingConsumption(orders: Order[], aliasMap: AliasMap): Topping
       const rawName = product.goodsName?.trim();
       if (!rawName) continue;
       const resolved = aliasMap.get(rawName.toLowerCase());
-      const fallbackToppingPosition = Number.isFinite(product.position) && product.position >= 2 && product.position <= 4;
-      if (resolved?.productType ? resolved.productType !== "topping" : !fallbackToppingPosition) continue;
+      const hasKnownPosition = Number.isFinite(product.position);
+      const isSolidToppingPosition = hasKnownPosition && product.position >= 2 && product.position <= 4;
+      if (hasKnownPosition && !isSolidToppingPosition) continue;
+      if (resolved?.productType && resolved.productType !== "topping") continue;
+      if (!hasKnownPosition && !resolved?.productType) continue;
       const name = resolved?.productName ?? rawName;
       const row = rows.get(name) ?? { name, servings: 0, orders: 0 };
       row.servings += Math.max(order.nums, 0);

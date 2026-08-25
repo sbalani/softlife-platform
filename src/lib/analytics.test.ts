@@ -70,18 +70,28 @@ test("topping consumption includes standalone and combo servings but excludes ba
   ]);
 });
 
-test("topping consumption uses canonical product type before Huaxin position", () => {
+test("topping consumption uses Huaxin lanes to exclude liquids even when the catalog type is wrong", () => {
   const order = {
     order_state: "COMPLETE", is_admin_override: false, refund_status: null, nums: 2, product_name: "Combo",
-    products: [{ goodsName: "White Chocolate", position: 1 }, { goodsName: "Vanilla", position: 2 }],
+    products: [{ goodsName: "Oreo", position: 2 }, { goodsName: "Avellana", position: 5 }, { goodsName: "Vanilla", position: 3 }],
   } as unknown as Order;
   const aliases = new Map([
-    ["white chocolate", { productId: "topping-1", productName: "CHOCOLATE BLANCO", productType: "topping" }],
+    ["oreo", { productId: "topping-1", productName: "Galleta OREO", productType: "topping" }],
+    ["avellana", { productId: "wrong-type", productName: "Avellana", productType: "topping" }],
     ["vanilla", { productId: "base-1", productName: "Soft Vainilla Nata", productType: "base" }],
   ]);
   assert.deepEqual(toppingConsumption([order], aliases), [
-    { name: "CHOCOLATE BLANCO", servings: 2, orders: 1 },
+    { name: "Galleta OREO", servings: 2, orders: 1 },
   ]);
+});
+
+test("topping consumption can use the catalog when legacy order positions are unavailable", () => {
+  const order = {
+    order_state: "COMPLETE", is_admin_override: false, refund_status: null, nums: 1, product_name: "Oreo",
+    products: [{ goodsName: "Oreo", position: Number.NaN }],
+  } as unknown as Order;
+  const aliases = new Map([["oreo", { productId: "topping-1", productName: "Galleta OREO", productType: "topping" }]]);
+  assert.deepEqual(toppingConsumption([order], aliases), [{ name: "Galleta OREO", servings: 1, orders: 1 }]);
 });
 
 test("machine sales reports keep one stable machine across IMEI changes", () => {

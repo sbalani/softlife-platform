@@ -13,6 +13,9 @@ test("existing role restrictions remain intact", () => {
   assert.equal(canAccessWebPath("operator", "/refills"), true);
   assert.equal(canAccessWebPath("operator", "/dashboard"), false);
   assert.equal(canAccessWebPath("franchisee", "/analytics"), true);
+  assert.equal(canAccessWebPath("franchisee", "/incidents"), true);
+  assert.equal(canAccessWebPath("franchisee", "/refills"), true);
+  assert.equal(canAccessWebPath("operator", "/incidents"), false);
   assert.equal(canAccessWebPath("franchisee", "/users"), false);
   assert.equal(canAccessWebPath("admin", "/users"), true);
 });

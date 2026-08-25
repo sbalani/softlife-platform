@@ -1,6 +1,6 @@
 import type { SessionProfile } from "./session.ts";
 
-const FRANCHISEE_PATHS = ["/dashboard", "/analytics", "/alerts", "/remote-control", "/coupons"];
+const FRANCHISEE_PATHS = ["/dashboard", "/analytics", "/alerts", "/incidents", "/refills", "/remote-control", "/coupons"];
 
 export function canAccessWebPath(role: SessionProfile["role"], path: string): boolean {
   if (role === "admin" || path === "/downloads" || path.startsWith("/downloads/") || path.startsWith("/machine/")) return true;

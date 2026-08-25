@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runHuaxinFleetSync } from "@/lib/data/huaxin-fleet-sync";
+import { createServiceClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -12,7 +13,10 @@ export async function GET(req: Request) {
   }
 
   try {
-    return NextResponse.json(await runHuaxinFleetSync("cron"));
+    const result = await runHuaxinFleetSync("cron");
+    const { data: scheduledIncidents, error } = await (await createServiceClient()).rpc("refresh_scheduled_refill_incidents");
+    if (error) throw error;
+    return NextResponse.json({ ...result, scheduledIncidents: Number(scheduledIncidents ?? 0) });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ error: message }, { status: message === "Huaxin not configured" ? 400 : 500 });

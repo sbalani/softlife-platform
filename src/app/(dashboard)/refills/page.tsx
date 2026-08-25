@@ -9,11 +9,12 @@ import { getSessionProfile } from "@/lib/auth/session";
 import { createServiceClient } from "@/lib/supabase/server";
 import { accessibleMachineIds } from "@/lib/data/service-access";
 import { ActionReportStockRetry } from "@/components/ActionReportStockRetry";
+import { getIncidents } from "@/lib/data/incidents";
 
 export const dynamic = "force-dynamic";
 
-export default async function RefillsPage({ searchParams }: { searchParams: Promise<{ draft?: string }> }) {
-  const { draft: draftId } = await searchParams;
+export default async function RefillsPage({ searchParams }: { searchParams: Promise<{ draft?: string; machine?: string; incident?: string }> }) {
+  const { draft: draftId, machine: requestedMachineId, incident: requestedIncidentId } = await searchParams;
   const session = await getSessionProfile();
   const s = await createServiceClient();
   const [{ machines: allMachines }, allowedIds] = await Promise.all([
@@ -28,17 +29,22 @@ export default async function RefillsPage({ searchParams }: { searchParams: Prom
   const warehouseByMachine = new Map(((machineRows as { id: string; odoo_warehouse_id: number | null }[]) ?? []).map((row) => [row.id, row.odoo_warehouse_id]));
   const warehouseIds = [...new Set([...warehouseByMachine.values()].filter((id): id is number => id !== null))];
   const tenantId = session?.role === "admin" ? undefined : session?.tenant_id ?? "no-tenant";
-  const [lots, history, tz, requestedDraft] = await Promise.all([
+  const [lots, history, tz, requestedDraft, incidents] = await Promise.all([
     getActionReportLots(warehouseIds),
     getActionReportHistory({
       machineIds: allowedIds ?? undefined,
       tenantId,
       actorId: session?.role === "admin" ? undefined : session?.id,
+      canViewIncidents: session?.role === "admin" || session?.role === "franchisee",
+      incidentTenantId: session?.role === "franchisee" ? session.tenant_id ?? undefined : undefined,
     }),
     getDisplayTimezone(),
     draftId ? getActionReportDraft(draftId, tenantId, session?.role === "admin" ? undefined : session?.id) : Promise.resolve(null),
+    session && session.role !== "operator" ? getIncidents(session, { machineIds: machines.map((machine) => machine.id), status: "open" }) : Promise.resolve([]),
   ]);
   const draft = requestedDraft && machines.some((machine) => machine.id === requestedDraft.machineId) ? requestedDraft : null;
+  const requestedIncident = incidents.find((incident) => incident.id === requestedIncidentId);
+  const refillIncidentTypes = new Set(["scheduled_refill", "material_remaining_critical", "stock"]);
 
   return (
     <div>
@@ -54,6 +60,10 @@ export default async function RefillsPage({ searchParams }: { searchParams: Prom
           lots={lots}
           initialEventTime={new Date().toISOString()}
           initialDraft={draft}
+          incidents={incidents.map((incident) => ({ id: incident.id, machineId: incident.machineId, title: incident.title, severity: incident.severity, typeLabel: incident.typeLabel }))}
+          initialMachineId={machines.some((machine) => machine.id === requestedMachineId) ? requestedMachineId : undefined}
+          initialIncidentIds={incidents.some((incident) => incident.id === requestedIncidentId) ? [requestedIncidentId!] : []}
+          initialModes={requestedIncident ? refillIncidentTypes.has(requestedIncident.incidentType) ? ["refill"] : ["other"] : undefined}
         />
       </section>
 
@@ -66,7 +76,7 @@ export default async function RefillsPage({ searchParams }: { searchParams: Prom
         ) : (
           <div className="space-y-3">
             {history.map((r) => (
-              <article key={r.id} className="rounded-2xl border border-line bg-white p-4">
+              <article id={`report-${r.id}`} key={r.id} className="rounded-2xl border border-line bg-white p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <span className="font-display text-base font-bold text-cocoa">{r.machineName}</span>
@@ -75,6 +85,7 @@ export default async function RefillsPage({ searchParams }: { searchParams: Prom
                   <span className="text-xs text-taupe">{formatDateTime(r.occurredAt, tz)} · {r.status} · provenance {r.provenanceStatus.replace("_", " ")}</span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
+                  {r.incidents.map((incident) => <Link key={incident.id} href={`/incidents#incident-${incident.id}`} className="rounded-full bg-terracotta/10 px-2.5 py-1 text-xs font-semibold text-terracotta">Incident · {incident.title}</Link>)}
                   {r.refillLines.map((l, i) => (
                     <span key={i} className="rounded-full bg-cream px-2.5 py-1 text-xs text-cocoa">
                       {l.lotCode ?? l.productName ?? "Unknown lot"} · {l.quantity} {l.unit} · {l.provenanceStatus.replace("_", " ")}

@@ -5,6 +5,8 @@ import { FleetMap } from "@/components/maps";
 import { formatDateTime, ymd } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { getOrders } from "@/lib/data/orders";
+import { refillAge } from "@/lib/refill-aging";
+import { createRefillIncident } from "@/app/actions/incidents";
 
 export const dynamic = "force-dynamic";
 
@@ -129,6 +131,7 @@ export default async function MachinesPage({
           </thead>
           <tbody className="divide-y divide-line">
             {rows.map((m) => {
+              const refill = refillAge(m.last_refill_at);
               return (
                 <tr key={m.id} className="hover:bg-cream/50">
                   <td className="px-4 py-3 font-semibold text-cocoa">{m.device_imei ? <Link href={`/machines/${m.device_imei}`} className="hover:text-terracotta hover:underline">{m.display_name || m.name}</Link> : m.display_name || m.name}</td>
@@ -138,7 +141,9 @@ export default async function MachinesPage({
                     <div className="flex flex-wrap items-center gap-2">
                        <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${!m.deployed ? "bg-taupe/15 text-taupe" : m.oos ? "bg-danger/15 text-danger" : m.low_stock ? "bg-warning/15 text-warning" : "bg-sage/15 text-sage"}`}>{!m.deployed ? "Not deployed" : m.oos ? "OOS" : m.low_stock ? "Low stock" : "OK"}</span>
                        {m.deployed && <span className={`text-xs font-semibold ${m.net_online ? "text-sage" : "text-danger"}`}>{m.net_online ? "Online" : "Offline"}</span>}
-                      {m.active_alert_count > 0 && <span title={`${m.active_alert_count} other active alert(s)`} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-warning text-xs font-black text-white">!</span>}
+                       {m.open_incident_count > 0 && <Link href="/incidents" className="rounded-full bg-danger/10 px-2.5 py-0.5 text-xs font-bold text-danger">{m.open_incident_count} incident{m.open_incident_count === 1 ? "" : "s"}</Link>}
+                       {m.deployed && <span className={`basis-full text-[11px] font-semibold ${refill.state === "overdue" ? "text-danger" : refill.state === "due" ? "text-warning" : refill.state === "fresh" ? "text-sage" : "text-taupe"}`}>{refill.state === "never" ? "Never refilled" : `Last refill ${refill.days}d ago`}</span>}
+                       {m.deployed && (refill.state === "due" || refill.state === "overdue") && !m.open_refill_incident && <form action={createRefillIncident}><input type="hidden" name="machine_id" value={m.id} /><button className="text-[11px] font-bold text-terracotta hover:underline">Create refill incident</button></form>}
                       {m.deployed && !m.net_online && <span className="basis-full text-[11px] text-taupe">{m.offline_since ? `Offline since ${formatDateTime(m.offline_since, tz)}` : "Offline time unknown"}{m.last_online_at ? ` · Last online ${formatDateTime(m.last_online_at, tz)}` : ""}</span>}
                     </div>
                   </td>

@@ -9,6 +9,7 @@ const FAULT_FIELDS = {
   status_0_faultcup: "cup_foreign_object",
   status_0_cupfault: "cup_blocked",
   status_0_cupget: "cup_take_fault",
+  status_0_overhot: "compressor_overheat",
 } as const;
 
 const OPERATING_STATE_FIELDS: Record<string, string> = {
@@ -32,6 +33,7 @@ const DISPLAY_ORDER = [
   "status_0_faultcup",
   "status_0_cupfault",
   "status_0_cupget",
+  "status_0_overhot",
 ];
 
 export type ResourceStatusSignal = {

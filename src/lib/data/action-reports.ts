@@ -13,6 +13,7 @@ export type ActionReportHistoryItem = {
   refillLines: { quantity: number; unit: string; lotCode: string | null; productName: string | null; provenanceStatus: string }[];
   stockSnapshot: { capturedAt: string; status: string; items: { menuKind: string; position: string; goodsName: string | null; stockCount: number | null }[] } | null;
   canRetryStockSnapshot: boolean;
+  incidents: { id: string; title: string }[];
 };
 
 export type ActionReportLotOption = {
@@ -34,6 +35,7 @@ export type ActionReportDraft = {
   cleaningMaterialUsed: boolean | null;
   waterBucketCount: number | null;
   lines: { odooLotId: number | null; lotCode: string; productName: string; quantity: number; unit: string }[];
+  incidentIds: string[];
 };
 
 export async function getActionReportLots(warehouseIds: number[]): Promise<ActionReportLotOption[]> {
@@ -56,11 +58,11 @@ export async function getActionReportLots(warehouseIds: number[]): Promise<Actio
     .map((lot) => ({ odooId: lot.odooId, name: lot.name, productName: lot.productName, available: lot.available, warehouseId: lot.warehouseId }));
 }
 
-export async function getActionReportHistory(filters: { machineIds?: string[]; tenantId?: string; actorId?: string }): Promise<ActionReportHistoryItem[]> {
+export async function getActionReportHistory(filters: { machineIds?: string[]; tenantId?: string; actorId?: string; canViewIncidents?: boolean; incidentTenantId?: string }): Promise<ActionReportHistoryItem[]> {
   if (!isSupabaseConfigured() || (!filters.tenantId && filters.machineIds?.length === 0)) return [];
   const s = await createServiceClient();
   let query = s.from("service_action_reports")
-    .select("id,operator_id,action_kind,action_modes,occurred_at,status,provenance_status,notes,machines(name,display_name),service_action_refill_lines(quantity,unit,observed_lot_code,product_name,provenance_status),service_action_stock_snapshots(captured_at,status,service_action_stock_snapshot_items(menu_kind,position,goods_name_raw,stock_count))")
+    .select("id,operator_id,action_kind,action_modes,occurred_at,status,provenance_status,notes,machines(name,display_name),service_action_refill_lines(quantity,unit,observed_lot_code,product_name,provenance_status),service_action_stock_snapshots(captured_at,status,service_action_stock_snapshot_items(menu_kind,position,goods_name_raw,stock_count)),service_action_report_incidents(incidents(id,title,assigned_tenant_id))")
     .order("occurred_at", { ascending: false }).limit(50);
   if (filters.tenantId) query = query.eq("tenant_id", filters.tenantId);
   else if (filters.machineIds) query = query.in("machine_id", filters.machineIds);
@@ -94,6 +96,7 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
         items: snapshotItems.sort((a, b) => String(a.menu_kind).localeCompare(String(b.menu_kind)) || Number(a.position) - Number(b.position)).map((item) => ({ menuKind: item.menu_kind as string, position: item.position as string, goodsName: item.goods_name_raw as string | null, stockCount: item.stock_count === null ? null : Number(item.stock_count) })),
       } : null,
       canRetryStockSnapshot: !filters.actorId || row.operator_id === filters.actorId,
+      incidents: filters.canViewIncidents ? ((row.service_action_report_incidents as { incidents: { id: string; title: string; assigned_tenant_id: string | null } | null }[]) ?? []).flatMap((link) => link.incidents && (!filters.incidentTenantId || link.incidents.assigned_tenant_id === filters.incidentTenantId) ? [{ id: link.incidents.id, title: link.incidents.title }] : []) : [],
     };
   });
 
@@ -135,6 +138,7 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
       })),
       stockSnapshot: null,
       canRetryStockSnapshot: false,
+      incidents: [],
     };
   });
   const legacyCleanings: ActionReportHistoryItem[] = ((cleanings as Record<string, unknown>[]) ?? []).map((row) => {
@@ -151,6 +155,7 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
       refillLines: [],
       stockSnapshot: null,
       canRetryStockSnapshot: false,
+      incidents: [],
     };
   });
   return [...canonical, ...legacyRefills, ...legacyCleanings]
@@ -161,7 +166,7 @@ export async function getActionReportDraft(id: string, tenantId?: string, actorI
   if (!isSupabaseConfigured() || !/^[0-9a-f-]{36}$/i.test(id)) return null;
   const s = await createServiceClient();
   let query = s.from("service_action_reports")
-    .select("id,client_uuid,machine_id,occurred_at,action_kind,action_modes,notes,cleaning_material_used,water_bucket_count,service_action_refill_lines(odoo_lot_id:observed_odoo_lot_id,lot_code:observed_lot_code,product_name,quantity,unit,line_number)")
+    .select("id,client_uuid,machine_id,occurred_at,action_kind,action_modes,notes,cleaning_material_used,water_bucket_count,service_action_refill_lines(odoo_lot_id:observed_odoo_lot_id,lot_code:observed_lot_code,product_name,quantity,unit,line_number),service_action_report_incidents(incident_id)")
     .eq("id", id).eq("status", "draft");
   if (tenantId) query = query.eq("tenant_id", tenantId);
   if (actorId) query = query.eq("operator_id", actorId);
@@ -188,5 +193,6 @@ export async function getActionReportDraft(id: string, tenantId?: string, actorI
       quantity: Number(line.quantity),
       unit: line.unit as string,
     })),
+    incidentIds: ((row.service_action_report_incidents as { incident_id: string }[]) ?? []).map((link) => link.incident_id),
   };
 }

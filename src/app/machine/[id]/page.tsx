@@ -5,6 +5,7 @@ import { getMachineService } from "@/lib/data/machine-service";
 import { formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { ActionReportForm } from "@/components/ActionReportForm";
+import { getIncidents } from "@/lib/data/incidents";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export default async function MachineServicePage({ params }: { params: Promise<{
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const session = await getSessionProfile();
   if (!session) redirect(`/login?next=${encodeURIComponent(`/machine/${id}`)}`);
-  const [machine, tz] = await Promise.all([getMachineService(id, session), getDisplayTimezone()]);
+  const [machine, tz, incidents] = await Promise.all([getMachineService(id, session), getDisplayTimezone(), getIncidents(session, { machineIds: [id], status: "open" })]);
   if (!machine) notFound();
   const appUrl = `softlife-haccp:///machine/${encodeURIComponent(id)}`;
 
@@ -38,6 +39,7 @@ export default async function MachineServicePage({ params }: { params: Promise<{
           }))}
           source="machine_qr"
           initialEventTime={new Date().toISOString()}
+          incidents={incidents.map((incident) => ({ id: incident.id, machineId: incident.machineId, title: incident.title, severity: incident.severity, typeLabel: incident.typeLabel }))}
         />
         <p className="mt-6 text-center text-xs text-taupe">Signed in as {session.full_name ?? session.email ?? "operator"}</p>
       </div>

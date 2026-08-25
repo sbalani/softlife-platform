@@ -20,6 +20,7 @@ export type ActionReportLot = {
   available: number;
   warehouseId: number;
 };
+export type ActionReportIncident = { id: string; machineId: string; title: string; severity: "info" | "warning" | "critical"; typeLabel: string };
 
 type LineDraft = { key: string; lotId: string; lotCode: string; productName: string; quantity: number | null; unit: string };
 type StagedPhoto = { id: string; file: File; lineKey: string | null; uploaded?: { uploadId: string; path: string; token: string; mimeType: string; stored: boolean } };
@@ -54,29 +55,40 @@ export function ActionReportForm({
   source = "web",
   initialEventTime,
   initialDraft,
+  incidents = [],
+  initialMachineId,
+  initialIncidentIds = [],
+  initialModes,
 }: {
   machines: ActionReportMachine[];
   lots: ActionReportLot[];
   source?: "web" | "machine_qr";
   initialEventTime: string;
   initialDraft?: ActionReportDraft | null;
+  incidents?: ActionReportIncident[];
+  initialMachineId?: string;
+  initialIncidentIds?: string[];
+  initialModes?: ActionReportMode[];
 }) {
   const action = source === "machine_qr" ? submitQrActionReport : submitWebActionReport;
   const [result, formAction, pending] = useActionState<ActionReportResult | null, FormData>(action, null);
   const [clientUuid] = useState(() => initialDraft?.clientUuid ?? crypto.randomUUID());
-  const [machineId, setMachineId] = useState(initialDraft?.machineId ?? machines[0]?.id ?? "");
-  const [modes, setModes] = useState<ActionReportMode[]>(initialDraft?.actionModes ?? modesFromLegacyKind(initialDraft?.actionKind ?? "both"));
+  const [machineId, setMachineId] = useState(initialDraft?.machineId ?? initialMachineId ?? machines[0]?.id ?? "");
+  const [modes, setModes] = useState<ActionReportMode[]>(initialDraft?.actionModes ?? initialModes ?? modesFromLegacyKind("both"));
   const [occurredAt, setOccurredAt] = useState(initialDraft?.occurredAt ?? initialEventTime);
   const [notes, setNotes] = useState(initialDraft?.notes ?? "");
   const [voicePending, setVoicePending] = useState(false);
   const [lines, setLines] = useState<LineDraft[]>(() => initialDraft?.lines.length ? initialDraft.lines.map((line) => ({ key: crypto.randomUUID(), lotId: line.odooLotId ? String(line.odooLotId) : "", lotCode: line.lotCode, productName: line.productName, quantity: line.quantity, unit: line.unit })) : [newLine()]);
   const [photos, setPhotos] = useState<StagedPhoto[]>([]);
+  const [selectedIncidentIds, setSelectedIncidentIds] = useState(() => initialDraft?.incidentIds ?? initialIncidentIds);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoMessage, setPhotoMessage] = useState<string | null>(null);
   const [stockMessage, setStockMessage] = useState<string | null>(null);
   const submittedLineNumbers = useRef(new Map<string, number>());
   const machine = machines.find((item) => item.id === machineId);
   const availableLots = lots.filter((lot) => machine?.warehouseId === lot.warehouseId);
+  const availableIncidents = incidents.filter((incident) => incident.machineId === machineId);
+  const unavailableSelectedIncidentIds = selectedIncidentIds.filter((id) => !availableIncidents.some((incident) => incident.id === id));
   const hasCleaning = modes.includes("cleaning");
   const hasRefill = modes.includes("refill");
   const hasOther = modes.includes("other");
@@ -201,7 +213,7 @@ export function ActionReportForm({
               name="machine_id"
               value={machineId}
               disabled={pending || result?.status === "confirmed"}
-              onChange={(event) => { setMachineId(event.target.value); setLines([newLine()]); setPhotos([]); }}
+              onChange={(event) => { setMachineId(event.target.value); setLines([newLine()]); setPhotos([]); setSelectedIncidentIds([]); }}
               className={`w-full ${input}`}
               required
             >
@@ -234,6 +246,18 @@ export function ActionReportForm({
         </div>
         <p className="mt-2 text-xs text-taupe">Select every action performed during this activity.</p>
       </fieldset>
+
+      {availableIncidents.length > 0 && (
+        <fieldset className="rounded-xl border border-warning/30 bg-warning/5 p-4">
+          <legend className="px-1 font-display font-bold text-cocoa">Incidents addressed</legend>
+          <p className="mb-3 text-xs text-taupe">Select every incident this work resolves. A single confirmed report can close several incidents.</p>
+          <div className="space-y-2">
+            {availableIncidents.map((incident) => <label key={incident.id} className="flex cursor-pointer items-start gap-3 rounded-lg border border-line bg-white p-3"><input type="checkbox" name="incident_ids" value={incident.id} checked={selectedIncidentIds.includes(incident.id)} disabled={pending || result?.status === "confirmed"} onChange={(event) => setSelectedIncidentIds((current) => event.target.checked ? [...new Set([...current, incident.id])] : current.filter((id) => id !== incident.id))} className="mt-1 accent-terracotta" /><span><span className="block text-sm font-bold text-cocoa">{incident.title}</span><span className="text-xs capitalize text-taupe">{incident.severity} · {incident.typeLabel}</span></span></label>)}
+          </div>
+        </fieldset>
+      )}
+      {unavailableSelectedIncidentIds.map((id) => <input key={id} type="hidden" name="incident_ids" value={id} />)}
+      {unavailableSelectedIncidentIds.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-lg bg-warning/10 px-3 py-2 text-xs font-semibold text-warning"><span>A previously selected incident is no longer available.</span><button type="button" onClick={() => setSelectedIncidentIds((current) => current.filter((id) => !unavailableSelectedIncidentIds.includes(id)))} className="font-bold text-terracotta underline">Remove unavailable selection</button></div>}
 
       {hasCleaning && (
         <section className="rounded-xl border border-line bg-cream/40 p-4">

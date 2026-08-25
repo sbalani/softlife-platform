@@ -28,6 +28,9 @@ export type Machine = {
   oos: boolean;
   low_stock: boolean;
   active_alert_count: number;
+  open_incident_count: number;
+  open_refill_incident: boolean;
+  last_refill_at: string | null;
   status_observed_at: string | null;
 };
 
@@ -53,19 +56,22 @@ export async function getMachines(machineIds?: string[]): Promise<{
       rows.push(...((data as Machine[]) ?? []));
       if (!data || data.length < 1000) break;
     }
-    let namesQuery = s.from("machines").select("id,display_name,deployed");
+    let namesQuery = s.from("machines").select("id,display_name,deployed,last_refill_at");
     let statusesQuery = s.from("machine_status_snapshots").select("machine_id,field,value,observed_at").in("field", ["cup_empty", "material_empty", "material_out"]);
     let alertsQuery = s.from("v_alerts").select("machine_id,change_field").is("resolved_at", null);
+    let incidentsQuery = s.from("incidents").select("machine_id,incident_type").eq("status", "open");
     if (machineIds) {
       namesQuery = namesQuery.in("id", machineIds);
       statusesQuery = statusesQuery.in("machine_id", machineIds);
       alertsQuery = alertsQuery.in("machine_id", machineIds);
+      incidentsQuery = incidentsQuery.in("machine_id", machineIds);
     }
-    const [{ data: names, error: namesError }, { data: statuses, error: statusesError }, { data: alerts, error: alertsError }] = await Promise.all([namesQuery, statusesQuery, alertsQuery]);
+    const [{ data: names, error: namesError }, { data: statuses, error: statusesError }, { data: alerts, error: alertsError }, { data: incidents, error: incidentsError }] = await Promise.all([namesQuery, statusesQuery, alertsQuery, incidentsQuery]);
     if (namesError) throw namesError;
     if (statusesError) throw statusesError;
     if (alertsError) throw alertsError;
-    const displayNames = new Map(((names as { id: string; display_name: string | null }[]) ?? []).map((row) => [row.id, row.display_name]));
+    if (incidentsError) throw incidentsError;
+    const machineMetadata = new Map(((names as { id: string; display_name: string | null; last_refill_at: string | null }[]) ?? []).map((row) => [row.id, row]));
     const statusRows = (statuses as { machine_id: string; field: string; value: unknown; observed_at: string }[]) ?? [];
     const activeStatuses = statusRows.filter((row) => row.value === true || row.value === "true");
     const oosMachines = new Set(activeStatuses.filter((row) => row.field === "cup_empty" || row.field === "material_out").map((row) => row.machine_id));
@@ -77,13 +83,22 @@ export async function getMachines(machineIds?: string[]): Promise<{
       if (!alert.machine_id || alert.change_field === "cup_empty" || alert.change_field === "material_empty") continue;
       alertCounts.set(alert.machine_id, (alertCounts.get(alert.machine_id) ?? 0) + 1);
     }
+    const incidentCounts = new Map<string, number>();
+    const refillIncidents = new Set<string>();
+    for (const incident of (incidents as { machine_id: string; incident_type: string }[]) ?? []) {
+      incidentCounts.set(incident.machine_id, (incidentCounts.get(incident.machine_id) ?? 0) + 1);
+      if (incident.incident_type === "scheduled_refill") refillIncidents.add(incident.machine_id);
+    }
     const machines = rows.map((machine) => ({
       ...machine,
-      display_name: displayNames.get(machine.id) ?? null,
+      display_name: machineMetadata.get(machine.id)?.display_name ?? null,
       location: machine.location_override || translateLocation(machine.location),
       oos: machine.deployed && oosMachines.has(machine.id),
       low_stock: machine.deployed && lowStockMachines.has(machine.id) && !oosMachines.has(machine.id),
       active_alert_count: machine.deployed ? alertCounts.get(machine.id) ?? 0 : 0,
+      open_incident_count: incidentCounts.get(machine.id) ?? 0,
+      open_refill_incident: machine.deployed && refillIncidents.has(machine.id),
+      last_refill_at: machineMetadata.get(machine.id)?.last_refill_at ?? null,
       status_observed_at: statusTimes.get(machine.id) ?? null,
     }));
     const freshness = fleetFreshness(machines.map((machine) => machine.huaxin_last_sync));

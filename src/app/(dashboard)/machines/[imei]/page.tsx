@@ -34,6 +34,10 @@ import { getMachineCleanHistory } from "@/lib/data/clean-logs";
 import { MachineServiceQr } from "@/components/MachineServiceQr";
 import { DefrostRunPanel } from "./DefrostRunPanel";
 import { faultStatusSignal, materialRemainingStatus, resourceStatusSignal, statusDisplayRank } from "@/lib/huaxin/status-signals";
+import { getSessionProfile } from "@/lib/auth/session";
+import { getIncidents } from "@/lib/data/incidents";
+import { refillAge } from "@/lib/refill-aging";
+import { createRefillIncident } from "@/app/actions/incidents";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +48,8 @@ export default async function MachineDetailPage({
   params: Promise<{ imei: string }>;
   searchParams: Promise<{ dateFrom?: string; dateTo?: string }>;
 }) {
-  const [{ imei }, sp, tz] = await Promise.all([params, searchParams, getDisplayTimezone()]);
+  const [{ imei }, sp, tz, session] = await Promise.all([params, searchParams, getDisplayTimezone(), getSessionProfile()]);
+  if (!session) notFound();
   const today = new Date();
   const defaultTo = ymd(today, tz);
   const defaultFrom = ymd(new Date(today.getTime() - 6 * 86_400_000), tz);
@@ -72,15 +77,16 @@ export default async function MachineDetailPage({
   const media = telemetry?.media ?? [];
   const baseProduct = config?.baseProductId ? ingredients.find((p) => p.id === config.baseProductId) ?? null : null;
   const otherMachines = allMachines.filter((m) => m.device_imei !== imei).map((m) => ({ id: m.id, name: m.name }));
-  const [pendingDraft, franchiseeAssignments, lotHistory, refillHistory, cleanHistory] = config?.machineId
+  const [pendingDraft, franchiseeAssignments, lotHistory, refillHistory, cleanHistory, machineIncidents] = config?.machineId
     ? await Promise.all([
       getPendingMenuDraft(config.machineId),
       getFranchiseeAssignments(config.machineId),
       getMachineLotHistory(config.machineId, imei),
       getRefillHistory([config.machineId]),
       getMachineCleanHistory(config.machineId),
+      getIncidents(session, { machineIds: [config.machineId], status: "open" }),
     ])
-    : [null, [], [], [], []];
+    : [null, [], [], [], [], []];
   const draftByPosition = new Map((pendingDraft?.items ?? []).map((it) => [it.position, it]));
 
   // Map Huaxin lane numbers to config positions for ingredient linking
@@ -117,6 +123,8 @@ export default async function MachineDetailPage({
   // is the raw Huaxin value and still needs translating.
   const location = config?.location ?? translateLocation(telemetry?.location) ?? null;
   const online = telemetry?.online ?? false;
+  const machineRow = allMachines.find((machine) => machine.id === config?.machineId);
+  const refill = refillAge(machineRow?.last_refill_at ?? null);
   const orderCoverageCurrent = telemetry?.orders_fresh_from && telemetry.orders_fresh_from <= dateFrom && telemetry.orders_fresh_through && telemetry.orders_fresh_through >= dateTo;
   const salesByDay = new Map<string, number>();
   for (const order of telemetry?.orders ?? []) {
@@ -159,6 +167,13 @@ export default async function MachineDetailPage({
       <p className="-mt-6 mb-6 text-xs text-taupe">
         Supabase snapshot · Machine data synced {telemetry?.machine_synced_at ? formatDateTime(telemetry.machine_synced_at, tz) : "never"}
       </p>
+
+      <section className="mb-6 grid gap-3 sm:grid-cols-2">
+        <div className={`rounded-xl border p-4 ${refill.state === "overdue" ? "border-danger/30 bg-danger/5" : refill.state === "due" ? "border-warning/30 bg-warning/5" : "border-sage/25 bg-sage/5"}`}><p className="text-[10px] font-bold uppercase tracking-wide text-taupe">Last refill</p><p className={`mt-1 font-display text-lg font-bold ${refill.state === "overdue" ? "text-danger" : refill.state === "due" ? "text-warning" : "text-cocoa"}`}>{machineRow?.last_refill_at ? formatDateTime(machineRow.last_refill_at, tz) : "Never recorded"}</p>{refill.days !== null && <p className="text-xs text-taupe">{refill.days} day{refill.days === 1 ? "" : "s"} ago</p>}{config?.machineId && (refill.state === "due" || refill.state === "overdue") && !machineRow?.open_refill_incident && <form action={createRefillIncident} className="mt-2"><input type="hidden" name="machine_id" value={config.machineId} /><button className="text-xs font-bold text-terracotta hover:underline">Create refill incident</button></form>}</div>
+        <Link href="/incidents" className={`rounded-xl border p-4 ${machineIncidents.length ? "border-danger/30 bg-danger/5" : "border-sage/25 bg-sage/5"}`}><p className="text-[10px] font-bold uppercase tracking-wide text-taupe">Open incidents</p><p className={`mt-1 font-display text-lg font-bold ${machineIncidents.length ? "text-danger" : "text-sage"}`}>{machineIncidents.length}</p><p className="text-xs text-taupe">View incident workspace</p></Link>
+      </section>
+
+      {machineIncidents.length > 0 && <details open={machineIncidents.some((incident) => incident.severity === "critical")} className="mb-6 overflow-hidden rounded-2xl border border-danger/25 bg-white"><summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4"><span className="font-display text-lg font-bold text-cocoa">Open incidents for this machine</span><span className="rounded-full bg-danger/10 px-3 py-1 text-xs font-bold text-danger">{machineIncidents.length}</span></summary><div className="space-y-2 border-t border-line p-4">{machineIncidents.map((incident) => <div key={incident.id} className="rounded-lg bg-cream/50 p-3"><div className="flex flex-wrap justify-between gap-2"><span className="font-semibold text-cocoa">{incident.title}</span><span className={`text-xs font-bold capitalize ${incident.severity === "critical" ? "text-danger" : incident.severity === "warning" ? "text-warning" : "text-sage"}`}>{incident.severity}</span></div>{incident.description && <p className="mt-1 text-xs text-taupe">{incident.description}</p>}<Link href={`/incidents#incident-${incident.id}`} className="mt-2 inline-block text-xs font-bold text-terracotta">Review incident</Link></div>)}</div></details>}
 
       {/* Location map */}
       {location && (

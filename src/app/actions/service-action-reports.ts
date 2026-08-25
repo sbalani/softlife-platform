@@ -40,6 +40,8 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
   }
   if (!actionModes) return { ok: false, error: "Choose at least one valid action type." };
   const actionKind = legacyKindFromModes(actionModes);
+  const incidentIds = [...new Set(formData.getAll("incident_ids").map(String))];
+  if (incidentIds.length > 20 || incidentIds.some((id) => !UUID.test(id))) return { ok: false, error: "Choose valid incidents for this machine." };
 
   const hasCleaning = actionModes.includes("cleaning");
   const hasRefill = actionModes.includes("refill");
@@ -102,7 +104,7 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
         }
       }
     }
-    const { data, error } = await s.rpc("record_service_action_report", {
+    const { data, error } = await s.rpc("record_service_action_report_with_incidents", {
       p_client_uuid: clientUuid,
       p_machine_id: machineId,
       p_operator_id: actor.id,
@@ -115,6 +117,7 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
       p_refill_lines: refillLines,
       p_source: source,
       p_action_modes: actionModes,
+      p_incident_ids: incidentIds,
     });
     if (error) return { ok: false, error: error.message };
 
@@ -133,6 +136,9 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
 
     revalidatePath("/refills");
     revalidatePath("/lot-audit");
+    revalidatePath("/incidents");
+    revalidatePath("/machines");
+    revalidatePath("/alerts");
     revalidatePath(`/machine/${machineId}`);
     return {
       ok: true,

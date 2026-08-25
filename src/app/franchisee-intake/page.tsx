@@ -1,4 +1,5 @@
 import { FranchiseeIntakeForm } from "./FranchiseeIntakeForm";
+import Link from "next/link";
 
 export const metadata = { title: "New franchisee information | SoftLife" };
 
@@ -14,6 +15,7 @@ export default function FranchiseeIntakePage() {
         <section className="rounded-3xl border border-[#e0d6cb] bg-[#fffdfa] p-6 shadow-[0_18px_60px_rgba(74,52,40,0.08)] sm:p-8">
           <FranchiseeIntakeForm />
         </section>
+        <p className="mt-5 text-center text-xs text-[#806f63]">Al enviar tus datos, consulta nuestra <Link href="/privacy" className="font-bold text-[#c87954] hover:underline">política de privacidad</Link>.</p>
       </div>
     </main>
   );

@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { LoginForm } from "./LoginForm";
 
 export default function LoginPage() {
@@ -17,6 +18,9 @@ export default function LoginPage() {
         <Suspense>
           <LoginForm />
         </Suspense>
+        <div className="mt-6 border-t border-line pt-4 text-center">
+          <Link href="/privacy" className="text-xs font-semibold text-taupe hover:text-terracotta hover:underline">Política de privacidad</Link>
+        </div>
       </div>
     </div>
   );

@@ -111,7 +111,10 @@ function SidebarContent({ onNavigate, role, mobile }: { onNavigate: () => void; 
         )}
       </nav>
 
-      <div className="border-t border-line px-6 py-4 text-xs text-taupe">SoftLife Platform · v0.3</div>
+      <div className="flex items-center justify-between gap-3 border-t border-line px-6 py-4 text-xs text-taupe">
+        <span>SoftLife Platform · v0.3</span>
+        <Link href="/privacy" className="font-semibold hover:text-terracotta hover:underline">Privacidad</Link>
+      </div>
     </>
   );
 }

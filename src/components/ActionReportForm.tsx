@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useEffectEvent, useRef, useState } from "react";
+import Image from "next/image";
 import {
   submitQrActionReport,
   submitWebActionReport,
@@ -34,6 +35,17 @@ function localDateTime(iso: string) {
 
 function newLine(lotId = ""): LineDraft {
   return { key: crypto.randomUUID(), lotId, lotCode: "", productName: "", quantity: null, unit: "unit" };
+}
+
+function PhotoPreview({ file }: { file: File }) {
+  const [url] = useState(() => URL.createObjectURL(file));
+  useEffect(() => () => URL.revokeObjectURL(url), [url]);
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="relative mt-2 block h-72 overflow-hidden rounded-lg border border-line bg-white sm:h-96">
+      <Image src={url} alt={`Selected batch code photo: ${file.name}`} fill unoptimized className="object-contain" />
+      <span className="absolute right-2 bottom-2 rounded-md bg-cocoa/80 px-2 py-1 text-[10px] font-bold text-white">Tap to enlarge</span>
+    </a>
+  );
 }
 
 export function ActionReportForm({
@@ -240,16 +252,17 @@ export function ActionReportForm({
             <p className="text-xs text-taupe">Record what physically entered the machine. Missing warehouse or stock records will be saved as provenance gaps, not rejected.</p>
           </div>
           {lines.map((line, index) => {
+            const linePhoto = photos.find((photo) => photo.lineKey === line.key);
             return (
               <div key={line.key} className="rounded-xl border border-line bg-cream/40 p-4">
                 <div className="mb-3 flex items-center justify-between"><span className="text-xs font-bold uppercase text-taupe">Refill line {index + 1}</span>{lines.length > 1 && <button type="button" disabled={pending || result?.status === "confirmed"} onClick={() => { setLines((current) => current.filter((item) => item.key !== line.key)); setPhotos((current) => current.filter((photo) => photo.lineKey !== line.key)); }} className="text-xs font-bold text-danger disabled:opacity-50">Remove</button>}</div>
                 <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="sm:col-span-2"><label className="block"><span className={label}>Batch code photo</span><input type="file" accept="image/jpeg,image/png,image/webp,image/heic" onChange={(event) => stageLinePhoto(line.key, event.target.files?.[0])} className={`w-full ${input} text-xs`} /><span className="mt-1 block text-xs text-taupe">Take or choose the photo first, then read the lot details from the preview below.</span></label>{linePhoto && <PhotoPreview key={linePhoto.id} file={linePhoto.file} />}</div>
                   <label className="block sm:col-span-2"><span className={label}>Inventory lot, if known</span><select name="odoo_lot_id" value={line.lotId} onChange={(event) => { const selected = availableLots.find((lot) => String(lot.odooId) === event.target.value); setLines((current) => current.map((item) => item.key === line.key ? { ...item, lotId: event.target.value, lotCode: selected?.name ?? item.lotCode, productName: selected?.productName ?? item.productName } : item)); }} className={`w-full ${input}`}><option value="">Unknown / not listed</option>{availableLots.map((lot) => <option key={lot.odooId} value={lot.odooId}>{lot.name} - {lot.productName} (available {lot.available})</option>)}</select></label>
                   <label className="block"><span className={label}>Observed lot code</span><input name="lot_code" value={line.lotCode} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, lotCode: event.target.value } : item))} placeholder="Type the code on the package" className={`w-full ${input}`} /></label>
                   <label className="block"><span className={label}>Product, if lot unknown</span><input name="product_name" value={line.productName} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, productName: event.target.value } : item))} placeholder="Product name" className={`w-full ${input}`} /></label>
                   <label className="block"><span className={label}>Quantity</span><input name="quantity" type="number" min="0.01" step="0.01" value={line.quantity ?? ""} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, quantity: event.target.value ? Number(event.target.value) : null } : item))} className={`w-full ${input}`} required /></label>
                   <label className="block"><span className={label}>Unit</span><select name="unit" className={`w-full ${input}`} value={line.unit} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, unit: event.target.value } : item))}><option value="unit">Units</option><option value="kg">kg</option><option value="l">litres</option><option value="bag">bags</option><option value="box">boxes</option></select></label>
-                  <label className="block sm:col-span-2"><span className={label}>Batch code photo</span><input type="file" accept="image/jpeg,image/png,image/webp,image/heic" onChange={(event) => stageLinePhoto(line.key, event.target.files?.[0])} className={`w-full ${input} text-xs`} /></label>
                 </div>
               </div>
             );

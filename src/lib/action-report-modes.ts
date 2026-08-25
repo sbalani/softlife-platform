@@ -3,6 +3,10 @@ export const ACTION_REPORT_MODES = ["cleaning", "refill", "other"] as const;
 export type ActionReportMode = typeof ACTION_REPORT_MODES[number];
 export type LegacyActionReportKind = "cleaning" | "refill" | "both" | "other";
 
+export function initialActionReportModes(draftModes?: ActionReportMode[], suggestedModes?: ActionReportMode[]): ActionReportMode[] {
+  return [...(draftModes ?? suggestedModes ?? [])];
+}
+
 export function modesFromLegacyKind(kind: unknown): ActionReportMode[] {
   if (kind === "both") return ["cleaning", "refill"];
   return ACTION_REPORT_MODES.includes(kind as ActionReportMode) ? [kind as ActionReportMode] : [];

@@ -9,7 +9,7 @@ import {
 } from "@/app/actions/service-action-reports";
 import type { ActionReportDraft } from "@/lib/data/action-reports";
 import { ActionReportVoice } from "@/components/ActionReportVoice";
-import { ACTION_REPORT_MODES, modesFromLegacyKind, type ActionReportMode } from "@/lib/action-report-modes";
+import { ACTION_REPORT_MODES, initialActionReportModes, type ActionReportMode } from "@/lib/action-report-modes";
 import { createClient } from "@/lib/supabase/client";
 
 export type ActionReportMachine = { id: string; name: string; warehouseId: number | null };
@@ -74,7 +74,7 @@ export function ActionReportForm({
   const [result, formAction, pending] = useActionState<ActionReportResult | null, FormData>(action, null);
   const [clientUuid] = useState(() => initialDraft?.clientUuid ?? crypto.randomUUID());
   const [machineId, setMachineId] = useState(initialDraft?.machineId ?? initialMachineId ?? machines[0]?.id ?? "");
-  const [modes, setModes] = useState<ActionReportMode[]>(initialDraft?.actionModes ?? initialModes ?? modesFromLegacyKind("both"));
+  const [modes, setModes] = useState<ActionReportMode[]>(() => initialActionReportModes(initialDraft?.actionModes, initialModes));
   const [occurredAt, setOccurredAt] = useState(initialDraft?.occurredAt ?? initialEventTime);
   const [notes, setNotes] = useState(initialDraft?.notes ?? "");
   const [voicePending, setVoicePending] = useState(false);
@@ -244,7 +244,7 @@ export function ActionReportForm({
             </label>
           ))}
         </div>
-        <p className="mt-2 text-xs text-taupe">Select every action performed during this activity.</p>
+        <p className="mt-2 text-xs text-taupe">Select Cleaning, Refill, Other, or any combination. The relevant fields will appear below.</p>
       </fieldset>
 
       {availableIncidents.length > 0 && (

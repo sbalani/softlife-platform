@@ -82,6 +82,13 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
     const { data: existingOwnedReport, error: ownershipError } = await s.from("service_action_reports").select("id,operator_id,status").eq("client_uuid", clientUuid).maybeSingle();
     if (ownershipError) throw ownershipError;
     if (existingOwnedReport && actor.role !== "admin" && existingOwnedReport.operator_id !== actor.id) return { ok: false, error: "You do not own this draft." };
+    let hasExistingIncidentLinks = false;
+    if (existingOwnedReport && incidentIds.length === 0) {
+      const { count, error: linkError } = await s.from("service_action_report_incidents")
+        .select("incident_id", { count: "exact", head: true }).eq("report_id", existingOwnedReport.id);
+      if (linkError) throw linkError;
+      hasExistingIncidentLinks = Boolean(count);
+    }
     if (status === "confirmed") {
       const { data: existingReport } = await s.from("service_action_reports").select("id").eq("client_uuid", clientUuid).maybeSingle();
       if (existingReport) {
@@ -104,7 +111,7 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
         }
       }
     }
-    const { data, error } = await s.rpc("record_service_action_report_with_incidents", {
+    const reportArgs = {
       p_client_uuid: clientUuid,
       p_machine_id: machineId,
       p_operator_id: actor.id,
@@ -117,8 +124,10 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
       p_refill_lines: refillLines,
       p_source: source,
       p_action_modes: actionModes,
-      p_incident_ids: incidentIds,
-    });
+    };
+    const { data, error } = incidentIds.length > 0 || hasExistingIncidentLinks
+      ? await s.rpc("record_service_action_report_with_incidents", { ...reportArgs, p_incident_ids: incidentIds })
+      : await s.rpc("record_service_action_report", reportArgs);
     if (error) return { ok: false, error: error.message };
 
     const result = data as { id: string; status: "draft" | "confirmed"; provenance_status: string; projection_error?: string | null };

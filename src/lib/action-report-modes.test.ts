@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { legacyKindFromModes, modesFromLegacyKind, parseActionReportModes } from "./action-report-modes.ts";
+import { initialActionReportModes, legacyKindFromModes, modesFromLegacyKind, parseActionReportModes } from "./action-report-modes.ts";
+
+test("new reports start collapsed while drafts and incident suggestions restore modes", () => {
+  assert.deepEqual(initialActionReportModes(), []);
+  assert.deepEqual(initialActionReportModes(undefined, ["other"]), ["other"]);
+  assert.deepEqual(initialActionReportModes(["cleaning", "refill"], ["other"]), ["cleaning", "refill"]);
+});
 
 test("legacy action kinds normalize to independent modes", () => {
   assert.deepEqual(modesFromLegacyKind("both"), ["cleaning", "refill"]);

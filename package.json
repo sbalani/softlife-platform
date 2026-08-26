@@ -20,7 +20,7 @@
     "test:mobile-status": "node --experimental-strip-types --test src/lib/data/mobile-machine-status.test.ts",
     "test:mobile-menu": "node --experimental-strip-types --test src/lib/data/mobile-machine-menu.test.ts",
     "test:mobile-builds": "node --experimental-strip-types --test src/lib/auth/web-authorization.test.ts src/lib/mobile-builds.test.ts",
-    "test:incidents": "node --experimental-strip-types --test src/lib/refill-aging.test.ts src/lib/auth/web-authorization.test.ts src/lib/huaxin/status-signals.test.ts",
+    "test:incidents": "node --experimental-strip-types --test src/lib/incident-workflow.test.ts src/lib/refill-aging.test.ts src/lib/auth/web-authorization.test.ts src/lib/huaxin/status-signals.test.ts",
     "test:defrost": "node --experimental-strip-types --test src/lib/defrost-status.test.ts src/lib/huaxin/status-signals.test.ts",
     "test:mcp": "npx -y deno test --allow-env supabase/functions/softlife-mcp/index.test.ts",
     "test:action-reports": "node --experimental-strip-types --test src/lib/data/recall.test.ts src/lib/action-report-ai.test.ts src/lib/action-report-modes.test.ts src/lib/action-report-stock-values.test.ts",

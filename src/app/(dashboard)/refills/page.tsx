@@ -40,7 +40,7 @@ export default async function RefillsPage({ searchParams }: { searchParams: Prom
     }),
     getDisplayTimezone(),
     draftId ? getActionReportDraft(draftId, tenantId, session?.role === "admin" ? undefined : session?.id) : Promise.resolve(null),
-    session && session.role !== "operator" ? getIncidents(session, { machineIds: machines.map((machine) => machine.id), status: "open" }) : Promise.resolve([]),
+    session ? getIncidents(session, { machineIds: machines.map((machine) => machine.id), status: "open" }) : Promise.resolve([]),
   ]);
   const draft = requestedDraft && machines.some((machine) => machine.id === requestedDraft.machineId) ? requestedDraft : null;
   const requestedIncident = incidents.find((incident) => incident.id === requestedIncidentId);
@@ -60,7 +60,7 @@ export default async function RefillsPage({ searchParams }: { searchParams: Prom
           lots={lots}
           initialEventTime={new Date().toISOString()}
           initialDraft={draft}
-          incidents={incidents.map((incident) => ({ id: incident.id, machineId: incident.machineId, title: incident.title, severity: incident.severity, typeLabel: incident.typeLabel }))}
+          incidents={incidents.map((incident) => ({ id: incident.id, machineId: incident.machineId!, title: incident.title, severity: incident.severity, typeLabel: incident.typeLabel }))}
           initialMachineId={machines.some((machine) => machine.id === requestedMachineId) ? requestedMachineId : undefined}
           initialIncidentIds={incidents.some((incident) => incident.id === requestedIncidentId) ? [requestedIncidentId!] : []}
           initialModes={requestedIncident ? refillIncidentTypes.has(requestedIncident.incidentType) ? ["refill"] : ["other"] : undefined}

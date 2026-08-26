@@ -39,7 +39,7 @@ export default async function MachineServicePage({ params }: { params: Promise<{
           }))}
           source="machine_qr"
           initialEventTime={new Date().toISOString()}
-          incidents={incidents.map((incident) => ({ id: incident.id, machineId: incident.machineId, title: incident.title, severity: incident.severity, typeLabel: incident.typeLabel }))}
+          incidents={incidents.map((incident) => ({ id: incident.id, machineId: incident.machineId!, title: incident.title, severity: incident.severity, typeLabel: incident.typeLabel }))}
         />
         <p className="mt-6 text-center text-xs text-taupe">Signed in as {session.full_name ?? session.email ?? "operator"}</p>
       </div>

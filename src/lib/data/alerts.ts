@@ -16,7 +16,7 @@ export type Alert = {
   entity_key: string | null;
   resolved_at: string | null;
   incident_id: string | null;
-  incident_status: "open" | "closed" | null;
+  incident_status: "open" | "in_progress" | "resolved" | "closed" | null;
 };
 
 const SAMPLE: Alert[] = [
@@ -41,7 +41,7 @@ export async function getAlerts(resolved = false, machineIds?: string[]): Promis
     if (error || !data) return machineIds ? { alerts: [], source: "supabase" } : { alerts: resolved ? [] : SAMPLE, source: "sample" };
     const rows = data as Omit<Alert, "incident_id" | "incident_status">[];
     const { data: incidentRows } = rows.length ? await (await createClient()).from("incidents").select("id,status,source_alert_id").in("source_alert_id", rows.map((row) => row.id)) : { data: [] };
-    const incidents = new Map(((incidentRows as { id: string; status: "open" | "closed"; source_alert_id: string }[]) ?? []).map((incident) => [incident.source_alert_id, incident]));
+    const incidents = new Map(((incidentRows as { id: string; status: Alert["incident_status"]; source_alert_id: string }[]) ?? []).map((incident) => [incident.source_alert_id, incident]));
     return { alerts: rows.map((row) => ({ ...row, incident_id: incidents.get(row.id)?.id ?? null, incident_status: incidents.get(row.id)?.status ?? null })), source: "supabase" };
   } catch {
     return machineIds ? { alerts: [], source: "supabase" } : { alerts: resolved ? [] : SAMPLE, source: "sample" };

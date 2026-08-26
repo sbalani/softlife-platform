@@ -59,7 +59,7 @@ export async function getMachines(machineIds?: string[]): Promise<{
     let namesQuery = s.from("machines").select("id,display_name,deployed,last_refill_at");
     let statusesQuery = s.from("machine_status_snapshots").select("machine_id,field,value,observed_at").in("field", ["cup_empty", "material_empty", "material_out"]);
     let alertsQuery = s.from("v_alerts").select("machine_id,change_field").is("resolved_at", null);
-    let incidentsQuery = s.from("incidents").select("machine_id,incident_type").eq("status", "open");
+    let incidentsQuery = s.from("incidents").select("machine_id,incident_type").in("status", ["open", "in_progress"]);
     if (machineIds) {
       namesQuery = namesQuery.in("id", machineIds);
       statusesQuery = statusesQuery.in("machine_id", machineIds);

@@ -1,14 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { canAccessWebPath } from "./lib/auth/web-authorization";
+import { canAccessWebPath, isPublicWebPath } from "./lib/auth/web-authorization";
 
 /** /api/* is excluded on purpose — the mobile app and server-to-server
  *  callbacks (Huaxin webhook, Vercel cron) authenticate with their own
  *  bearer tokens / shared secrets, not a browser cookie session. */
-function isPublicPath(pathname: string) {
-  return pathname === "/login" || pathname === "/privacy" || pathname.startsWith("/privacy/") || pathname === "/set-password" || pathname === "/franchisee-intake" || pathname.startsWith("/auth/callback") || pathname.startsWith("/api");
-}
-
 export async function proxy(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -33,7 +29,7 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser();
   const path = request.nextUrl.pathname;
 
-  if (!user && !isPublicPath(path)) {
+  if (!user && !isPublicWebPath(path)) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", path);
@@ -47,7 +43,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (user && !isPublicPath(path)) {
+  if (user && !isPublicWebPath(path)) {
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
     const role = profile?.role;
     const normalizedRole = role === "admin" || role === "franchisee" ? role : "operator";

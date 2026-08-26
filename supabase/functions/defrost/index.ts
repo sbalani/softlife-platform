@@ -52,7 +52,7 @@ const OPERATING_STATE_FIELDS: Record<string, string> = {
   "120": "cup_foreign_object",
   "255": "mixture_ratio_fault",
 };
-const BENIGN_OPERATING_STATES = new Set(["9", "11", "105"]);
+const BENIGN_OPERATING_STATES = new Set(["4", "9", "11", "105"]);
 const OPERATING_ACTIONABLE_FIELDS = [...new Set(Object.values(OPERATING_STATE_FIELDS))];
 const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const COMMAND_DELAY_MS = 2_000;

@@ -138,6 +138,7 @@ export function translateStatusValue(value: string | null | undefined): string {
   if (!value) return "—";
   const operatingState = value.match(/^\[(\d+)]/)?.[1];
   const operatingStates: Record<string, string> = {
+    "4": "Remote control (defrost or service mode)",
     "8": "Insufficient stock",
     "9": "Closed",
     "11": "Night mode",

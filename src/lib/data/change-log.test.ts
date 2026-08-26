@@ -70,6 +70,7 @@ test("fault statuses and display order use Huaxin codes", () => {
 });
 
 test("aggregate operating states distinguish modes from actionable faults", () => {
+  assert.ok(operatingStatusSignals({ code: "status_0_os", value: "[4]Control remoto" }).every(({ active }) => !active));
   const modes = operatingStatusSignals({ code: "status_0_os", value: "[11]Modo nocturno" });
   assert.ok(modes.every(({ active }) => !active));
   assert.ok(operatingStatusSignals({ code: "status_0_os", value: "[105]Cooling off" }).every(({ active }) => !active));

@@ -59,6 +59,15 @@ export type Envelope = {
   result?: boolean;
 };
 
+export function huaxinMutationError(envelope: Envelope) {
+  const nestedResult = envelope.data && typeof envelope.data === "object"
+    ? (envelope.data as { result?: unknown }).result
+    : undefined;
+  if (String(envelope.code) !== "200") return envelope.msg || "Huaxin rejected the update";
+  if (envelope.result === false || nestedResult === false) return envelope.msg || "Huaxin did not apply the update";
+  return null;
+}
+
 export const COUPON_PATHS = {
   edit: "/machine/cloud/api/coupon/edit",
   list: "/machine/cloud/api/coupon/list",

@@ -92,7 +92,7 @@ export function ComboEditor({
   const pushDraft = () => {
     if (!draftId) return;
     startTransition(async () => {
-      const res = await pushDraftItemAt(imei, draftId, String(item.position ?? "0"));
+      const res = await pushDraftItemAt(imei, draftId, "unify", String(item.position ?? "0"));
       setResult(res.ok ? "Updated & synced." : res.error ?? "Failed");
     });
   };
@@ -100,7 +100,7 @@ export function ComboEditor({
   const revertDraft = () => {
     if (!draftId) return;
     startTransition(async () => {
-      const res = await revertDraftItemAt(imei, draftId, String(item.position ?? "0"));
+      const res = await revertDraftItemAt(imei, draftId, "unify", String(item.position ?? "0"));
       if (!res.ok) setResult(res.error ?? "Failed");
     });
   };

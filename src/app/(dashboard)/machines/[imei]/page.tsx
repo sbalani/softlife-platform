@@ -87,7 +87,9 @@ export default async function MachineDetailPage({
       getIncidents(session, { machineIds: [config.machineId], status: "open" }),
     ])
     : [null, [], [], [], [], []];
-  const draftByPosition = new Map((pendingDraft?.items ?? []).map((it) => [it.position, it]));
+  const draftByMenuKey = new Map((pendingDraft?.items ?? []).filter((item) => item.menuKind).map((item) => [`${item.menuKind}:${item.position}`, item]));
+  const legacyDraftByPosition = new Map((pendingDraft?.items ?? []).filter((item) => !item.menuKind).map((item) => [item.position, item]));
+  const draftItem = (menuKind: "diy" | "unify", position: string) => draftByMenuKey.get(`${menuKind}:${position}`) ?? legacyDraftByPosition.get(position) ?? null;
 
   // Map Huaxin lane numbers to config positions for ingredient linking
   const HUAXIN_TO_CONFIG_POS: Record<string, string> = {
@@ -395,7 +397,7 @@ export default async function MachineDetailPage({
                       item={item}
                       hopperIngredients={hopperIngredients}
                       draftId={pendingDraft?.id ?? null}
-                      draftItem={draftByPosition.get(String(item.position)) ?? null}
+                      draftItem={draftItem("unify", String(item.position))}
                     />
                   ))}
                 </div>
@@ -418,7 +420,7 @@ export default async function MachineDetailPage({
                         bases={ingredients.filter((p) => p.type === "base").map((p) => ({ id: p.id, name: p.name, name_es: p.name_translations?.es, price: p.price, image_url: p.image_url, allergen_url: p.allergen_url }))}
                         linkedBaseId={config?.baseProductId ?? null}
                         draftId={pendingDraft?.id ?? null}
-                        draftItem={draftByPosition.get(String(item.position)) ?? null}
+                        draftItem={draftItem("diy", String(item.position))}
                       />
                     ) : (
                       <ProductEditor
@@ -429,7 +431,7 @@ export default async function MachineDetailPage({
                         ingredients={ingredients.filter((p) => p.type === (Number(item.position) <= 4 ? "topping" : "sauce")).map((p) => ({ id: p.id, name: p.name, name_es: p.name_translations?.es, price: p.price, image_url: p.image_url, allergen_url: p.allergen_url }))}
                         linkedProductId={linkedProductIdByLane.get(HUAXIN_TO_CONFIG_POS[String(item.position)] ?? "") ?? null}
                         draftId={pendingDraft?.id ?? null}
-                        draftItem={draftByPosition.get(String(item.position)) ?? null}
+                        draftItem={draftItem("diy", String(item.position))}
                       />
                     ),
                   )}

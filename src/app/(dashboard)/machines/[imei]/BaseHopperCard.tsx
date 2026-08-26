@@ -125,7 +125,7 @@ export function BaseHopperCard({
   const pushDraft = () => {
     if (!draftId) return;
     startTransition(async () => {
-      const res = await pushDraftItemAt(imei, draftId, BASE_POSITION);
+      const res = await pushDraftItemAt(imei, draftId, "diy", BASE_POSITION);
       setResult(res.ok ? "Updated & synced." : res.error ?? "Failed");
     });
   };
@@ -133,7 +133,7 @@ export function BaseHopperCard({
   const revertDraft = () => {
     if (!draftId) return;
     startTransition(async () => {
-      const res = await revertDraftItemAt(imei, draftId, BASE_POSITION);
+      const res = await revertDraftItemAt(imei, draftId, "diy", BASE_POSITION);
       if (!res.ok) setResult(res.error ?? "Failed");
     });
   };

@@ -2,10 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { getConfigFromEnv, editDeviceMedia, listDeviceProducts, pushDeviceSetting, pushProductDiy, refreshProduct, refreshResource, removeDeviceMedia, sendCommand, updateDeviceInfo } from "@/lib/huaxin/client";
+import { getConfigFromEnv, editDeviceMedia, huaxinMutationError, listDeviceProducts, pushDeviceSetting, pushProductDiy, refreshProduct, refreshResource, removeDeviceMedia, sendCommand, updateDeviceInfo } from "@/lib/huaxin/client";
 import type { DiyPushItem } from "@/lib/huaxin/client";
 import { generateAllergenComposite } from "@/lib/allergens/composite";
 import { getSessionProfile } from "@/lib/auth/session";
+import type { SessionProfile } from "@/lib/auth/session";
 import { recordMachinePush, recordMachineSync, recordProductChange, recordRemoteCommand } from "@/lib/data/change-log";
 import { syncMachineMedia } from "@/lib/data/machine-media";
 import { recordMachineClean } from "@/lib/data/clean-logs";
@@ -143,16 +144,71 @@ const HUAXIN_LANE_TO_CONFIG: Record<string, { position: string; product_type: st
 type DiyItem = { position: string; code: string; value: string };
 type ServiceClient = Awaited<ReturnType<typeof createServiceClient>>;
 
+async function requireMenuAdmin(): Promise<SessionProfile> {
+  const actor = await getSessionProfile();
+  if (!actor || actor.role !== "admin") throw new Error("Admin access required.");
+  return actor;
+}
+
+async function getMenuMachine(s: ServiceClient, imei: string) {
+  const { data, error } = await s.from("machines").select("id,name,device_imei").eq("device_imei", imei).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Machine not found.");
+  return data as { id: string; name: string | null; device_imei: string };
+}
+
+async function createStableRecipe(s: ServiceClient, ingredientIds: string[], name: string) {
+  const { data, error } = await s.rpc("create_or_reuse_recipe", { p_product_ids: ingredientIds, p_name: name });
+  if (error) throw error;
+  return String(data);
+}
+
+type RecipeAssignmentInput = {
+  menu_kind: "diy" | "unify";
+  menu_position: string;
+  recipe_id: string;
+  source: "direct_push" | "draft_push" | "menu_copy";
+};
+
+async function pushRecipeMenuWithHistory(
+  cfg: NonNullable<ReturnType<typeof getConfigFromEnv>>,
+  s: ServiceClient,
+  machine: { id: string },
+  imei: string,
+  items: DiyPushItem[],
+  assignments: RecipeAssignmentInput[],
+  actor: SessionProfile,
+) {
+  const { data: operation, error: operationError } = await s.from("menu_recipe_push_operations").insert({
+    machine_id: machine.id, assignments, payload: items, requested_by: actor.id,
+  }).select("id").single();
+  if (operationError) throw operationError;
+  try {
+    await pushProductDiyWithLog(cfg, imei, items, actor);
+  } catch (error) {
+    await s.from("menu_recipe_push_operations").update({ status: "failed", error: error instanceof Error ? error.message.slice(0, 5000) : String(error).slice(0, 5000) }).eq("id", operation.id);
+    throw error;
+  }
+  const { error: completionError } = await s.rpc("complete_menu_recipe_push", {
+    p_operation_id: operation.id, p_effective_at: new Date().toISOString(),
+  });
+  if (completionError) throw new Error(`Menu reached Huaxin, but recipe history is pending reconciliation: ${completionError.message}`);
+}
+
 async function pushProductDiyWithLog(
   cfg: NonNullable<ReturnType<typeof getConfigFromEnv>>,
   imei: string,
   items: DiyPushItem[],
+  actor?: SessionProfile,
 ) {
+  const effectiveActor = actor ?? await requireMenuAdmin();
   const result = await pushProductDiy(cfg, imei, items);
-  if (String(result.code) === "200" && isSupabaseConfigured()) {
+  const mutationError = huaxinMutationError(result);
+  if (mutationError) throw new Error(mutationError);
+  if (isSupabaseConfigured()) {
     const s = await createServiceClient();
     const { data: machine } = await s.from("machines").select("id,name,device_imei").eq("device_imei", imei).maybeSingle();
-    if (machine?.id) await recordMachinePush(s, machine as { id: string; name: string | null; device_imei: string }, items, await getSessionProfile());
+    if (machine?.id) await recordMachinePush(s, machine as { id: string; name: string | null; device_imei: string }, items, effectiveActor);
   }
   return result;
 }
@@ -307,8 +363,12 @@ export async function saveBaseDraft(
     return { ok: false, error: "Nothing to save." };
   }
   try {
+    await requireMenuAdmin();
     const s = await createServiceClient();
+    const machine = await getMenuMachine(s, imei);
+    if (machine.id !== machineId) return { ok: false, error: "Draft machine does not match the requested machine." };
     await upsertDraftItem(s, machineId, {
+      menuKind: "diy",
       position: BASE_LANE,
       goodsName: fields.goodsName ?? "",
       price: fields.price ?? "",
@@ -616,8 +676,12 @@ export async function saveHopperDraft(
     return { ok: false, error: "Nothing to save." };
   }
   try {
+    await requireMenuAdmin();
     const s = await createServiceClient();
+    const machine = await getMenuMachine(s, imei);
+    if (machine.id !== machineId) return { ok: false, error: "Draft machine does not match the requested machine." };
     await upsertDraftItem(s, machineId, {
+      menuKind: "diy",
       position,
       goodsName: fields.goodsName ?? "",
       price: fields.price ?? "",
@@ -654,9 +718,12 @@ export async function pushComboToMachine(
   if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
 
   try {
+    const actor = await requireMenuAdmin();
     const s = await createServiceClient();
+    const machine = await getMenuMachine(s, imei);
     const resolved = await resolveComboFields(s, imei, position, ingredientIds);
     if ("error" in resolved) return { ok: false, error: resolved.error };
+    const recipeId = await createStableRecipe(s, ingredientIds, resolved.goodsName);
 
     const items: DiyItem[] = [
       { position, code: "goodsName", value: resolved.goodsName },
@@ -665,12 +732,9 @@ export async function pushComboToMachine(
     if (imagePath) items.push({ position, code: "imagePath", value: imagePath });
     if (resolved.compositeUrl) items.push({ position, code: "allergyPath", value: resolved.compositeUrl });
 
-    const result = await pushProductDiyWithLog(cfg, imei, items);
-    if (String(result.code) === "200") {
-      try { await refreshProduct(cfg, imei); } catch { /* best-effort */ }
-      return { ok: true };
-    }
-    return { ok: false, error: result.msg ?? "Update rejected" };
+    await pushRecipeMenuWithHistory(cfg, s, machine, imei, items, [{ menu_kind: "unify", menu_position: position, recipe_id: recipeId, source: "direct_push" }], actor);
+    try { await refreshProduct(cfg, imei); } catch { /* best-effort */ }
+    return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
@@ -685,7 +749,8 @@ async function resolveComboFields(
   const { data: prods } = await s.from("products").select("id,name").in("id", ingredientIds);
   const byId = new Map(((prods as { id: string; name: string }[]) ?? []).map((p) => [p.id, p.name]));
   const names = ingredientIds.map((id) => byId.get(id)).filter(Boolean) as string[];
-  if (!names.length) return { error: "Ingredients not found." };
+  if (new Set(ingredientIds).size !== ingredientIds.length) return { error: "A combo cannot contain the same ingredient twice." };
+  if (names.length !== ingredientIds.length) return { error: "One or more ingredients were not found." };
   const goodsName = names.join(" + ");
   const compositeUrl = await computeAllergenCompositeUrl(s, ingredientIds, `combo_${imei}_${position}`);
   return { goodsName, compositeUrl };
@@ -710,16 +775,23 @@ export async function saveComboDraft(
   if (!machineId) return { ok: false, error: "Machine not synced to Supabase yet — sync first." };
 
   try {
+    await requireMenuAdmin();
     const s = await createServiceClient();
+    const machine = await getMenuMachine(s, imei);
+    if (machine.id !== machineId) return { ok: false, error: "Draft machine does not match the requested machine." };
     const resolved = await resolveComboFields(s, imei, position, ingredientIds);
     if ("error" in resolved) return { ok: false, error: resolved.error };
+    const recipeId = await createStableRecipe(s, ingredientIds, resolved.goodsName);
 
     await upsertDraftItem(s, machineId, {
+      menuKind: "unify",
       position,
       goodsName: resolved.goodsName,
       price,
       imagePath,
       allergyPath: resolved.compositeUrl ?? undefined,
+      recipeId,
+      assignmentSource: "draft_push",
     });
     revalidatePath(`/machines/${imei}`);
     return { ok: true };
@@ -771,6 +843,7 @@ export async function uploadMenuItemImage(fd: FormData): Promise<UploadResult> {
   if (!(file instanceof File) || !file.size) return { ok: false, error: "No file provided." };
 
   try {
+    await requireMenuAdmin();
     const s = await createServiceClient();
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `menu-items/${crypto.randomUUID()}.${ext}`;
@@ -786,11 +859,15 @@ export async function uploadMenuItemImage(fd: FormData): Promise<UploadResult> {
 }
 
 type DraftItemInput = {
+  menuKind?: "diy" | "unify";
   position: string;
   goodsName: string;
   price: string;
   imagePath: string;
   allergyPath?: string;
+  marketPrice?: string;
+  recipeId?: string | null;
+  assignmentSource?: "draft_push" | "menu_copy";
 };
 
 /** Merges one item into the machine's current pending draft (creating one if
@@ -809,7 +886,9 @@ async function upsertDraftItem(s: ServiceClient, machineId: string, item: DraftI
     .maybeSingle();
 
   if (existing) {
-    const items = ((existing.items as DraftItemInput[]) ?? []).filter((i) => i.position !== item.position);
+    const items = ((existing.items as DraftItemInput[]) ?? []).filter((i) =>
+      i.position !== item.position || (i.menuKind ?? item.menuKind) !== item.menuKind,
+    );
     items.push(item);
     await s.from("machine_menu_drafts").update({ items }).eq("id", existing.id);
   } else {
@@ -839,30 +918,42 @@ export async function copyMenuToMachines(_prev: CopyMenuResult | null, fd: FormD
   if (!cfg) return { ok: false, error: "Huaxin not configured." };
 
   try {
+    await requireMenuAdmin();
     const s = await createServiceClient();
     const { data: source } = await s.from("machines").select("id,name").eq("device_imei", sourceImei).maybeSingle();
     if (!source) return { ok: false, error: "Source machine not found." };
 
+    const { data: activeAssignments, error: assignmentError } = await s.from("machine_menu_recipe_assignments")
+      .select("menu_kind,menu_position,recipe_id").eq("machine_id", source.id).is("valid_to", null);
+    if (assignmentError) throw assignmentError;
+    const recipeByMenuKey = new Map(((activeAssignments as { menu_kind: string; menu_position: string; recipe_id: string }[]) ?? [])
+      .map((assignment) => [`${assignment.menu_kind}:${assignment.menu_position}`, assignment.recipe_id]));
     const { diy, unify } = await listDeviceProducts(cfg, sourceImei);
-    const items = [...diy, ...unify]
-      .filter((i) => i.position != null)
-      .map((i) => ({
+    const items = [
+      ...diy.map((item) => ({ item, menuKind: "diy" as const })),
+      ...unify.map((item) => ({ item, menuKind: "unify" as const })),
+    ].filter(({ item }) => item.position != null)
+      .map(({ item: i, menuKind }) => ({
+        menuKind,
         position: String(i.position),
         goodsName: i.goodsName ?? "",
         price: i.price ?? "",
         imagePath: i.imagePath ?? "",
         marketPrice: i.marketPrice ?? "",
+        recipeId: recipeByMenuKey.get(`${menuKind}:${String(i.position)}`) ?? null,
+        assignmentSource: "menu_copy" as const,
       }));
     if (!items.length) return { ok: false, error: "Source machine has no menu to copy." };
 
-    const rows = targetIds.map((machineId) => ({
-      machine_id: machineId,
-      source_machine_id: source.id,
-      source_machine_name: source.name,
-      items,
-    }));
-    const { error } = await s.from("machine_menu_drafts").insert(rows);
-    if (error) return { ok: false, error: error.message };
+    const { data: targets, error: targetError } = await s.from("machines").select("id").in("id", targetIds);
+    if (targetError) throw targetError;
+    if ((targets?.length ?? 0) !== new Set(targetIds).size) return { ok: false, error: "One or more target machines were not found." };
+    for (const machineId of new Set(targetIds)) {
+      for (const item of items) await upsertDraftItem(s, machineId, item);
+      const { error } = await s.from("machine_menu_drafts").update({ source_machine_id: source.id, source_machine_name: source.name })
+        .eq("machine_id", machineId).is("applied_at", null);
+      if (error) throw error;
+    }
 
     return { ok: true, copiedTo: targetIds.length };
   } catch (e) {
@@ -879,24 +970,35 @@ export async function pushMenuDraft(imei: string, draftId: string): Promise<Push
   if (!cfg) return { ok: false, error: "Huaxin not configured." };
 
   try {
+    const actor = await requireMenuAdmin();
     const s = await createServiceClient();
-    const { data: draft } = await s.from("machine_menu_drafts").select("id,items").eq("id", draftId).maybeSingle();
+    const machine = await getMenuMachine(s, imei);
+    const { data: draft } = await s.from("machine_menu_drafts").select("id,machine_id,items").eq("id", draftId).is("applied_at", null).maybeSingle();
     if (!draft) return { ok: false, error: "Draft not found." };
+    if (draft.machine_id !== machine.id) return { ok: false, error: "Draft does not belong to this machine." };
 
     const draftItems = (draft.items as DraftItemInput[]) ?? [];
     const items: DiyItem[] = [];
     for (const it of draftItems) {
       if (it.goodsName) items.push({ position: it.position, code: "goodsName", value: it.goodsName });
       if (it.price) items.push({ position: it.position, code: "price", value: it.price });
+      if (it.marketPrice) items.push({ position: it.position, code: "marketPrice", value: it.marketPrice });
       if (it.imagePath) items.push({ position: it.position, code: "imagePath", value: it.imagePath });
       if (it.allergyPath) items.push({ position: it.position, code: "allergyPath", value: it.allergyPath });
     }
     if (!items.length) return { ok: false, error: "Draft has nothing to push." };
 
-    await pushProductDiyWithLog(cfg, imei, items);
+    const assignments = draftItems.filter((item) => item.recipeId).map((item) => ({
+      menu_kind: item.menuKind ?? "unify", menu_position: item.position, recipe_id: item.recipeId!,
+      source: item.assignmentSource ?? "draft_push",
+    })) satisfies RecipeAssignmentInput[];
+    if (assignments.length) {
+      await pushRecipeMenuWithHistory(cfg, s, machine, imei, items, assignments, actor);
+    } else await pushProductDiyWithLog(cfg, imei, items, actor);
     try { await refreshProduct(cfg, imei); } catch { /* best-effort */ }
 
-    await s.from("machine_menu_drafts").update({ applied_at: new Date().toISOString() }).eq("id", draftId);
+    const { error: appliedError } = await s.from("machine_menu_drafts").update({ applied_at: new Date().toISOString() }).eq("id", draftId).is("applied_at", null);
+    if (appliedError) throw new Error(`Menu and recipe history were applied, but the draft could not be closed: ${appliedError.message}`);
     revalidatePath(`/machines/${imei}`);
     return { ok: true, pushed: draftItems.length };
   } catch (e) {
@@ -904,10 +1006,12 @@ export async function pushMenuDraft(imei: string, draftId: string): Promise<Push
   }
 }
 
-async function removeDraftItemAt(s: ServiceClient, draftId: string, position: string): Promise<void> {
+async function removeDraftItemAt(s: ServiceClient, draftId: string, menuKind: "diy" | "unify", position: string): Promise<void> {
   const { data: draft } = await s.from("machine_menu_drafts").select("id,items").eq("id", draftId).maybeSingle();
   if (!draft) return;
-  const items = ((draft.items as DraftItemInput[]) ?? []).filter((d) => d.position !== position);
+  const items = ((draft.items as DraftItemInput[]) ?? []).filter((item) =>
+    item.position !== position || (item.menuKind !== undefined && item.menuKind !== menuKind),
+  );
   if (items.length) {
     await s.from("machine_menu_drafts").update({ items }).eq("id", draftId);
   } else {
@@ -918,29 +1022,35 @@ async function removeDraftItemAt(s: ServiceClient, draftId: string, position: st
 /** Pushes just one position's staged item — the per-card "Push to machine"
  * shown in place on the hopper/combo/base editor itself, not a separate
  * summary. Clears only that position from the draft on success. */
-export async function pushDraftItemAt(imei: string, draftId: string, position: string): Promise<ProductUpdateResult> {
+export async function pushDraftItemAt(imei: string, draftId: string, menuKind: "diy" | "unify", position: string): Promise<ProductUpdateResult> {
   if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
   const cfg = getConfigFromEnv();
   if (!cfg) return { ok: false, error: "Huaxin not configured." };
 
   try {
+    const actor = await requireMenuAdmin();
     const s = await createServiceClient();
-    const { data: draft } = await s.from("machine_menu_drafts").select("id,items").eq("id", draftId).maybeSingle();
+    const machine = await getMenuMachine(s, imei);
+    const { data: draft } = await s.from("machine_menu_drafts").select("id,machine_id,items").eq("id", draftId).is("applied_at", null).maybeSingle();
     if (!draft) return { ok: false, error: "Draft not found." };
-    const it = ((draft.items as DraftItemInput[]) ?? []).find((d) => d.position === position);
+    if (draft.machine_id !== machine.id) return { ok: false, error: "Draft does not belong to this machine." };
+    const it = ((draft.items as DraftItemInput[]) ?? []).find((item) => item.position === position && (item.menuKind === menuKind || item.menuKind === undefined));
     if (!it) return { ok: false, error: "Draft item not found." };
 
     const items: DiyItem[] = [];
     if (it.goodsName) items.push({ position: it.position, code: "goodsName", value: it.goodsName });
     if (it.price) items.push({ position: it.position, code: "price", value: it.price });
+    if (it.marketPrice) items.push({ position: it.position, code: "marketPrice", value: it.marketPrice });
     if (it.imagePath) items.push({ position: it.position, code: "imagePath", value: it.imagePath });
     if (it.allergyPath) items.push({ position: it.position, code: "allergyPath", value: it.allergyPath });
     if (!items.length) return { ok: false, error: "Nothing to push." };
 
-    await pushProductDiyWithLog(cfg, imei, items);
+    if (it.recipeId) {
+      await pushRecipeMenuWithHistory(cfg, s, machine, imei, items, [{ menu_kind: it.menuKind ?? menuKind, menu_position: it.position, recipe_id: it.recipeId, source: it.assignmentSource ?? "draft_push" }], actor);
+    } else await pushProductDiyWithLog(cfg, imei, items, actor);
     try { await refreshProduct(cfg, imei); } catch { /* best-effort */ }
 
-    await removeDraftItemAt(s, draftId, position);
+    await removeDraftItemAt(s, draftId, menuKind, position);
     revalidatePath(`/machines/${imei}`);
     return { ok: true };
   } catch (e) {
@@ -950,11 +1060,15 @@ export async function pushDraftItemAt(imei: string, draftId: string, position: s
 
 /** Discards just one position's staged item without pushing — reverts that
  * card back to showing live data. */
-export async function revertDraftItemAt(imei: string, draftId: string, position: string): Promise<{ ok: boolean; error?: string }> {
+export async function revertDraftItemAt(imei: string, draftId: string, menuKind: "diy" | "unify", position: string): Promise<{ ok: boolean; error?: string }> {
   if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
   try {
+    await requireMenuAdmin();
     const s = await createServiceClient();
-    await removeDraftItemAt(s, draftId, position);
+    const machine = await getMenuMachine(s, imei);
+    const { data: draft } = await s.from("machine_menu_drafts").select("machine_id").eq("id", draftId).maybeSingle();
+    if (!draft || draft.machine_id !== machine.id) return { ok: false, error: "Draft does not belong to this machine." };
+    await removeDraftItemAt(s, draftId, menuKind, position);
     revalidatePath(`/machines/${imei}`);
     return { ok: true };
   } catch (e) {
@@ -965,8 +1079,11 @@ export async function revertDraftItemAt(imei: string, draftId: string, position:
 export async function dismissMenuDraft(imei: string, draftId: string): Promise<{ ok: boolean; error?: string }> {
   if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
   try {
+    await requireMenuAdmin();
     const s = await createServiceClient();
-    await s.from("machine_menu_drafts").delete().eq("id", draftId);
+    const machine = await getMenuMachine(s, imei);
+    const { error } = await s.from("machine_menu_drafts").delete().eq("id", draftId).eq("machine_id", machine.id);
+    if (error) throw error;
     revalidatePath(`/machines/${imei}`);
     return { ok: true };
   } catch (e) {

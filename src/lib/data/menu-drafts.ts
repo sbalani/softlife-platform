@@ -1,12 +1,15 @@
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 
 export type MenuDraftItem = {
+  menuKind?: "diy" | "unify";
   position: string;
   goodsName: string;
   price: string;
   imagePath: string;
   marketPrice: string;
   allergyPath?: string;
+  recipeId?: string | null;
+  assignmentSource?: "draft_push" | "menu_copy";
 };
 
 export type MenuDraft = {

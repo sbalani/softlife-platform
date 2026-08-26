@@ -123,7 +123,7 @@ export function ProductEditor({
   const pushDraft = () => {
     if (!draftId) return;
     startTransition(async () => {
-      const res = await pushDraftItemAt(imei, draftId, pos);
+      const res = await pushDraftItemAt(imei, draftId, "diy", pos);
       setResult(res.ok ? "Updated & synced." : res.error ?? "Failed");
     });
   };
@@ -131,7 +131,7 @@ export function ProductEditor({
   const revertDraft = () => {
     if (!draftId) return;
     startTransition(async () => {
-      const res = await revertDraftItemAt(imei, draftId, pos);
+      const res = await revertDraftItemAt(imei, draftId, "diy", pos);
       if (!res.ok) setResult(res.error ?? "Failed");
     });
   };

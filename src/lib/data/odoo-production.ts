@@ -29,6 +29,10 @@ type Resolution = {
   menuKind: "diy" | "unify" | null;
   method: string; status: "resolved" | "pending" | "ignored"; problemCode: string | null;
 };
+type RecipeVersionComponent = {
+  platform_product_id: string | null; odoo_product_id: number | null;
+  quantity: number; uom: unknown; sequence: number;
+};
 
 function catalogCursor(value: unknown): value is CatalogCursor {
   if (!value || typeof value !== "object") return false;
@@ -69,7 +73,7 @@ export async function getOdooCatalog(s: SupabaseClient, url: URL) {
     .select("id,name,type,consumption_type,odoo_id,default_portion_size,default_portion_uom,updated_at,product_aliases(alias,normalized_alias)")
     .order("updated_at").order("id").limit(cursor?.ingredients === "done" ? 0 : limit + 1);
   let versionQuery = s.from("recipe_versions")
-    .select("id,recipe_id,version,component_hash,odoo_bom_id,updated_at,recipes(name,odoo_finished_product_id),recipe_version_components(product_id,quantity,uom,sequence,products(odoo_id))")
+    .select("id,recipe_id,version,component_hash,odoo_bom_id,updated_at,recipes(name,odoo_finished_product_id),recipe_version_components(product_id,odoo_product_id,quantity,uom,sequence),recipe_version_odoo_components(odoo_product_id,quantity,uom,sequence)")
     .order("updated_at").order("id").limit(cursor?.recipes === "done" ? 0 : limit + 1);
   if (updatedAfter) { productQuery = productQuery.gt("updated_at", updatedAfter); versionQuery = versionQuery.gt("updated_at", updatedAfter); }
   productQuery = applyCursor(productQuery, isSyncCursor(cursor?.ingredients) ? cursor.ingredients : null);
@@ -105,7 +109,10 @@ export async function getOdooCatalog(s: SupabaseClient, url: URL) {
     }),
     recipe_versions: versionRows.map((row) => {
       const recipe = relation(row.recipes);
-      const components = (row.recipe_version_components as Record<string, unknown>[] | null) ?? [];
+      const components = mergeRecipeVersionComponents(
+        (row.recipe_version_components as Record<string, unknown>[] | null) ?? [],
+        (row.recipe_version_odoo_components as Record<string, unknown>[] | null) ?? [],
+      );
       return {
         recipe_id: row.recipe_id,
         recipe_version_id: row.id,
@@ -114,10 +121,11 @@ export async function getOdooCatalog(s: SupabaseClient, url: URL) {
         odoo_finished_product_id: recipe?.odoo_finished_product_id ?? null,
         odoo_bom_id: row.odoo_bom_id ?? null,
         component_hash: row.component_hash,
-        components: components.sort((a, b) => Number(a.sequence) - Number(b.sequence)).map((component) => ({
-          platform_product_id: component.product_id,
-          odoo_product_id: relation(component.products)?.odoo_id ?? null,
-          quantity: Number(component.quantity), uom: component.uom,
+        components: components.map((component) => ({
+          platform_product_id: component.platform_product_id,
+          odoo_product_id: component.odoo_product_id,
+          quantity: component.quantity,
+          uom: component.uom,
         })),
         updated_at: row.updated_at,
       };
@@ -125,6 +133,24 @@ export async function getOdooCatalog(s: SupabaseClient, url: URL) {
     next_cursor: catalogDone ? null : encodeSyncCursor({ ingredients: nextIngredients, recipes: nextRecipes, updatedAfter }),
     has_more: !catalogDone,
   };
+}
+
+export function mergeRecipeVersionComponents(
+  foodComponents: Record<string, unknown>[],
+  odooComponents: Record<string, unknown>[],
+): RecipeVersionComponent[] {
+  return [
+    ...foodComponents.map((component) => ({
+      platform_product_id: String(component.product_id),
+      odoo_product_id: Number(component.odoo_product_id) || null,
+      quantity: Number(component.quantity), uom: component.uom, sequence: Number(component.sequence),
+    })),
+    ...odooComponents.map((component) => ({
+      platform_product_id: null,
+      odoo_product_id: Number(component.odoo_product_id),
+      quantity: Number(component.quantity), uom: component.uom, sequence: Number(component.sequence),
+    })),
+  ].sort((a, b) => a.sequence - b.sequence);
 }
 
 function relation(value: unknown): Record<string, unknown> | null {
@@ -197,19 +223,22 @@ function resolveOrderLines(
 ): Resolution[] {
   const orderTime = String(order.order_time);
   return rawLines(order).map((line, lineIndex) => {
+    const rawName = String(line.goodsName ?? "").trim();
+    const normalizedName = normalizeObservedName(rawName);
+    const rawPosition = line.position == null ? null : String(line.position);
     const durable = existing.get(lineIndex);
-    if (durable && ["resolved", "ignored"].includes(String(durable.resolution_status))) return {
-      lineIndex, rawName: String(durable.raw_name ?? ""), normalizedName: String(durable.normalized_name ?? ""),
-      rawPosition: durable.raw_position == null ? null : String(durable.raw_position),
+    const durableMatchesEvidence = durable
+      && String(durable.raw_name ?? "").trim() === rawName
+      && String(durable.normalized_name ?? "") === normalizedName
+      && (durable.raw_position == null ? null : String(durable.raw_position)) === rawPosition;
+    if (durableMatchesEvidence && ["resolved", "ignored"].includes(String(durable.resolution_status))) return {
+      lineIndex, rawName, normalizedName, rawPosition,
       productId: durable.platform_product_id == null ? null : String(durable.platform_product_id),
       recipeId: durable.recipe_id == null ? null : String(durable.recipe_id),
       recipeVersionId: durable.recipe_version_id == null ? null : String(durable.recipe_version_id),
       menuKind: durable.menu_kind === "diy" || durable.menu_kind === "unify" ? durable.menu_kind : null,
       method: String(durable.mapping_method), status: durable.resolution_status as "resolved" | "ignored", problemCode: durable.problem_code == null ? null : String(durable.problem_code),
     };
-    const rawName = String(line.goodsName ?? "").trim();
-    const normalizedName = normalizeObservedName(rawName);
-    const rawPosition = line.position == null ? null : String(line.position);
     if (rawPosition && ["diy", "unify"].some((kind) => pendingMenuKeys.has(`${String(order.machine_id)}:${kind}:${rawPosition}`))) {
       return { lineIndex, rawName, normalizedName, rawPosition, productId: null, recipeId: null, recipeVersionId: null, menuKind: null, method: "unresolved", status: "pending", problemCode: "menu_assignment_pending" };
     }
@@ -237,32 +266,38 @@ function orderSourceSnapshot(order: Record<string, unknown>) {
 async function createRecipeVersion(s: SupabaseClient, recipeId: string, machineId: string, context: {
   products: Map<string, ProductRow>; defaults: Map<string, { quantity: number; uom: string }>;
   productOverrides: Map<string, { quantity: number; uom: string }>; machineOverrides: Map<string, { quantity: number; uom: string }>;
-  cupProductId: string | null;
+  cupOdooProductId: number | null;
 }) {
   const { data: stableRows, error: stableError } = await s.from("recipe_components").select("product_id,sequence").eq("recipe_id", recipeId).order("sequence");
   if (stableError) throw stableError;
   const ids = (stableRows ?? []).map((row) => String(row.product_id));
-  if (context.cupProductId && !ids.includes(context.cupProductId)) ids.push(context.cupProductId);
-  const components: { platform_product_id: string; odoo_product_id: number; quantity: number; uom: string; sequence: number }[] = [];
-  const problems: { problem_code: string; platform_product_id: string }[] = [];
+  const components: { platform_product_id: string | null; odoo_product_id: number; quantity: number; uom: string; sequence: number }[] = [];
+  const problems: { problem_code: string; platform_product_id: string | null }[] = [];
   for (const [index, productId] of ids.entries()) {
     const product = context.products.get(productId);
     if (!product) { problems.push({ problem_code: "unknown_ingredient_name", platform_product_id: productId }); continue; }
-    const quantity = productId === context.cupProductId ? { quantity: 1, uom: "unit" }
-      : context.machineOverrides.get(`${machineId}:${productId}`) ?? context.productOverrides.get(productId)
+    const quantity = context.machineOverrides.get(`${machineId}:${productId}`) ?? context.productOverrides.get(productId)
         ?? (product.default_portion_size && product.default_portion_uom ? { quantity: Number(product.default_portion_size), uom: product.default_portion_uom } : undefined)
         ?? (product.consumption_type ? context.defaults.get(product.consumption_type) : undefined);
     if (!quantity) { problems.push({ problem_code: "missing_component_quantity", platform_product_id: productId }); continue; }
     if (!product.odoo_id) { problems.push({ problem_code: "missing_ingredient_odoo_link", platform_product_id: productId }); continue; }
-    components.push({ platform_product_id: productId, odoo_product_id: product.odoo_id, quantity: Number(quantity.quantity), uom: quantity.uom, sequence: index + 1 });
+    components.push({
+      platform_product_id: productId, odoo_product_id: product.odoo_id,
+      quantity: Number(quantity.quantity), uom: quantity.uom.trim(), sequence: index + 1,
+    });
   }
-  if (!context.cupProductId) problems.push({ problem_code: "missing_component_quantity", platform_product_id: "cup" });
-  if (problems.length) return { version: null, components: [], problems };
-  const hash = sha256(components.map(({ platform_product_id, quantity, uom }) => ({ platform_product_id, quantity, uom })).sort((a, b) => a.platform_product_id.localeCompare(b.platform_product_id)));
+  const cupOdooProductId = context.cupOdooProductId;
+  if (!cupOdooProductId) problems.push({ problem_code: "missing_cup_odoo_product", platform_product_id: null });
+  if (cupOdooProductId && components.some((component) => component.odoo_product_id === cupOdooProductId)) {
+    problems.push({ problem_code: "cup_matches_food_ingredient", platform_product_id: null });
+  }
+  if (problems.length || !cupOdooProductId) return { version: null, components: [], problems };
+  const cupComponent = { platform_product_id: null, odoo_product_id: cupOdooProductId, quantity: 1, uom: "unit", sequence: components.length + 1 };
+  components.push(cupComponent);
   const { data: version, error } = await s.rpc("create_or_reuse_recipe_version", {
     p_recipe_id: recipeId,
-    p_component_hash: hash,
-    p_components: components.map((component) => ({ product_id: component.platform_product_id, quantity: component.quantity, uom: component.uom, sequence: component.sequence })),
+    p_components: components.filter((component) => component.platform_product_id !== null).map((component) => ({ product_id: component.platform_product_id, odoo_product_id: component.odoo_product_id, quantity: component.quantity, uom: component.uom, sequence: component.sequence })),
+    p_odoo_components: [{ odoo_product_id: cupComponent.odoo_product_id, quantity: cupComponent.quantity, uom: cupComponent.uom, sequence: cupComponent.sequence }],
   });
   if (error) throw error;
   return { version: relation(version) ?? version as Record<string, unknown>, components, problems: [] };
@@ -322,7 +357,7 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       s.from("production_consumption_defaults").select("consumption_type,quantity,uom"),
       s.from("production_product_consumption_overrides").select("product_id,quantity,uom"),
       machineIds.length ? s.from("machine_product_consumption_overrides").select("machine_id,product_id,quantity,uom").in("machine_id", machineIds) : Promise.resolve({ data: [], error: null }),
-      s.from("production_settings").select("cup_product_id,currency").eq("singleton", true).single(),
+      s.from("production_settings").select("cup_odoo_product_id,currency").eq("singleton", true).single(),
       s.from("odoo_warehouses").select("odoo_id,name,sales_customer_odoo_id"),
       orders.length ? s.from("manufacturing_period_export_orders").select("order_id,export_id").in("order_id", orders.map((order) => order.id as string)).is("released_at", null) : Promise.resolve({ data: [], error: null }),
       machineIds.length ? s.from("menu_recipe_push_operations").select("machine_id,assignments").in("machine_id", machineIds).eq("status", "pending") : Promise.resolve({ data: [], error: null }),
@@ -360,13 +395,24 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       const orderCode = String(order.order_code);
       if (occupied.has(orderId)) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "already_in_production_run" }); continue; }
       if (!Number.isInteger(Number(order.nums)) || Number(order.nums) <= 0) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "invalid_units" }); continue; }
-      const resolutions = resolveOrderLines(order, productsByName, (assignmentsResult.data as unknown as Record<string, unknown>[]) ?? [], existingResolutions.get(orderId) ?? new Map(), pendingMenuKeys);
-      for (const resolution of resolutions) resolutionRows.push({
-        order_id: orderId, line_index: resolution.lineIndex, raw_name: resolution.rawName, normalized_name: resolution.normalizedName,
-        raw_position: resolution.rawPosition, menu_kind: resolution.menuKind, platform_product_id: resolution.productId, recipe_id: resolution.recipeId, recipe_version_id: resolution.recipeVersionId,
-        mapping_method: resolution.method, resolution_status: resolution.status, problem_code: resolution.problemCode,
-        resolved_at: resolution.status === "resolved" ? new Date().toISOString() : null,
-      });
+      const priorByLine = existingResolutions.get(orderId) ?? new Map();
+      const resolutions = resolveOrderLines(order, productsByName, (assignmentsResult.data as unknown as Record<string, unknown>[]) ?? [], priorByLine, pendingMenuKeys);
+      for (const resolution of resolutions) {
+        const prior = priorByLine.get(resolution.lineIndex);
+        const priorMatchesEvidence = prior
+          && String(prior.raw_name ?? "").trim() === resolution.rawName
+          && String(prior.normalized_name ?? "") === resolution.normalizedName
+          && (prior.raw_position == null ? null : String(prior.raw_position)) === resolution.rawPosition;
+        resolutionRows.push({
+          order_id: orderId, line_index: resolution.lineIndex, raw_name: resolution.rawName, normalized_name: resolution.normalizedName,
+          raw_position: resolution.rawPosition, menu_kind: resolution.menuKind, platform_product_id: resolution.productId, recipe_id: resolution.recipeId, recipe_version_id: resolution.recipeVersionId,
+          mapping_method: resolution.method, resolution_status: resolution.status, problem_code: resolution.problemCode,
+          resolved_at: priorMatchesEvidence && ["resolved", "ignored"].includes(String(prior?.resolution_status))
+            ? prior?.resolved_at ?? null
+            : resolution.status === "resolved" ? new Date().toISOString() : null,
+          ...(prior && !priorMatchesEvidence ? { resolution_note: null, resolved_by: null } : {}),
+        });
+      }
       const pending = resolutions.find((resolution) => resolution.status === "pending");
       if (pending) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, raw_text: pending.rawName, problem_code: pending.problemCode }); continue; }
       const activeResolutions = resolutions.filter((resolution) => resolution.status !== "ignored");
@@ -384,7 +430,9 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       const warehouse = warehouseMap.get(warehouseId);
       if (!warehouseId || !warehouse) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "missing_warehouse_assignment" }); continue; }
       if (!warehouse.sales_customer_odoo_id) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "missing_warehouse_customer", odoo_warehouse_id: warehouseId }); continue; }
-      const versionResult = await createRecipeVersion(s, recipeId, machineId, { products: productsById, defaults, productOverrides, machineOverrides, cupProductId: settings.cup_product_id as string | null });
+      const currency = String(order.currency ?? settings.currency ?? "EUR");
+      if (currency !== settings.currency) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "currency_mismatch", currency, expected_currency: settings.currency }); continue; }
+      const versionResult = await createRecipeVersion(s, recipeId, machineId, { products: productsById, defaults, productOverrides, machineOverrides, cupOdooProductId: settings.cup_odoo_product_id == null ? null : Number(settings.cup_odoo_product_id) });
       if (!versionResult.version) { for (const problem of versionResult.problems) blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, ...problem }); continue; }
       for (const row of resolutionRows) if (row.order_id === orderId && row.resolution_status !== "ignored") {
         row.recipe_id = recipeId;
@@ -392,7 +440,6 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       }
       const { data: recipe, error: recipeError } = await s.from("recipes").select("name,odoo_finished_product_id").eq("id", recipeId).single();
       if (recipeError) throw recipeError;
-      const currency = String(order.currency ?? settings.currency ?? "EUR");
       const groupKey = `${warehouseId}:${versionResult.version.id}:${currency}`;
       const current = groups.get(groupKey) ?? {
         odoo_warehouse_id: warehouseId, odoo_customer_id: warehouse.sales_customer_odoo_id, warehouse_name: warehouse.name,
@@ -503,12 +550,52 @@ export async function recordManufacturingPeriodResult(s: SupabaseClient, exportI
   if (!/^[0-9a-f-]{36}$/i.test(exportId) || !/^[0-9a-f]{64}$/i.test(hash)) throw new OdooContractError("Valid export ID and payload hash are required");
   if (typeof body.accepted !== "boolean") throw new OdooContractError("accepted must be boolean");
   if (canonicalJson(body).length > 100_000) throw new OdooContractError("Result payload is too large", 413, "payload_too_large");
+  const { data: run, error: runError } = await s.from("manufacturing_period_exports").select("payload").eq("id", exportId).maybeSingle();
+  if (runError) throw runError;
+  if (!run) throw new OdooContractError("Production run not found", 404, "not_found");
+  validateManufacturingResult(body, run.payload as Record<string, unknown> | null);
   const { data, error } = await s.rpc("record_manufacturing_export_result", { p_export_id: exportId, p_payload_sha256: hash, p_result: body });
   if (error) {
     if (["P0001", "P0002"].includes(error.code)) throw new OdooContractError(error.message, 409, error.code === "P0002" ? "hash_mismatch" : "result_conflict");
     throw error;
   }
   return presentManufacturingExport(relation(data) ?? data as Record<string, unknown>);
+}
+
+export function validateManufacturingResult(body: Record<string, unknown>, payload: Record<string, unknown> | null) {
+  if (body.accepted === false) {
+    if (typeof body.error !== "string" || !body.error.trim() || body.error.length > 5000) throw new OdooContractError("A bounded error is required for a rejected result");
+    return;
+  }
+  const expected = new Map(((payload?.warehouses as Record<string, unknown>[] | undefined) ?? []).map((warehouse) => [
+    Number(warehouse.odoo_warehouse_id),
+    Array.isArray(warehouse.recipes) ? warehouse.recipes.length : 0,
+  ]));
+  const rows = Array.isArray(body.warehouses) ? body.warehouses as Record<string, unknown>[] : [];
+  const received = new Set<number>();
+  const receivedManufacturingIds = new Set<number>();
+  const receivedSalesOrderIds = new Set<number>();
+  const receivedDeliveryIds = new Set<number>();
+  for (const row of rows) {
+    const warehouseId = Number(row.odoo_warehouse_id);
+    const manufacturingIds = Array.isArray(row.manufacturing_order_ids) ? row.manufacturing_order_ids.map(Number) : [];
+    const salesOrderId = Number(row.sales_order_id);
+    const deliveryId = Number(row.delivery_id);
+    if (!expected.has(warehouseId) || received.has(warehouseId) || manufacturingIds.length !== expected.get(warehouseId)
+      || manufacturingIds.some((id) => !Number.isInteger(id) || id <= 0)
+      || !Number.isInteger(salesOrderId) || salesOrderId <= 0
+      || !Number.isInteger(deliveryId) || deliveryId <= 0
+      || manufacturingIds.some((id) => receivedManufacturingIds.has(id))
+      || new Set(manufacturingIds).size !== manufacturingIds.length
+      || receivedSalesOrderIds.has(salesOrderId) || receivedDeliveryIds.has(deliveryId)) {
+      throw new OdooContractError("Accepted results require one valid manufacturing, sale, and delivery result per frozen warehouse");
+    }
+    received.add(warehouseId);
+    for (const id of manufacturingIds) receivedManufacturingIds.add(id);
+    receivedSalesOrderIds.add(salesOrderId);
+    receivedDeliveryIds.add(deliveryId);
+  }
+  if (received.size !== expected.size) throw new OdooContractError("Accepted result warehouses do not match the frozen payload");
 }
 
 export async function getOdooSales(s: SupabaseClient, url: URL) {

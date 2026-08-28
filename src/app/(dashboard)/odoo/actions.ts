@@ -33,18 +33,26 @@ export async function saveProductionProduct(fd: FormData): Promise<void> {
   const rawQuantity = String(fd.get("quantity") ?? "").trim();
   const uom = String(fd.get("uom") ?? "").trim() || null;
   const quantity = rawQuantity ? Number(rawQuantity) : null;
-  if (!/^[0-9a-f-]{36}$/i.test(productId) || (consumptionType && !["base", "solid_topping", "liquid_topping", "cup"].includes(consumptionType)) || (quantity !== null && (!Number.isFinite(quantity) || quantity <= 0 || !uom))) throw new Error("Invalid product consumption configuration.");
-  const { error } = await s.from("products").update({ consumption_type: consumptionType, default_portion_size: quantity, default_portion_uom: quantity === null ? null : uom }).eq("id", productId);
-  if (error) throw error;
+  if (!/^[0-9a-f-]{36}$/i.test(productId) || (consumptionType && !["base", "solid_topping", "liquid_topping"].includes(consumptionType)) || (quantity !== null && (!Number.isFinite(quantity) || quantity <= 0 || !uom))) throw new Error("Invalid product consumption configuration.");
+  const { error: productError } = await s.from("products").update({ consumption_type: consumptionType }).eq("id", productId);
+  if (productError) throw productError;
+  if (quantity === null) {
+    const { error } = await s.from("production_product_consumption_overrides").delete().eq("product_id", productId);
+    if (error) throw error;
+  } else {
+    const { error } = await s.from("production_product_consumption_overrides").upsert({ product_id: productId, quantity, uom });
+    if (error) throw error;
+  }
   revalidatePath("/odoo");
 }
 
 export async function saveProductionSettings(fd: FormData): Promise<void> {
   const s = await productionAdminClient();
-  const cupProductId = String(fd.get("cup_product_id") ?? "") || null;
+  const rawCupOdooProductId = String(fd.get("cup_odoo_product_id") ?? "").trim();
+  const cupOdooProductId = rawCupOdooProductId ? Number(rawCupOdooProductId) : null;
   const currency = String(fd.get("currency") ?? "EUR").trim().toUpperCase();
-  if (cupProductId && !/^[0-9a-f-]{36}$/i.test(cupProductId) || !/^[A-Z]{3}$/.test(currency)) throw new Error("Invalid production settings.");
-  const { error } = await s.from("production_settings").update({ cup_product_id: cupProductId, currency }).eq("singleton", true);
+  if (cupOdooProductId !== null && (!Number.isInteger(cupOdooProductId) || cupOdooProductId <= 0) || !/^[A-Z]{3}$/.test(currency)) throw new Error("Invalid production settings.");
+  const { error } = await s.from("production_settings").update({ cup_odoo_product_id: cupOdooProductId, currency }).eq("singleton", true);
   if (error) throw error;
   revalidatePath("/odoo");
 }
@@ -65,12 +73,18 @@ export async function resolveProductionLine(fd: FormData): Promise<void> {
   const resolutionId = String(fd.get("resolution_id") ?? "");
   const choice = String(fd.get("choice") ?? "");
   const productId = choice.startsWith("product:") ? choice.slice(8) : null;
+  const recipeId = choice.startsWith("recipe:") ? choice.slice(7) : null;
   const ignored = choice === "ignored";
-  if (!/^[0-9a-f-]{36}$/i.test(resolutionId) || (!ignored && !/^[0-9a-f-]{36}$/i.test(productId ?? ""))) throw new Error("Invalid resolution.");
+  const note = String(fd.get("resolution_note") ?? "").trim();
+  if (!/^[0-9a-f-]{36}$/i.test(resolutionId)
+    || (!ignored && !/^[0-9a-f-]{36}$/i.test(productId ?? "") && !/^[0-9a-f-]{36}$/i.test(recipeId ?? ""))
+    || ignored && !note) throw new Error("Invalid resolution or missing ignore reason.");
+  const actor = await getSessionProfile();
+  if (!actor || actor.role !== "admin") throw new Error("Admin access required.");
   const { error } = await s.from("order_product_resolutions").update({
-    platform_product_id: productId, recipe_id: null, recipe_version_id: null,
+    platform_product_id: productId, recipe_id: recipeId, recipe_version_id: null,
     mapping_method: ignored ? "ignored" : "manual", resolution_status: ignored ? "ignored" : "resolved",
-    problem_code: null, resolved_at: new Date().toISOString(), resolved_by: (await getSessionProfile())!.id,
+    problem_code: null, resolution_note: note || null, resolved_at: new Date().toISOString(), resolved_by: actor.id,
   }).eq("id", resolutionId).eq("resolution_status", "pending");
   if (error) throw error;
   revalidatePath("/odoo");

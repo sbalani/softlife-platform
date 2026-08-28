@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-export function SignOutButton() {
+export function SignOutButton({ title = "Sign out" }: { title?: string }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
 
@@ -18,7 +18,7 @@ export function SignOutButton() {
 
   return (
     <button
-      title="Sign out"
+      title={title}
       onClick={signOut}
       disabled={pending}
       className="text-taupe hover:text-danger disabled:opacity-50"

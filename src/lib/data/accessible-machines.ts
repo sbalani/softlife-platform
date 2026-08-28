@@ -1,5 +1,8 @@
-import { getSessionProfile } from "@/lib/auth/session";
-import { createServiceClient } from "@/lib/supabase/server";
+import { getSessionProfile } from "../auth/session.ts";
+import { createServiceClient } from "../supabase/server.ts";
+import type { MachineAccessPeriod } from "../machine-access.ts";
+
+export { filterOrdersByMachinePeriods } from "../machine-access.ts";
 
 export type AccessibleMachine = {
   id: string;
@@ -8,6 +11,17 @@ export type AccessibleMachine = {
   device_imei: string;
   is_online: boolean | null;
 };
+
+export async function getAccessibleMachinePeriods(from: string, to: string): Promise<MachineAccessPeriod[] | null> {
+  const session = await getSessionProfile();
+  if (!session || session.role === "operator" || !session.tenant_id) return [];
+  if (session.role === "admin") return null;
+  const { data, error } = await (await createServiceClient()).from("machine_franchisee_assignments")
+    .select("machine_id,start_date,end_date").eq("tenant_id", session.tenant_id)
+    .lte("start_date", to).or(`end_date.is.null,end_date.gte.${from}`);
+  if (error) throw new Error(error.message);
+  return (data as MachineAccessPeriod[]) ?? [];
+}
 
 export async function getAccessibleMachineIds(): Promise<string[] | null> {
   const session = await getSessionProfile();

@@ -4,6 +4,7 @@ import { getDisplayTimezone } from "@/lib/timezone";
 import { analyticsRange, filterAnalyticsOrders, machineSalesReport, ordersInPeriod, type AnalyticsParams, type MachineSalesCadence } from "@/lib/analytics";
 import { orderProductLabel } from "@/lib/order-products";
 import { getSessionProfile } from "@/lib/auth/session";
+import { filterOrdersByMachinePeriods, getAccessibleMachinePeriods } from "@/lib/data/accessible-machines";
 
 export const dynamic = "force-dynamic";
 
@@ -39,8 +40,10 @@ export async function GET(request: Request) {
   };
   const [timeZone, aliasMap] = await Promise.all([getDisplayTimezone(), getAliasMap()]);
   const range = analyticsRange(params, timeZone);
-  const orderResult = await getOrders({ dateFrom: range.from, dateTo: range.to, timeZone });
-  const orders = orderResult.orders;
+  const machineAccess = await getAccessibleMachinePeriods(range.from, range.to);
+  const machineIds = machineAccess === null ? undefined : [...new Set(machineAccess.map((period) => period.machine_id))];
+  const orderResult = await getOrders({ dateFrom: range.from, dateTo: range.to, timeZone, machineIds });
+  const orders = filterOrdersByMachinePeriods(orderResult.orders, machineAccess, timeZone);
   const { readError } = orderResult;
   if (readError) return new Response(`Supabase order read failed: ${readError}`, { status: 503 });
   const filtered = ordersInPeriod(filterAnalyticsOrders(orders, params, aliasMap), range.from, range.to, timeZone);

@@ -10,7 +10,7 @@ import { getSessionProfile } from "@/lib/auth/session";
 import { calculateFranchiseePayouts } from "@/lib/data/franchisee-profit";
 import { ANALYTICS_WEEKDAYS, analyticsPresetRange, analyticsRange, canonicalProductCombination, datesBetween, filterAnalyticsOrders, ordersInPeriod, salesTimeBreakdown, toppingConsumption, type AnalyticsParams, type AnalyticsPeriodPreset } from "@/lib/analytics";
 import { OrderDataNote } from "@/components/order-data-note";
-import { getAccessibleMachineIds } from "@/lib/data/accessible-machines";
+import { filterOrdersByMachinePeriods, getAccessibleMachinePeriods } from "@/lib/data/accessible-machines";
 import { HourlySalesChart } from "./HourlySalesChart";
 
 export const dynamic = "force-dynamic";
@@ -30,25 +30,25 @@ function completedSales(orders: Order[]): Order[] {
 }
 
 export default async function AnalyticsPage({ searchParams }: { searchParams: Promise<AnalyticsParams> }) {
-  const [params, tz, machineResult, aliasMap, session, machineScope] = await Promise.all([
+  const [params, tz, machineResult, aliasMap, session] = await Promise.all([
     searchParams,
     getDisplayTimezone(),
     getMachines(),
     getAliasMap(),
     getSessionProfile(),
-    getAccessibleMachineIds(),
   ]);
-  const machineIds = machineScope && new Set(machineScope);
-  const machines = machineIds ? machineResult.machines.filter((machine) => machineIds.has(machine.id)) : machineResult.machines;
   const range = analyticsRange(params, tz);
+  const machineAccess = await getAccessibleMachinePeriods(range.previousFrom, range.to);
+  const machineIds = machineAccess && new Set(machineAccess.map((period) => period.machine_id));
+  const machines = machineIds ? machineResult.machines.filter((machine) => machineIds.has(machine.id)) : machineResult.machines;
   const orderResult = await getOrders({
     dateFrom: range.previousFrom,
     dateTo: range.to,
     timeZone: tz,
-    machineIds: machineScope ?? undefined,
+    machineIds: machineAccess === null ? undefined : [...machineIds!],
   });
   const { sync, readError } = orderResult;
-  const loadedOrders = orderResult.orders;
+  const loadedOrders = filterOrdersByMachinePeriods(orderResult.orders, machineAccess, tz);
   const machineOptions = [...new Map([
     ...machines.map((machine) => [machine.id, { id: machine.id, name: machine.display_name || machine.name, imei: machine.device_imei }] as const),
     ...loadedOrders.flatMap((order) => order.machine_id ? [[order.machine_id, { id: order.machine_id, name: order.machine_name || "Historical machine", imei: order.device_imei } as const] as const] : []),

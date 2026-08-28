@@ -45,6 +45,7 @@ export default function EnglishPrivacyPage() {
             <h2 className={heading}>2. Data we process</h2>
             <div className={copy}>
               <p>We may process identification and professional data, such as your name, email address, company, role, franchise, or relationship with SoftLife.</p>
+              <p>For franchisee onboarding and payouts, we may also process tax identifiers, account-holder information, and bank account details needed to calculate and make payments.</p>
               <p>We also process account and security data, access logs, technical identifiers, device information, and data required to provide support and protect the platform.</p>
               <p>When operational features are used, we may process service, cleaning, and refill reports, notes, photographs, voice recordings, transcripts, incidents, assignments, and machine-related activity. Machine telemetry does not normally identify a person by itself, but it may be associated with an account or professional action.</p>
             </div>
@@ -53,7 +54,7 @@ export default function EnglishPrivacyPage() {
           <section className={section}>
             <h2 className={heading}>3. Purposes and legal bases</h2>
             <div className={copy}>
-              <p>We process data to create and administer accounts; authenticate users; provide the platform and its features; manage machines, inventory, incidents, and operations; answer enquiries; maintain security; prevent misuse; and retain evidence and audit trails.</p>
+              <p>We process data to create and administer accounts; authenticate users; provide the platform and its features; manage machines, inventory, incidents, operations, and franchisee payouts; answer enquiries; maintain security; prevent misuse; and retain evidence and audit trails.</p>
               <p>The applicable legal bases are the performance of a contract or steps taken before entering into a contract; compliance with legal obligations; and the legitimate interests of SoftLife and its partners in operating, protecting, and improving the service. Where required by law, we will request consent, which may be withdrawn without affecting the lawfulness of earlier processing.</p>
               <p>We do not make decisions producing legal effects based solely on automated processing. Some features may use automated or artificial-intelligence tools to transcribe, classify, or suggest information, subject to human review where appropriate.</p>
             </div>

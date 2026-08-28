@@ -19,25 +19,30 @@ export function LoginForm() {
     e.preventDefault();
     setPending(true);
     setError(null);
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setPending(false);
-    if (error) {
-      setError(error.message === "Invalid login credentials" ? "Incorrect email or password." : error.message);
-      return;
-    }
-    const next = searchParams.get("next");
-    let destination = "/dashboard";
-    if (next) {
-      try {
+    try {
+      const supabase = createClient();
+      const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+      if (authError || !data.session || !data.user) {
+        setError(authError?.code === "invalid_credentials" || authError?.message === "Invalid login credentials" ? "Incorrect email or password." : authError?.message ?? "Unable to sign in. Please try again.");
+        return;
+      }
+      const next = searchParams.get("next");
+      let destination = "/dashboard";
+      if (next) {
+        try {
         const resolved = new URL(next, location.origin);
         if (resolved.origin === location.origin) destination = `${resolved.pathname}${resolved.search}${resolved.hash}`;
-      } catch {
-        destination = "/dashboard";
+        } catch {
+          destination = "/dashboard";
+        }
       }
+      router.push(destination);
+      router.refresh();
+    } catch {
+      setError("Unable to sign in. Please try again.");
+    } finally {
+      setPending(false);
     }
-    router.push(destination);
-    router.refresh();
   };
 
   return (
@@ -65,7 +70,7 @@ export function LoginForm() {
           autoComplete="current-password"
         />
       </label>
-      {error && <p className="text-sm text-danger">{error}</p>}
+      {error && <p role="alert" aria-live="polite" className="text-sm text-danger">{error}</p>}
       <button
         type="submit"
         disabled={pending}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyticsPresetRange, analyticsRange, canonicalProductCombination, filterAnalyticsOrders, machineSalesReport, toppingConsumption } from "./analytics.ts";
+import { analyticsPresetRange, analyticsRange, canonicalProductCombination, filterAnalyticsOrders, machineSalesReport, salesTimeBreakdown, toppingConsumption } from "./analytics.ts";
 import type { Order } from "./data/orders.ts";
 
 test("analytics range creates an equal previous period", () => {
@@ -43,6 +43,35 @@ test("analytics filters resolve product aliases", () => {
   const aliases = new Map([["old vanilla", { productId: "1", productName: "Vanilla" }]]);
   assert.equal(filterAnalyticsOrders([order], { machineId: "machine-1", payType: "Card", product: "vanilla" }, aliases).length, 1);
   assert.equal(filterAnalyticsOrders([order], { machineId: "machine-2" }, aliases).length, 0);
+});
+
+test("hourly sales compare weekday occurrences with the all-days average", () => {
+  const orders = [
+    { order_time: "2026-08-03T08:00:00Z", price: 10 },
+    { order_time: "2026-08-10T08:00:00Z", price: 30 },
+    { order_time: "2026-08-04T08:00:00Z", price: 9 },
+  ] as unknown as Order[];
+  const result = salesTimeBreakdown(orders, "2026-08-03", 9, "UTC");
+
+  assert.equal(result.hourly.length, 24);
+  assert.deepEqual(result.weekdays.slice(0, 2).map((weekday) => weekday.occurrences), [2, 2]);
+  assert.equal(result.hourly[8].weekdayAverages[0], 20);
+  assert.equal(result.hourly[8].weekdayAverages[1], 4.5);
+  assert.equal(result.hourly[8].allDaysAverage, 49 / 9);
+  assert.equal(result.hourly[7].allDaysAverage, 0);
+});
+
+test("hourly sales use the configured local weekday and hour", () => {
+  const orders = [
+    { order_time: "2026-08-02T21:59:00Z", price: 99 },
+    { order_time: "2026-08-02T22:30:00Z", price: 12 },
+    { order_time: "2026-08-03T22:00:00Z", price: 99 },
+  ] as unknown as Order[];
+  const result = salesTimeBreakdown(orders, "2026-08-03", 1, "Europe/Madrid");
+
+  assert.equal(result.hourly[0].allDaysAverage, 12);
+  assert.equal(result.hourly[0].weekdayAverages[0], 12);
+  assert.equal(result.heatmap[0][0], 12);
 });
 
 test("analytics payout presets use inclusive Madrid calendar periods", () => {

@@ -18,6 +18,14 @@ export function shiftDay(value: string, days: number): string {
 
 export type AnalyticsPeriodPreset = "last-month" | "this-month" | "this-week" | "last-week" | "yesterday" | "today";
 
+export const ANALYTICS_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+
+export type HourlySalesRow = {
+  hour: number;
+  allDaysAverage: number;
+  weekdayAverages: number[];
+};
+
 export function analyticsPresetRange(preset: AnalyticsPeriodPreset, timeZone: string, now = new Date()): { from: string; to: string } {
   const today = ymd(now, timeZone);
   if (preset === "today") return { from: today, to: today };
@@ -55,6 +63,40 @@ export function analyticsRange(params: AnalyticsParams, timeZone: string) {
 
 export function datesBetween(from: string, days: number): string[] {
   return Array.from({ length: days }, (_, i) => shiftDay(from, i));
+}
+
+export function salesTimeBreakdown(orders: Pick<Order, "order_time" | "price">[], from: string, days: number, timeZone: string) {
+  const to = shiftDay(from, Math.max(days - 1, 0));
+  const weekdayOccurrences = new Array<number>(7).fill(0);
+  for (const day of datesBetween(from, days)) {
+    weekdayOccurrences[(new Date(`${day}T12:00:00Z`).getUTCDay() + 6) % 7]++;
+  }
+
+  const weekdayRevenue = new Array<number>(7).fill(0);
+  const heatmap = Array.from({ length: 7 }, () => new Array<number>(24).fill(0));
+  const formatter = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short", hour: "2-digit", hourCycle: "h23" });
+  for (const order of orders) {
+    const localDay = ymd(new Date(order.order_time), timeZone);
+    if (localDay < from || localDay > to) continue;
+    const parts = formatter.formatToParts(new Date(order.order_time));
+    const weekday = ANALYTICS_WEEKDAYS.indexOf(parts.find((part) => part.type === "weekday")?.value as typeof ANALYTICS_WEEKDAYS[number]);
+    const hour = Number(parts.find((part) => part.type === "hour")?.value);
+    if (weekday < 0 || !Number.isInteger(hour) || hour < 0 || hour > 23) continue;
+    weekdayRevenue[weekday] += order.price;
+    heatmap[weekday][hour] += order.price;
+  }
+
+  const weekdays = ANALYTICS_WEEKDAYS.map((label, index) => ({
+    label,
+    occurrences: weekdayOccurrences[index],
+    average: weekdayRevenue[index] / Math.max(weekdayOccurrences[index], 1),
+  }));
+  const hourly: HourlySalesRow[] = Array.from({ length: 24 }, (_, hour) => ({
+    hour,
+    allDaysAverage: heatmap.reduce((sum, row) => sum + row[hour], 0) / Math.max(days, 1),
+    weekdayAverages: heatmap.map((row, weekday) => row[hour] / Math.max(weekdayOccurrences[weekday], 1)),
+  }));
+  return { weekdays, hourly, heatmap };
 }
 
 export function filterAnalyticsOrders(orders: Order[], params: AnalyticsParams, aliasMap: AliasMap): Order[] {

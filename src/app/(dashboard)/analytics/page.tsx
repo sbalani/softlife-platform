@@ -8,13 +8,12 @@ import { getDisplayTimezone } from "@/lib/timezone";
 import { getAliasMap } from "@/lib/data/products";
 import { getSessionProfile } from "@/lib/auth/session";
 import { calculateFranchiseePayouts } from "@/lib/data/franchisee-profit";
-import { analyticsPresetRange, analyticsRange, canonicalProductCombination, datesBetween, filterAnalyticsOrders, ordersInPeriod, toppingConsumption, type AnalyticsParams, type AnalyticsPeriodPreset } from "@/lib/analytics";
+import { ANALYTICS_WEEKDAYS, analyticsPresetRange, analyticsRange, canonicalProductCombination, datesBetween, filterAnalyticsOrders, ordersInPeriod, salesTimeBreakdown, toppingConsumption, type AnalyticsParams, type AnalyticsPeriodPreset } from "@/lib/analytics";
 import { OrderDataNote } from "@/components/order-data-note";
 import { getAccessibleMachineIds } from "@/lib/data/accessible-machines";
+import { HourlySalesTable } from "./HourlySalesTable";
 
 export const dynamic = "force-dynamic";
-
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 function percentChange(current: number, previous: number): string {
   if (!previous) return current ? "New vs previous period" : "No change vs previous period";
@@ -28,14 +27,6 @@ function netSales(orders: Order[]): Order[] {
 
 function completedSales(orders: Order[]): Order[] {
   return orders.filter((order) => order.order_state === "COMPLETE" && !order.is_admin_override);
-}
-
-function localParts(iso: string, timeZone: string) {
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short", hour: "2-digit", hourCycle: "h23" }).formatToParts(new Date(iso));
-  return {
-    weekday: parts.find((part) => part.type === "weekday")?.value ?? "Mon",
-    hour: Number(parts.find((part) => part.type === "hour")?.value ?? 0),
-  };
 }
 
 export default async function AnalyticsPage({ searchParams }: { searchParams: Promise<AnalyticsParams> }) {
@@ -54,6 +45,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     dateFrom: range.previousFrom,
     dateTo: range.to,
     timeZone: tz,
+    machineIds: machineScope ?? undefined,
   });
   const { sync, readError } = orderResult;
   const loadedOrders = orderResult.orders;
@@ -95,18 +87,9 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     value: Number((revenueByDay.get(day) ?? 0).toFixed(2)),
   }));
 
-  const weekdayOccurrences = new Array(7).fill(0);
-  for (const day of days) weekdayOccurrences[(new Date(`${day}T12:00:00Z`).getUTCDay() + 6) % 7]++;
-  const weekdayRevenue = new Array(7).fill(0);
-  const heatmap = Array.from({ length: 7 }, () => new Array(24).fill(0));
-  for (const order of sales) {
-    const local = localParts(order.order_time, tz);
-    const weekday = WEEKDAYS.indexOf(local.weekday);
-    if (weekday < 0) continue;
-    weekdayRevenue[weekday] += order.price;
-    heatmap[weekday][local.hour] += order.price;
-  }
-  const weekdayData = WEEKDAYS.map((label, index) => ({ label, value: Number((weekdayRevenue[index] / Math.max(weekdayOccurrences[index], 1)).toFixed(2)) }));
+  const timeBreakdown = salesTimeBreakdown(sales, range.from, range.days, tz);
+  const weekdayData = timeBreakdown.weekdays.map((weekday) => ({ label: weekday.label, value: Number(weekday.average.toFixed(2)) }));
+  const heatmap = timeBreakdown.heatmap;
   const heatMax = Math.max(...heatmap.flat(), 1);
 
   const machineStats = new Map<string, { id: string; name: string; imei: string; revenue: number; units: number; orders: number; refunds: number }>();
@@ -144,7 +127,8 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   }
   const paymentRows = [...paymentStats.entries()].map(([name, values]) => ({ name, ...values })).sort((a, b) => b.revenue - a.revenue);
   const paymentOptions = [...new Set(loadedOrders.map((order) => order.pay_type).filter((value): value is string => !!value))].sort();
-  const query = new URLSearchParams(Object.entries({ dateFrom: range.from, dateTo: range.to, machineId: params.machineId, product: params.product, payType: params.payType }).filter((entry): entry is [string, string] => !!entry[1]));
+  const selectedMachineId = params.machineId ?? machineOptions.find((machine) => machine.imei === params.machine)?.id;
+  const query = new URLSearchParams(Object.entries({ dateFrom: range.from, dateTo: range.to, machineId: selectedMachineId, product: params.product, payType: params.payType }).filter((entry): entry is [string, string] => !!entry[1]));
   const reportUrl = (report?: "weekly" | "monthly") => {
     const reportQuery = new URLSearchParams(query);
     if (report) reportQuery.set("report", report);
@@ -175,7 +159,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
       <form className="mb-5 flex flex-wrap items-end gap-3 rounded-2xl border border-line bg-white p-4">
         <label><span className={label}>From</span><input type="date" name="dateFrom" defaultValue={range.from} max={range.to} className={input} /></label>
         <label><span className={label}>To</span><input type="date" name="dateTo" defaultValue={range.to} min={range.from} max={range.today} className={input} /></label>
-        <label><span className={label}>Machine</span><select name="machineId" defaultValue={params.machineId ?? ""} className={input}><option value="">All machines</option>{machineOptions.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}</select></label>
+        <label><span className={label}>Machine</span><select name="machineId" defaultValue={selectedMachineId ?? ""} className={input}><option value="">All machines</option>{machineOptions.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}</select></label>
         <label><span className={label}>Product</span><input name="product" defaultValue={params.product} placeholder="Name or alias" className={`w-40 ${input}`} /></label>
         <label><span className={label}>Payment</span><select name="payType" defaultValue={params.payType ?? ""} className={input}><option value="">All methods</option>{paymentOptions.map((option) => <option key={option}>{option}</option>)}</select></label>
         <button className="rounded-lg bg-cocoa px-4 py-2 text-sm font-bold text-white">Apply</button>
@@ -209,11 +193,13 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         <section className="rounded-2xl border border-line bg-white p-5"><h2 className="mb-1 font-display text-lg font-bold text-cocoa">Top product combinations</h2><p className="mb-3 text-xs text-taupe">Units sold after alias resolution</p><HBarChart data={productBars} color="#6fa98c" unit="×" /></section>
       </div>
 
+      <HourlySalesTable rows={timeBreakdown.hourly} weekdayOccurrences={timeBreakdown.weekdays.map((weekday) => weekday.occurrences)} timeZone={tz} />
+
       <section className="mt-6 rounded-2xl border border-line bg-white p-5"><h2 className="mb-1 font-display text-lg font-bold text-cocoa">Topping consumption</h2><p className="mb-3 text-xs text-taupe">Servings selected across standalone and combination orders, multiplied by order quantity. Base and liquid lanes are excluded, with the product catalog used as an additional check.</p>{toppingBars.length ? <HBarChart data={toppingBars} color="#d47e54" unit="×" /> : <p className="py-6 text-center text-sm text-taupe">No topping consumption matches these filters.</p>}<div className="mt-4 overflow-x-auto"><table className="w-full min-w-[480px] text-sm"><thead className="text-left text-[11px] uppercase text-taupe"><tr><th className="py-2">Topping</th><th className="text-right">Orders</th><th className="text-right">Servings</th></tr></thead><tbody className="divide-y divide-line">{toppingRows.map((row) => <tr key={row.name}><td className="py-2 font-semibold text-cocoa">{row.name}</td><td className="text-right">{row.orders}</td><td className="text-right font-bold">{row.servings}</td></tr>)}</tbody></table></div></section>
 
       <section className="mt-6 rounded-2xl border border-line bg-white p-5">
         <h2 className="font-display text-lg font-bold text-cocoa">Sales heatmap</h2><p className="mb-4 text-xs text-taupe">Revenue by local weekday and hour · {tz}</p>
-        <div className="overflow-x-auto"><div className="min-w-[820px]"><div className="grid grid-cols-[44px_repeat(24,minmax(24px,1fr))] gap-1 text-center text-[9px] text-taupe"><span />{Array.from({ length: 24 }, (_, hour) => <span key={hour}>{hour}</span>)}{heatmap.flatMap((row, weekday) => [<span key={`${weekday}-label`} className="self-center text-left font-bold">{WEEKDAYS[weekday]}</span>, ...row.map((value, hour) => <span key={`${weekday}-${hour}`} title={`${WEEKDAYS[weekday]} ${hour}:00 · €${value.toFixed(2)}`} className="h-7 rounded border border-line/40" style={{ backgroundColor: `rgba(212,126,84,${value ? 0.15 + (value / heatMax) * 0.85 : 0.03})` }} />)])}</div></div></div>
+        <div className="overflow-x-auto"><div className="min-w-[820px]"><div className="grid grid-cols-[44px_repeat(24,minmax(24px,1fr))] gap-1 text-center text-[9px] text-taupe"><span />{Array.from({ length: 24 }, (_, hour) => <span key={hour}>{hour}</span>)}{heatmap.flatMap((row, weekday) => [<span key={`${weekday}-label`} className="self-center text-left font-bold">{ANALYTICS_WEEKDAYS[weekday]}</span>, ...row.map((value, hour) => <span key={`${weekday}-${hour}`} title={`${ANALYTICS_WEEKDAYS[weekday]} ${hour}:00 · €${value.toFixed(2)}`} className="h-7 rounded border border-line/40" style={{ backgroundColor: `rgba(212,126,84,${value ? 0.15 + (value / heatMax) * 0.85 : 0.03})` }} />)])}</div></div></div>
       </section>
 
       <section className="mt-6 rounded-2xl border border-line bg-white p-5">

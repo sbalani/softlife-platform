@@ -11,7 +11,7 @@ import { calculateFranchiseePayouts } from "@/lib/data/franchisee-profit";
 import { ANALYTICS_WEEKDAYS, analyticsPresetRange, analyticsRange, canonicalProductCombination, datesBetween, filterAnalyticsOrders, ordersInPeriod, salesTimeBreakdown, toppingConsumption, type AnalyticsParams, type AnalyticsPeriodPreset } from "@/lib/analytics";
 import { OrderDataNote } from "@/components/order-data-note";
 import { getAccessibleMachineIds } from "@/lib/data/accessible-machines";
-import { HourlySalesTable } from "./HourlySalesTable";
+import { HourlySalesChart } from "./HourlySalesChart";
 
 export const dynamic = "force-dynamic";
 
@@ -193,7 +193,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         <section className="rounded-2xl border border-line bg-white p-5"><h2 className="mb-1 font-display text-lg font-bold text-cocoa">Top product combinations</h2><p className="mb-3 text-xs text-taupe">Units sold after alias resolution</p><HBarChart data={productBars} color="#6fa98c" unit="×" /></section>
       </div>
 
-      <HourlySalesTable rows={timeBreakdown.hourly} weekdayOccurrences={timeBreakdown.weekdays.map((weekday) => weekday.occurrences)} timeZone={tz} />
+      <HourlySalesChart rows={timeBreakdown.hourly} weekdayOccurrences={timeBreakdown.weekdays.map((weekday) => weekday.occurrences)} timeZone={tz} />
 
       <section className="mt-6 rounded-2xl border border-line bg-white p-5"><h2 className="mb-1 font-display text-lg font-bold text-cocoa">Topping consumption</h2><p className="mb-3 text-xs text-taupe">Servings selected across standalone and combination orders, multiplied by order quantity. Base and liquid lanes are excluded, with the product catalog used as an additional check.</p>{toppingBars.length ? <HBarChart data={toppingBars} color="#d47e54" unit="×" /> : <p className="py-6 text-center text-sm text-taupe">No topping consumption matches these filters.</p>}<div className="mt-4 overflow-x-auto"><table className="w-full min-w-[480px] text-sm"><thead className="text-left text-[11px] uppercase text-taupe"><tr><th className="py-2">Topping</th><th className="text-right">Orders</th><th className="text-right">Servings</th></tr></thead><tbody className="divide-y divide-line">{toppingRows.map((row) => <tr key={row.name}><td className="py-2 font-semibold text-cocoa">{row.name}</td><td className="text-right">{row.orders}</td><td className="text-right font-bold">{row.servings}</td></tr>)}</tbody></table></div></section>
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { filterOrdersByMachinePeriods } from "../machine-access.ts";
+import { filterOrdersByMachinePeriods, machinePeriodTenantScope } from "../machine-access.ts";
 import type { Order } from "./orders.ts";
 
 test("historical analytics include orders only inside the franchisee assignment interval", () => {
@@ -18,4 +18,10 @@ test("admins retain all orders and users with no assignments retain none", () =>
   const orders = [{ machine_id: "machine-1", order_time: "2026-08-01T10:00:00Z" }] as unknown as Order[];
   assert.equal(filterOrdersByMachinePeriods(orders, null, "UTC").length, 1);
   assert.equal(filterOrdersByMachinePeriods(orders, [], "UTC").length, 0);
+});
+
+test("admins without a tenant retain access to every machine", () => {
+  assert.equal(machinePeriodTenantScope({ role: "admin", tenant_id: null }), null);
+  assert.equal(machinePeriodTenantScope({ role: "franchisee", tenant_id: null }), undefined);
+  assert.equal(machinePeriodTenantScope({ role: "franchisee", tenant_id: "tenant-1" }), "tenant-1");
 });

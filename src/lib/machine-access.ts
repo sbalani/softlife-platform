@@ -3,6 +3,12 @@ import type { Order } from "./data/orders.ts";
 
 export type MachineAccessPeriod = { machine_id: string; start_date: string; end_date: string | null };
 
+export function machinePeriodTenantScope(session: { role: string; tenant_id: string | null } | null): string | null | undefined {
+  if (!session || session.role === "operator") return undefined;
+  if (session.role === "admin") return null;
+  return session.tenant_id ?? undefined;
+}
+
 export function filterOrdersByMachinePeriods(orders: Order[], periods: MachineAccessPeriod[] | null, timeZone: string): Order[] {
   if (periods === null) return orders;
   const byMachine = new Map<string, MachineAccessPeriod[]>();

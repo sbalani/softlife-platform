@@ -19,7 +19,7 @@ export function FranchiseeSignupForm({ locale }: { locale: Locale }) {
       <label className={label}>{es ? "Nombre completo *" : "Full name *"}<input name="full_name" required maxLength={150} autoComplete="name" className={input} /></label>
       <label className={label}>Email *<input name="email" type="email" required maxLength={254} autoComplete="email" className={input} /></label>
       <label className={label}>{es ? "Teléfono *" : "Phone number *"}<input name="phone" required maxLength={40} inputMode="tel" autoComplete="tel" placeholder="+34 600 000 000" className={input} /></label>
-      <div className="border-t border-line pt-5"><h3 className="font-bold text-cocoa">{es ? "Datos opcionales" : "Optional business and payout details"}</h3><p className="mt-1 text-xs text-taupe">{es ? "Puedes actualizarlos más tarde desde tu cuenta." : "You can update these later from your account."}</p></div>
+      <div className="border-t border-line pt-5"><h3 className="font-bold text-cocoa">{es ? "Datos opcionales" : "Optional business and payout details"}</h3><p className="mt-1 text-xs text-taupe">{es ? "Puedes actualizarlos más tarde desde tu cuenta. Serán necesarios para poder realizar pagos." : "You can update these later from your account. They will be required before payments can be made."}</p></div>
       <label className={label}>{es ? "Empresa / autónomo" : "Company / autónomo name"}<input name="company_name" maxLength={150} autoComplete="organization" className={input} /></label>
       <label className={label}>NIF / CIF<input name="tax_id" maxLength={50} className={input} /></label>
       <label className={label}>{es ? "Titular de la cuenta" : "Bank account holder"}<input name="account_holder_name" maxLength={150} className={input} /></label>

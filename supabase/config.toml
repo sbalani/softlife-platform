@@ -220,10 +220,13 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
-# Uncomment to customize email template
-# [auth.email.template.invite]
-# subject = "You have been invited"
-# content_path = "./supabase/templates/invite.html"
+[auth.email.template.invite]
+subject = "Tu acceso a SoftLife | Your SoftLife access"
+content_path = "./supabase/templates/invite.html"
+
+[auth.email.template.recovery]
+subject = "Restablece tu contraseña de SoftLife | Reset your SoftLife password"
+content_path = "./supabase/templates/recovery.html"
 
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]
@@ -386,3 +389,22 @@ s3_region = "env(S3_REGION)"
 s3_access_key = "env(S3_ACCESS_KEY)"
 # Configures AWS_SECRET_ACCESS_KEY for S3 bucket
 s3_secret_key = "env(S3_SECRET_KEY)"
+
+[remotes.production]
+project_id = "awsfqnymosevmhawbukf"
+
+[remotes.production.auth]
+site_url = "https://softlife-platform.vercel.app"
+additional_redirect_urls = ["https://softlife-platform.vercel.app/**", "http://localhost:3000/**", "https://*-sbalanis-projects.vercel.app/**"]
+
+[remotes.production.auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
+[remotes.production.auth.email]
+enable_confirmations = true
+max_frequency = "1m"
+otp_length = 8
+
+[remotes.production.storage]
+file_size_limit = "200MiB"

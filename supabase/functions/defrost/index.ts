@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { cupAnomalyReason, type StatusRow } from "./status.ts";
 
 type HuaxinConfig = {
   baseUrl: string;
@@ -11,7 +12,6 @@ type HuaxinConfig = {
 };
 
 type Envelope = { code?: number; msg?: string; data?: unknown; jsessionId?: string; result?: boolean };
-type StatusRow = { code?: string; value?: string; desc?: string; data?: string | number };
 type DefrostRun = {
   id: string;
   schedule_id: string;
@@ -29,6 +29,7 @@ type DefrostRun = {
   sales_started_at: string | null;
   sales_attempts: number;
   sales_blocked_observed: boolean;
+  failure_detail: string | null;
 };
 type Machine = { id: string; device_imei: string; name: string; display_name: string | null; deployed: boolean; tenant_id: string | null };
 type PushToken = { id: string; user_id: string; expo_push_token: string };
@@ -59,6 +60,7 @@ const COMMAND_DELAY_MS = 2_000;
 const POLL_INTERVAL_MS = 60_000;
 const CONFIRMATION_TIMEOUT_MS = 10 * 60_000;
 const HUAXIN_DEFROST_BRIDGE_URL = "https://softlife-platform.vercel.app/api/internal/huaxin-defrost";
+const CUP_RECOVERY_PREFIX = "cup_anomaly_wait:";
 
 function env(name: string) {
   const value = Deno.env.get(name);
@@ -366,6 +368,20 @@ async function recordFailure(s: SupabaseClient, run: DefrostRun, owner: string, 
   if (error) throw error;
 }
 
+async function enforceSalesDisabled(s: SupabaseClient, cfg: HuaxinConfig, run: DefrostRun, machine: Machine, step: string, attempt: number) {
+  let telemetry = await captureTelemetry(s, cfg, run, machine, `${step}_precheck`, attempt);
+  for (let confirmation = 1; confirmation <= 3; confirmation += 1) {
+    if (isSalesBlocked(telemetry.operating) || isClosed(telemetry.sales)) {
+      await confirmCommandEffect(s, run, "operate_sellout", telemetry.observedAt);
+      return telemetry;
+    }
+    await issueCommand(s, cfg, run, machine, `${step}_${confirmation}`, "operate_sellout", attempt);
+    await delay(COMMAND_DELAY_MS);
+    telemetry = await captureTelemetry(s, cfg, run, machine, `${step}_check_${confirmation}`, attempt);
+  }
+  throw new Error(`Sales-off state is unconfirmed after 3 attempts (operating=${telemetry.operating ?? "missing"}, sales=${telemetry.sales ?? "missing"})`);
+}
+
 async function safeRecovery(s: SupabaseClient, cfg: HuaxinConfig, run: DefrostRun, machine: Machine) {
   const attempt = run.recovery_attempts + 1;
   const outcomes: string[] = [];
@@ -379,7 +395,7 @@ async function safeRecovery(s: SupabaseClient, cfg: HuaxinConfig, run: DefrostRu
   try {
     const telemetry = await captureTelemetry(s, cfg, run, machine, "recovery_precheck", attempt);
     if (isCompressorOverheated(telemetry.statuses)) {
-      const blocked = isSalesBlocked(telemetry.operating) || !isOpen(telemetry.sales);
+      const blocked = isSalesBlocked(telemetry.operating) || isClosed(telemetry.sales);
       outcomes.push("compressor overheat protection active; refrigeration left off");
       if (!isClosed(telemetry.defrost)) { safe = false; outcomes.push(`defrost state is ${telemetry.defrost ?? "missing"}`); }
       if (!blocked) { safe = false; outcomes.push(`sales-disabled state is unconfirmed (${telemetry.operating ?? "missing"})`); }
@@ -394,13 +410,58 @@ async function safeRecovery(s: SupabaseClient, cfg: HuaxinConfig, run: DefrostRu
   await delay(COMMAND_DELAY_MS);
   try {
     const telemetry = await captureTelemetry(s, cfg, run, machine, "recovery", attempt);
-    const blocked = isSalesBlocked(telemetry.operating) || !isOpen(telemetry.sales);
+    const blocked = isSalesBlocked(telemetry.operating) || isClosed(telemetry.sales);
     if (!isOpen(telemetry.refrigeration)) { safe = false; outcomes.push(`refrigeration state is ${telemetry.refrigeration ?? "missing"}`); }
     else if (!isClosed(telemetry.defrost)) { safe = false; outcomes.push(`defrost state is ${telemetry.defrost ?? "missing"}`); }
     else if (!blocked) { safe = false; outcomes.push(`sales-disabled state is unconfirmed (${telemetry.operating ?? "missing"})`); }
     else outcomes.push(`refrigeration confirmed ${telemetry.refrigeration}`);
   } catch (error) { safe = false; outcomes.push(`recovery telemetry failed: ${error instanceof Error ? error.message : String(error)}`); }
   return { safe, detail: outcomes.join("; ") };
+}
+
+async function recoverAfterCupAnomaly(s: SupabaseClient, cfg: HuaxinConfig, run: DefrostRun, machine: Machine, owner: string) {
+  const attempt = run.recovery_attempts + 1;
+  let telemetry = await enforceSalesDisabled(s, cfg, run, machine, `cup_recovery_${attempt}_sales_off`, attempt);
+  const anomaly = cupAnomalyReason(telemetry.statuses);
+  if (!isClosed(telemetry.defrost)) {
+    await issueCommand(s, cfg, run, machine, `cup_recovery_${attempt}_thaw_off`, "operate_closethawing", attempt);
+    await delay(COMMAND_DELAY_MS);
+  }
+  if (!isCompressorOverheated(telemetry.statuses) && !isOpen(telemetry.refrigeration)) {
+    await issueCommand(s, cfg, run, machine, `cup_recovery_${attempt}_refrigeration_on`, "operate_openrefrigeration", attempt);
+    await delay(COMMAND_DELAY_MS);
+  }
+  if (anomaly) {
+    await recordFailure(s, run, owner, `${CUP_RECOVERY_PREFIX} ${anomaly}. Refrigeration is being maintained and sales remain disabled until it clears.`, "recovery");
+    return;
+  }
+  if (isCompressorOverheated(telemetry.statuses)) {
+    await recordFailure(s, run, owner, `${CUP_RECOVERY_PREFIX} cup anomaly cleared, but compressor overheat protection is active.`, "recovery");
+    return;
+  }
+  if (!isClosed(telemetry.defrost) || !isOpen(telemetry.refrigeration) || telemetry.formation !== 100) {
+    await recordFailure(s, run, owner, `${CUP_RECOVERY_PREFIX} cup anomaly cleared; waiting for defrost closed, refrigeration open, and formation 100% (defrost=${telemetry.defrost ?? "missing"}, refrigeration=${telemetry.refrigeration ?? "missing"}, formation=${telemetry.formation ?? "missing"}).`, "recovery");
+    return;
+  }
+  const { error: leaseError } = await s.rpc("assert_defrost_cup_recovery_lease", { p_run_id: run.id, p_owner: owner });
+  if (leaseError) throw leaseError;
+  await issueCommand(s, cfg, run, machine, `cup_recovery_${attempt}_sales_on`, "operate_onsale", attempt);
+  await delay(COMMAND_DELAY_MS);
+  telemetry = await captureTelemetry(s, cfg, run, machine, "cup_recovery_sales_check", attempt);
+  const renewedAnomaly = cupAnomalyReason(telemetry.statuses);
+  if (renewedAnomaly || !isClosed(telemetry.defrost) || !isOpen(telemetry.refrigeration) || !isSalesReady(telemetry.operating) || !isOpen(telemetry.sales)) {
+    await enforceSalesDisabled(s, cfg, run, machine, `cup_recovery_${attempt}_rollback_sales_off`, attempt);
+    await recordFailure(s, run, owner, `${CUP_RECOVERY_PREFIX} sales resumption is not yet confirmed (cup=${renewedAnomaly ?? "clear"}, defrost=${telemetry.defrost ?? "missing"}, refrigeration=${telemetry.refrigeration ?? "missing"}, operating=${telemetry.operating ?? "missing"}, sales=${telemetry.sales ?? "missing"}).`, "recovery");
+    return;
+  }
+  await confirmCommandEffect(s, run, "operate_onsale", telemetry.observedAt);
+  const { error } = await s.rpc("complete_defrost_cup_recovery", {
+    p_run_id: run.id,
+    p_owner: owner,
+    p_observed_at: telemetry.observedAt,
+    p_final_sales_value: `${telemetry.operating} / ${telemetry.sales}`,
+  });
+  if (error) throw error;
 }
 
 async function processRun(s: SupabaseClient, cfg: HuaxinConfig, run: DefrostRun, owner: string) {
@@ -417,6 +478,10 @@ async function processRun(s: SupabaseClient, cfg: HuaxinConfig, run: DefrostRun,
   }
   try {
     if (run.state === "recovery") {
+      if (run.failure_detail?.startsWith(CUP_RECOVERY_PREFIX)) {
+        await recoverAfterCupAnomaly(s, cfg, run, typedMachine, owner);
+        return;
+      }
       const recovery = await safeRecovery(s, cfg, run, typedMachine);
       await recordFailure(s, run, owner, `Automated safe-state recovery: ${recovery.detail}`, recovery.safe ? "manual_intervention" : "recovery");
       return;
@@ -424,11 +489,14 @@ async function processRun(s: SupabaseClient, cfg: HuaxinConfig, run: DefrostRun,
     if (run.state === "scheduled") {
       const telemetry = await captureTelemetry(s, cfg, run, typedMachine, "precheck", 0);
       if (normalizedStatus(statusValue(telemetry.statuses, "status_0_online_status")) !== "online") throw new Error("Machine is not online at defrost precheck");
+      const cupAnomaly = cupAnomalyReason(telemetry.statuses);
       const skipReason = isCompressorOverheated(telemetry.statuses)
         ? "Skipped: compressor overheat protection is active."
         : isLowStock(telemetry.statuses)
           ? "Skipped: machine is in low-stock mode."
-          : null;
+          : cupAnomaly
+            ? `Skipped: ${cupAnomaly}.`
+            : null;
       if (skipReason) {
         const completedAt = new Date().toISOString();
         await transitionRun(s, run, owner, "skipped", "precheck_skipped", { completed_at: completedAt, outcome: "skipped", failure_detail: skipReason, last_status_observed_at: telemetry.observedAt });
@@ -489,6 +557,12 @@ async function processRun(s: SupabaseClient, cfg: HuaxinConfig, run: DefrostRun,
       const observedAt = telemetry.observedAt;
       const resetObserved = run.formation_reset_observed || pct !== null && pct < 100;
       const salesBlockedObserved = run.sales_blocked_observed || isSalesBlocked(telemetry.operating) || !isOpen(telemetry.sales);
+      const cupAnomaly = cupAnomalyReason(telemetry.statuses);
+      if (cupAnomaly) {
+        await enforceSalesDisabled(s, cfg, run, typedMachine, `cup_anomaly_formation_${poll}_sales_off`, poll);
+        await recordFailure(s, run, owner, `${CUP_RECOVERY_PREFIX} ${cupAnomaly}. Refrigeration is on and sales remain disabled until it clears.`, "recovery");
+        return;
+      }
       if (pct === 100 && resetObserved) {
         await issueCommand(s, cfg, run, typedMachine, "sales_on_1", "operate_onsale", 1);
         await transitionRun(s, run, owner, "sales_check", "sales_requested", { sales_started_at: observedAt, sales_attempts: 1, sales_blocked_observed: salesBlockedObserved, formation_poll_count: poll, last_formation_pct: pct, last_status_observed_at: observedAt, next_action_at: new Date(Date.now() + POLL_INTERVAL_MS).toISOString() });
@@ -502,6 +576,12 @@ async function processRun(s: SupabaseClient, cfg: HuaxinConfig, run: DefrostRun,
     if (run.state === "sales_check") {
       const poll = Math.max(run.sales_attempts, 1);
       const telemetry = await captureTelemetry(s, cfg, run, typedMachine, "sales_check", poll);
+      const cupAnomaly = cupAnomalyReason(telemetry.statuses);
+      if (cupAnomaly) {
+        await enforceSalesDisabled(s, cfg, run, typedMachine, `cup_anomaly_sales_check_${poll}_sales_off`, poll);
+        await recordFailure(s, run, owner, `${CUP_RECOVERY_PREFIX} ${cupAnomaly}. Refrigeration is on and sales remain disabled until it clears.`, "recovery");
+        return;
+      }
       if (run.sales_blocked_observed && isSalesReady(telemetry.operating) && isOpen(telemetry.sales)) {
         await confirmCommandEffect(s, run, "operate_onsale", telemetry.observedAt);
         await transitionRun(s, run, owner, "completed", "cycle_completed", { completed_at: telemetry.observedAt, outcome: "completed", final_sales_value: `${telemetry.operating} / ${telemetry.sales}`, failure_detail: null });
@@ -515,6 +595,11 @@ async function processRun(s: SupabaseClient, cfg: HuaxinConfig, run: DefrostRun,
     }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
+    if (run.state === "recovery" && run.failure_detail?.startsWith(CUP_RECOVERY_PREFIX)) {
+      const recovery = await safeRecovery(s, cfg, run, typedMachine);
+      await recordFailure(s, run, owner, `${CUP_RECOVERY_PREFIX} recovery attempt failed: ${detail}. Safe state: ${recovery.detail}`, "recovery");
+      return;
+    }
     if (run.state === "scheduled") {
       const { count, error: attemptsError } = await s.from("machine_command_attempts").select("id", { count: "exact", head: true }).eq("run_id", run.id);
       if (attemptsError) throw attemptsError;

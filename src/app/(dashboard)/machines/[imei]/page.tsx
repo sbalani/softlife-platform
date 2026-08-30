@@ -38,6 +38,7 @@ import { getSessionProfile } from "@/lib/auth/session";
 import { getIncidents } from "@/lib/data/incidents";
 import { refillAge } from "@/lib/refill-aging";
 import { createRefillIncident } from "@/app/actions/incidents";
+import { defrostStatusValue, isHuaxinClosed, isHuaxinOpen } from "@/lib/defrost-status";
 
 export const dynamic = "force-dynamic";
 
@@ -142,6 +143,13 @@ export default async function MachineDetailPage({
   });
   const completedSales = (telemetry?.orders ?? []).filter((order) => order.order_state === "COMPLETE" && !order.is_admin_override);
   const salesRevenue = completedSales.reduce((sum, order) => sum + order.price, 0);
+  const refrigerationValue = defrostStatusValue(status, "status_0_ac");
+  const physicalDefrostValue = defrostStatusValue(status, "status_0_thaw");
+  const refrigerationOn = isHuaxinOpen(refrigerationValue);
+  const refrigerationOff = isHuaxinClosed(refrigerationValue);
+  const physicalDefrostOn = isHuaxinOpen(physicalDefrostValue);
+  const physicalDefrostOff = isHuaxinClosed(physicalDefrostValue);
+  const activeDefrostRun = config?.defrostRuns.find((run) => ["scheduled", "thawing", "thaw_closed", "refrigeration_check", "forming", "sales_check", "recovery"].includes(run.state));
 
   return (
     <div>
@@ -169,6 +177,26 @@ export default async function MachineDetailPage({
       <p className="-mt-6 mb-6 text-xs text-taupe">
         Supabase snapshot · Machine data synced {telemetry?.machine_synced_at ? formatDateTime(telemetry.machine_synced_at, tz) : "never"}
       </p>
+
+      <section className="mb-6 grid gap-3 sm:grid-cols-2" aria-label="Refrigeration and physical defrost status">
+        <div className={`rounded-xl border p-4 ${refrigerationOn ? "border-sage/40 bg-sage/10" : refrigerationOff ? "border-danger/40 bg-danger/10" : "border-warning/40 bg-warning/10"}`}>
+          <p className={`text-[10px] font-bold uppercase tracking-wide ${refrigerationOn ? "text-sage" : refrigerationOff ? "text-danger" : "text-warning"}`}>Refrigeration</p>
+          <p className={`mt-1 font-display text-xl font-bold ${refrigerationOn ? "text-sage" : refrigerationOff ? "text-danger" : "text-warning"}`}>{refrigerationOn ? "ON" : refrigerationOff ? "OFF" : "UNKNOWN"}</p>
+          <p className="mt-1 text-xs text-taupe">Physical switch · Huaxin: {refrigerationValue ?? "not reported"}</p>
+        </div>
+        <div className={`rounded-xl border p-4 ${physicalDefrostOff ? "border-sage/40 bg-sage/10" : physicalDefrostOn ? "border-danger/40 bg-danger/10" : "border-warning/40 bg-warning/10"}`}>
+          <p className={`text-[10px] font-bold uppercase tracking-wide ${physicalDefrostOff ? "text-sage" : physicalDefrostOn ? "text-danger" : "text-warning"}`}>Physical defrost</p>
+          <p className={`mt-1 font-display text-xl font-bold ${physicalDefrostOff ? "text-sage" : physicalDefrostOn ? "text-danger" : "text-warning"}`}>{physicalDefrostOff ? "OFF" : physicalDefrostOn ? "ON" : "UNKNOWN"}</p>
+          <p className="mt-1 text-xs text-taupe">Physical switch · Huaxin: {physicalDefrostValue ?? "not reported"}</p>
+        </div>
+      </section>
+
+      {activeDefrostRun?.state === "recovery" && (
+        <section className="mb-6 rounded-xl border border-danger/40 bg-danger/10 p-4" aria-label="Automatic cup recovery status">
+          <p className="text-sm font-bold text-danger">Waiting for the cup anomaly to clear</p>
+          <p className="mt-1 text-xs text-cocoa">This is an automatic safety recovery, not physical defrost. Refrigeration is maintained and sales remain blocked until the cup signal clears, physical defrost is off, refrigeration is on, and formation returns to 100%. The intervention lock cannot be cleared while these checks are active.</p>
+        </section>
+      )}
 
       <section className="mb-6 grid gap-3 sm:grid-cols-2">
         <div className={`rounded-xl border p-4 ${refill.state === "overdue" ? "border-danger/30 bg-danger/5" : refill.state === "due" ? "border-warning/30 bg-warning/5" : "border-sage/25 bg-sage/5"}`}><p className="text-[10px] font-bold uppercase tracking-wide text-taupe">Last refill</p><p className={`mt-1 font-display text-lg font-bold ${refill.state === "overdue" ? "text-danger" : refill.state === "due" ? "text-warning" : "text-cocoa"}`}>{machineRow?.last_refill_at ? formatDateTime(machineRow.last_refill_at, tz) : "Never recorded"}</p>{refill.days !== null && <p className="text-xs text-taupe">{refill.days} day{refill.days === 1 ? "" : "s"} ago</p>}{config?.machineId && (refill.state === "due" || refill.state === "overdue") && !machineRow?.open_refill_incident && <form action={createRefillIncident} className="mt-2"><input type="hidden" name="machine_id" value={config.machineId} /><button className="text-xs font-bold text-terracotta hover:underline">Create refill incident</button></form>}</div>

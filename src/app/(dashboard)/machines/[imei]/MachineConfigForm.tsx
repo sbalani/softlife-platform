@@ -9,6 +9,7 @@ import { ClearDefrostInterventionButton } from "./ClearDefrostInterventionButton
 export function MachineConfigForm({ config, imei, today, lastCleanDate }: { config: MachineConfig; imei: string; today: string; lastCleanDate: string }) {
   const [profile, setProfile] = useState(config.profile ?? "");
   const [res, action, pending] = useActionState<SaveResult | null, FormData>(saveMachineConfig, null);
+  const activeDefrostState = config.defrostRuns.find((run) => ["scheduled", "thawing", "thaw_closed", "refrigeration_check", "forming", "sales_check", "recovery"].includes(run.state))?.state ?? null;
 
   const selectClass =
     "rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa focus:border-terracotta focus:outline-none";
@@ -83,8 +84,7 @@ export function MachineConfigForm({ config, imei, today, lastCleanDate }: { conf
             <label><span className={labelClass}>Defrost minutes</span><input type="number" name="defrost_minutes" min="1" max="30" step="1" defaultValue={config.defrostSchedule?.defrostMinutes ?? 4} className={`w-24 ${selectClass}`} /></label>
             <p className="max-w-xl pb-2 text-xs text-taupe">Europe/Madrid time. Sales and refrigeration are disabled before defrost. Afterward, refrigeration must report Abrir/Open, formation must freshly reach 100%, and sales must report Abrir/Open. Failures require intervention.</p>
           </div>
-          {config.latestDefrostRun && <p className={`mt-3 text-xs font-semibold ${config.latestDefrostRun.state === "failed" || config.latestDefrostRun.state === "manual_intervention" ? "text-danger" : "text-taupe"}`}>Latest run: {config.latestDefrostRun.state.replaceAll("_", " ")}{config.latestDefrostRun.lastFormationPct != null ? ` · Formation ${config.latestDefrostRun.lastFormationPct}%` : ""}{config.latestDefrostRun.failureDetail ? ` · ${config.latestDefrostRun.failureDetail}` : ""}</p>}
-          {config.defrostSchedule?.requiresIntervention && config.machineId && <ClearDefrostInterventionButton machineId={config.machineId} imei={imei} />}
+          {config.defrostSchedule?.requiresIntervention && config.machineId && <ClearDefrostInterventionButton machineId={config.machineId} imei={imei} activeState={activeDefrostState} />}
         </fieldset>
       </div>
 

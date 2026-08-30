@@ -14,7 +14,7 @@ const STATE_LABELS: Record<string, string> = {
   refrigeration_check: "Confirming refrigeration",
   forming: "Re-forming ice cream",
   sales_check: "Confirming sales",
-  recovery: "Safe recovery",
+  recovery: "Cup anomaly recovery",
   completed: "Completed",
   skipped: "Skipped",
   failed: "Failed",
@@ -52,7 +52,15 @@ export function DefrostRunPanel({ machineId, machineName, imei, deployed, durati
     });
   }
 
-  const blockedReason = !deployed ? "Deploy this machine first." : requiresIntervention ? "Clear the intervention latch first." : active ? "A cycle is already active." : null;
+  const blockedReason = !deployed
+    ? "Deploy this machine first."
+    : active?.state === "recovery"
+      ? "Waiting for the cup anomaly to clear; physical defrost is not running."
+      : active
+        ? "An automated cycle is already active."
+        : requiresIntervention
+          ? "Inspect the machine and clear the intervention lock first."
+          : null;
   return (
     <section className="mt-5 rounded-xl border border-line bg-cream/35 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -70,6 +78,7 @@ export function DefrostRunPanel({ machineId, machineName, imei, deployed, durati
         <div className={`mt-4 rounded-lg border px-3 py-3 ${active.state === "recovery" ? "border-danger/40 bg-danger/10" : "border-terracotta/30 bg-white"}`}>
           <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-bold text-cocoa">{STATE_LABELS[active.state] ?? active.state}</span><span className="text-[10px] uppercase tracking-wide text-taupe">{active.triggerKind} cycle</span></div>
           <div className="mt-1 text-xs text-taupe">Started {new Date(active.startedAt ?? active.scheduledFor).toLocaleString("en-GB")}{active.lastFormationPct != null ? ` · Formation ${active.lastFormationPct}%` : ""}{active.refrigerationAttempts > 1 ? ` · Fridge attempts ${active.refrigerationAttempts}` : ""}{active.salesAttempts > 1 ? ` · Sales attempts ${active.salesAttempts}` : ""}</div>
+          {active.state === "recovery" && <div className="mt-1 text-xs font-semibold text-danger">Sales remain safely blocked while the workflow waits for the cup signal and verifies normal machine state.</div>}
           {active.failureDetail && <div className="mt-1 text-xs font-semibold text-danger">{active.failureDetail}</div>}
         </div>
       )}

@@ -9,7 +9,7 @@ import { syncMachineMedia } from "@/lib/data/machine-media";
 import { syncCouponSnapshots } from "@/lib/data/coupons";
 import { sendPendingAlertNotifications } from "@/lib/data/alert-notifications";
 
-export type SyncResult = { ok: boolean; synced?: number; error?: string; warning?: string };
+export type SyncResult = { ok: boolean; synced?: number; error?: string; warning?: string; recoveryQueued?: boolean };
 
 /** Refresh fleet metadata and detailed status snapshots (no menus/orders/temps). */
 export async function syncMachineStatuses(): Promise<SyncResult> {
@@ -62,6 +62,7 @@ export async function syncOneMachine(imei: string): Promise<SyncResult> {
     const s = await createServiceClient();
     const actor = await getSessionProfile();
     let warning: string | undefined;
+    let recoveryQueued = false;
     const { error: machineError } = await s.from("machines").upsert({
       device_imei: imei,
       device_id_huaxin: d.deviceId ?? null,
@@ -75,6 +76,15 @@ export async function syncOneMachine(imei: string): Promise<SyncResult> {
     const { data: machine } = await s.from("machines").select("id,name").eq("device_imei", imei).maybeSingle();
     if (machine?.id) {
       await recordMachineStatuses(s, { id: machine.id, device_imei: imei, name: machine.name as string | null }, await getDeviceStatus(cfg, imei));
+      const now = new Date().toISOString();
+      const { data: wokenRuns, error: wakeError } = await s.from("machine_defrost_runs")
+        .update({ next_action_at: now })
+        .eq("machine_id", machine.id)
+        .eq("state", "recovery")
+        .or(`lease_until.is.null,lease_until.lt.${now}`)
+        .select("id");
+      if (wakeError) throw wakeError;
+      recoveryQueued = Boolean(wokenRuns?.length);
       await syncProductsToIngredients(s, cfg, imei, machine.id, machine.name as string | null, actor);
       try { await syncMachineMedia(s, cfg, imei); } catch (error) { console.error(`[machine-sync] Media snapshot failed for ${imei}:`, error); }
       const couponSync = await syncCouponSnapshots(s, cfg, [imei]);
@@ -85,7 +95,7 @@ export async function syncOneMachine(imei: string): Promise<SyncResult> {
     revalidatePath(`/machines/${imei}`);
     revalidatePath("/machines");
     try { await sendPendingAlertNotifications(s); } catch (error) { console.error("[machine-sync] Alert push failed:", error); }
-    return { ok: true, synced: 1, warning };
+    return { ok: true, synced: 1, warning, recoveryQueued };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

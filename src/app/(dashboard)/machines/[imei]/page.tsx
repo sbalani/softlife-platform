@@ -39,6 +39,7 @@ import { getIncidents } from "@/lib/data/incidents";
 import { refillAge } from "@/lib/refill-aging";
 import { createRefillIncident } from "@/app/actions/incidents";
 import { defrostStatusValue, isHuaxinClosed, isHuaxinOpen } from "@/lib/defrost-status";
+import { getAlerts } from "@/lib/data/alerts";
 
 export const dynamic = "force-dynamic";
 
@@ -78,7 +79,7 @@ export default async function MachineDetailPage({
   const media = telemetry?.media ?? [];
   const baseProduct = config?.baseProductId ? ingredients.find((p) => p.id === config.baseProductId) ?? null : null;
   const otherMachines = allMachines.filter((m) => m.device_imei !== imei).map((m) => ({ id: m.id, name: m.name }));
-  const [pendingDraft, franchiseeAssignments, lotHistory, refillHistory, cleanHistory, machineIncidents] = config?.machineId
+  const [pendingDraft, franchiseeAssignments, lotHistory, refillHistory, cleanHistory, machineIncidents, machineAlertResult] = config?.machineId
     ? await Promise.all([
       getPendingMenuDraft(config.machineId),
       getFranchiseeAssignments(config.machineId),
@@ -86,8 +87,10 @@ export default async function MachineDetailPage({
       getRefillHistory([config.machineId]),
       getMachineCleanHistory(config.machineId),
       getIncidents(session, { machineIds: [config.machineId], status: "open" }),
+      getAlerts(false, [config.machineId]),
     ])
-    : [null, [], [], [], [], []];
+    : [null, [], [], [], [], [], { alerts: [] }];
+  const machineAlerts = machineAlertResult.alerts;
   const draftByMenuKey = new Map((pendingDraft?.items ?? []).filter((item) => item.menuKind).map((item) => [`${item.menuKind}:${item.position}`, item]));
   const legacyDraftByPosition = new Map((pendingDraft?.items ?? []).filter((item) => !item.menuKind).map((item) => [item.position, item]));
   const draftItem = (menuKind: "diy" | "unify", position: string) => draftByMenuKey.get(`${menuKind}:${position}`) ?? legacyDraftByPosition.get(position) ?? null;
@@ -150,6 +153,7 @@ export default async function MachineDetailPage({
   const physicalDefrostOn = isHuaxinOpen(physicalDefrostValue);
   const physicalDefrostOff = isHuaxinClosed(physicalDefrostValue);
   const activeDefrostRun = config?.defrostRuns.find((run) => ["scheduled", "thawing", "thaw_closed", "refrigeration_check", "forming", "sales_check", "recovery"].includes(run.state));
+  const cupRecoveryActive = activeDefrostRun?.state === "recovery" && activeDefrostRun.failureDetail?.startsWith("cup_anomaly_wait:");
 
   return (
     <div>
@@ -170,7 +174,7 @@ export default async function MachineDetailPage({
             </span>
             {!online && <p className="mt-1 text-[11px] text-taupe">{telemetry?.offline_since ? `Offline since ${formatDateTime(telemetry.offline_since, tz)}` : "Offline time unknown"}{telemetry?.last_online_at ? ` · Last online ${formatDateTime(telemetry.last_online_at, tz)}` : ""}</p>}
           </div>
-          <MachineSyncButton imei={imei} />
+          {!cupRecoveryActive && <MachineSyncButton imei={imei} />}
         </div>
       </header>
 
@@ -191,10 +195,21 @@ export default async function MachineDetailPage({
         </div>
       </section>
 
-      {activeDefrostRun?.state === "recovery" && (
-        <section className="mb-6 rounded-xl border border-danger/40 bg-danger/10 p-4" aria-label="Automatic cup recovery status">
-          <p className="text-sm font-bold text-danger">Waiting for the cup anomaly to clear</p>
-          <p className="mt-1 text-xs text-cocoa">This is an automatic safety recovery, not physical defrost. Refrigeration is maintained and sales remain blocked until the cup signal clears, physical defrost is off, refrigeration is on, and formation returns to 100%. The intervention lock cannot be cleared while these checks are active.</p>
+      {(cupRecoveryActive || machineAlerts.length > 0) && (
+        <section className="mb-6 rounded-2xl border border-danger/40 bg-white p-5" aria-label="Machine recovery center">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="max-w-2xl">
+              <h2 className="font-display text-lg font-bold text-cocoa">Recovery center</h2>
+              {cupRecoveryActive ? (
+                <><p className="mt-1 text-sm font-bold text-danger">Automatic recovery is waiting to confirm the repair</p><p className="mt-1 text-xs text-cocoa">Fix the physical cup issue, then use the button here. It checks fresh telemetry, clears recovered hardware alerts automatically, and asks the safety worker to restore and verify sales. You do not need to visit the Alerts page or clear the defrost lock separately.</p></>
+              ) : <p className="mt-1 text-xs text-cocoa">Check the physical issue, then sync this machine. Recovered telemetry alerts clear automatically.</p>}
+            </div>
+            <MachineSyncButton imei={imei} recovery={cupRecoveryActive} />
+          </div>
+          <div className="mt-4 border-t border-line pt-3">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-taupe">Current blockers</p>
+            {machineAlerts.filter((alert) => alert.type !== "defrost_automation_failed").length > 0 ? <div className="mt-2 space-y-2">{machineAlerts.filter((alert) => alert.type !== "defrost_automation_failed").map((alert) => <div key={alert.id} className={`rounded-lg border px-3 py-2 ${alert.severity === "critical" ? "border-danger/30 bg-danger/5" : "border-warning/30 bg-warning/5"}`}><p className="text-xs font-bold text-cocoa">{alert.title}</p><p className="mt-0.5 text-xs text-taupe">{alert.message}</p></div>)}</div> : <p className="mt-1 text-xs font-semibold text-sage">No active cup or hardware alert remains. The safety worker only needs to confirm sales and close the recovery lock.</p>}
+          </div>
         </section>
       )}
 

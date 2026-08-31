@@ -3,12 +3,40 @@
 import { revalidatePath } from "next/cache";
 import { getSessionProfile } from "@/lib/auth/session";
 import { createServiceClient } from "@/lib/supabase/server";
+import { canAccessMachine } from "@/lib/data/service-access";
 
 export type AlertRuleResult = { ok: boolean; error?: string };
 
 const NUMERIC_FIELDS = new Set(["price", "marketPrice", "stock", "temperature"]);
 const STATUS_FIELDS = new Set(["cup_empty", "material_empty", "device_online", "cup_foreign_object", "ordering_system_fault", "cup_blocked", "cup_take_fault", "mixture_ratio_fault"]);
 const PRODUCT_FIELDS = new Set(["price", "marketPrice", "stock"]);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export async function dismissAlert(alertId: string): Promise<AlertRuleResult> {
+  if (!UUID.test(alertId)) return { ok: false, error: "Invalid alert." };
+  const actor = await getSessionProfile();
+  if (!actor || !["admin", "franchisee"].includes(actor.role)) return { ok: false, error: "Access denied." };
+  const s = await createServiceClient();
+  const { data: alert, error: alertError } = await s.from("alerts").select("id,machine_id,resolved_at").eq("id", alertId).maybeSingle();
+  if (alertError) return { ok: false, error: alertError.message };
+  if (!alert) return { ok: false, error: "Alert not found." };
+  if (alert.machine_id) {
+    if (!await canAccessMachine(s, actor, alert.machine_id, new Date().toISOString())) return { ok: false, error: "Access denied." };
+  } else if (actor.role !== "admin") return { ok: false, error: "Access denied." };
+  if (alert.resolved_at) return { ok: true };
+
+  const now = new Date().toISOString();
+  const { data: dismissed, error } = await s.from("alerts").update({ resolved_at: now, resolved_by: actor.id }).eq("id", alertId).is("resolved_at", null).select("id").maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!dismissed) return { ok: true };
+  revalidatePath("/alerts");
+  revalidatePath("/dashboard");
+  if (alert.machine_id) {
+    const { data: machine } = await s.from("machines").select("device_imei").eq("id", alert.machine_id).maybeSingle();
+    if (machine?.device_imei) revalidatePath(`/machines/${machine.device_imei}`);
+  }
+  return { ok: true };
+}
 
 export async function saveAlertRule(_previous: AlertRuleResult | null, formData: FormData): Promise<AlertRuleResult> {
   const session = await getSessionProfile();

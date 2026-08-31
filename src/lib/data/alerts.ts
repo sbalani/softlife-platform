@@ -15,13 +15,14 @@ export type Alert = {
   change_field: string | null;
   entity_key: string | null;
   resolved_at: string | null;
+  resolved_by: string | null;
   incident_id: string | null;
   incident_status: "open" | "in_progress" | "resolved" | "closed" | null;
 };
 
 const SAMPLE: Alert[] = [
-  { id: "a1", type: "machine_refill", severity: "warning", machine_name: "B84MAX-001", product_name: null, title: "Material running low", message: "Base product is at 28%. Schedule a refill.", remaining_pct: 28, created_at: "2026-07-01T08:00:00Z", change_log_id: null, device_imei: null, change_field: null, entity_key: null, resolved_at: null, incident_id: null, incident_status: null },
-  { id: "a2", type: "warehouse_restock", severity: "critical", machine_name: null, product_name: null, title: "Warehouse stock low", message: "Consigned stock is at 22%. Schedule a restock.", remaining_pct: 22, created_at: "2026-07-01T07:30:00Z", change_log_id: null, device_imei: null, change_field: null, entity_key: null, resolved_at: null, incident_id: null, incident_status: null },
+  { id: "a1", type: "machine_refill", severity: "warning", machine_name: "B84MAX-001", product_name: null, title: "Material running low", message: "Base product is at 28%. Schedule a refill.", remaining_pct: 28, created_at: "2026-07-01T08:00:00Z", change_log_id: null, device_imei: null, change_field: null, entity_key: null, resolved_at: null, resolved_by: null, incident_id: null, incident_status: null },
+  { id: "a2", type: "warehouse_restock", severity: "critical", machine_name: null, product_name: null, title: "Warehouse stock low", message: "Consigned stock is at 22%. Schedule a restock.", remaining_pct: 22, created_at: "2026-07-01T07:30:00Z", change_log_id: null, device_imei: null, change_field: null, entity_key: null, resolved_at: null, resolved_by: null, incident_id: null, incident_status: null },
 ];
 
 export async function getAlerts(resolved = false, machineIds?: string[]): Promise<{ alerts: Alert[]; source: "supabase" | "sample" }> {

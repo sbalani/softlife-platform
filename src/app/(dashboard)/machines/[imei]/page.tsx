@@ -40,6 +40,7 @@ import { refillAge } from "@/lib/refill-aging";
 import { createRefillIncident } from "@/app/actions/incidents";
 import { defrostStatusValue, isHuaxinClosed, isHuaxinOpen } from "@/lib/defrost-status";
 import { getAlerts } from "@/lib/data/alerts";
+import { DismissAlertButton } from "@/components/DismissAlertButton";
 
 export const dynamic = "force-dynamic";
 
@@ -208,7 +209,7 @@ export default async function MachineDetailPage({
           </div>
           <div className="mt-4 border-t border-line pt-3">
             <p className="text-[10px] font-bold uppercase tracking-wide text-taupe">Current blockers</p>
-            {machineAlerts.filter((alert) => alert.type !== "defrost_automation_failed").length > 0 ? <div className="mt-2 space-y-2">{machineAlerts.filter((alert) => alert.type !== "defrost_automation_failed").map((alert) => <div key={alert.id} className={`rounded-lg border px-3 py-2 ${alert.severity === "critical" ? "border-danger/30 bg-danger/5" : "border-warning/30 bg-warning/5"}`}><p className="text-xs font-bold text-cocoa">{alert.title}</p><p className="mt-0.5 text-xs text-taupe">{alert.message}</p></div>)}</div> : <p className="mt-1 text-xs font-semibold text-sage">No active cup or hardware alert remains. The safety worker only needs to confirm sales and close the recovery lock.</p>}
+            {machineAlerts.filter((alert) => alert.type !== "defrost_automation_failed").length > 0 ? <div className="mt-2 space-y-2">{machineAlerts.filter((alert) => alert.type !== "defrost_automation_failed").map((alert) => <div key={alert.id} className={`rounded-lg border px-3 py-2 ${alert.severity === "critical" ? "border-danger/30 bg-danger/5" : "border-warning/30 bg-warning/5"}`}><p className="text-xs font-bold text-cocoa">{alert.title}</p><p className="mt-0.5 text-xs text-taupe">{alert.message}</p><div className="mt-2"><DismissAlertButton alertId={alert.id} /></div></div>)}</div> : <p className="mt-1 text-xs font-semibold text-taupe">No unresolved hardware alert is listed. Check the live status above; safety recovery continues to use telemetry even when an alert is dismissed.</p>}
           </div>
         </section>
       )}

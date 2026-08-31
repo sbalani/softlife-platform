@@ -8,6 +8,7 @@ import { getProducts } from "@/lib/data/products";
 import { AlertRuleManager } from "./AlertRuleManager";
 import { getAccessibleMachineIds } from "@/lib/data/accessible-machines";
 import { getSessionProfile } from "@/lib/auth/session";
+import { DismissAlertButton } from "@/components/DismissAlertButton";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,7 @@ export default async function AlertsPage() {
       {isAdmin && <AlertRuleManager rules={rules} machines={machines} products={products.map(({ id, name }) => ({ id, name }))} />}
 
       <h2 className="mb-3 font-display text-xl font-bold text-cocoa">Active alerts</h2>
-      <p className="mb-4 rounded-xl border border-sage/25 bg-sage/5 px-4 py-3 text-xs text-cocoa">Machine alerts resolve automatically after a new sync confirms the condition has cleared. If an alert remains here, the latest telemetry still reports it as active.</p>
+      <p className="mb-4 rounded-xl border border-sage/25 bg-sage/5 px-4 py-3 text-xs text-cocoa">Machine alerts resolve automatically after a new sync confirms recovery. You can also dismiss an alert after reviewing it; if telemetry still reports the condition, a future check can create a new alert.</p>
       <div className="space-y-3">
         {alerts.map((a) => {
           const sev = SEV[a.severity] ?? SEV.info;
@@ -55,14 +56,15 @@ export default async function AlertsPage() {
                     </span>
                     {a.machine_name && (
                       a.device_imei
-                        ? isAdmin ? <Link href={`/machines/${a.device_imei}`} className="text-xs font-semibold text-terracotta hover:underline">· {a.machine_name}</Link> : <span className="text-xs text-taupe">· {a.machine_name}</span>
+                        ? <Link href={`/machines/${a.device_imei}`} className="text-xs font-semibold text-terracotta hover:underline">· {a.machine_name}</Link>
                         : <span className="text-xs text-taupe">· {a.machine_name}</span>
                     )}
                     {a.product_name && <span className="text-xs text-taupe">· {a.product_name}</span>}
                   </div>
                   <h3 className="mt-1.5 font-display text-lg font-bold text-cocoa">{a.title}</h3>
-                  <p className="mt-1 text-sm text-cocoa">{a.message}</p>
-                   <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-taupe"><span>{formatDateTime(a.created_at, tz)}</span>{a.incident_id && <Link href={`/incidents#incident-${a.incident_id}`} className="font-semibold text-terracotta">{a.incident_status === "resolved" || a.incident_status === "closed" ? "Resolved incident" : a.incident_status === "in_progress" ? "Incident in progress" : "Open incident"}</Link>}{isAdmin && a.change_log_id && <Link href={`/change-log?${new URLSearchParams({ ...(a.device_imei ? { machine: a.device_imei } : {}), ...(a.change_field ? { field: a.change_field } : {}) })}`} className="font-semibold text-terracotta">Technical details</Link>}</div>
+                   <p className="mt-1 text-sm text-cocoa">{a.message}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-taupe"><span>{formatDateTime(a.created_at, tz)}</span>{a.incident_id && <Link href={`/incidents#incident-${a.incident_id}`} className="font-semibold text-terracotta">{a.incident_status === "resolved" || a.incident_status === "closed" ? "Resolved incident" : a.incident_status === "in_progress" ? "Incident in progress" : "Open incident"}</Link>}{isAdmin && a.change_log_id && <Link href={`/change-log?${new URLSearchParams({ ...(a.device_imei ? { machine: a.device_imei } : {}), ...(a.change_field ? { field: a.change_field } : {}) })}`} className="font-semibold text-terracotta">Technical details</Link>}</div>
+                    {(a.device_imei || isAdmin) && <div className="mt-3"><DismissAlertButton alertId={a.id} /></div>}
                 </div>
                 {a.remaining_pct != null && (
                   <div className="text-right">
@@ -82,7 +84,7 @@ export default async function AlertsPage() {
           <table className="w-full min-w-[720px] text-sm">
             <thead className="bg-sand/60 text-left text-[11px] uppercase tracking-wide text-taupe"><tr><th className="px-4 py-3">Machine</th><th className="px-4 py-3">Alert</th><th className="px-4 py-3">Started</th><th className="px-4 py-3">Recovered</th></tr></thead>
             <tbody className="divide-y divide-line">
-              {history.map((alert) => <tr key={alert.id}><td className="px-4 py-3 font-semibold text-cocoa">{isAdmin && alert.device_imei ? <Link href={`/machines/${alert.device_imei}`} className="hover:text-terracotta hover:underline">{alert.machine_name ?? alert.device_imei}</Link> : alert.machine_name ?? alert.device_imei ?? "—"}</td><td className="px-4 py-3 text-cocoa"><div className="font-semibold">{alert.title}</div><div className="text-xs text-taupe">{alert.message}</div>{alert.incident_id && <Link href={`/incidents#incident-${alert.incident_id}`} className="mt-1 inline-block text-xs font-semibold text-terracotta">{alert.incident_status === "resolved" || alert.incident_status === "closed" ? "View resolved incident" : "Review active incident"}</Link>}</td><td className="px-4 py-3 text-taupe">{formatDateTime(alert.created_at, tz)}</td><td className="px-4 py-3 font-semibold text-sage">{formatDateTime(alert.resolved_at!, tz)}</td></tr>)}
+              {history.map((alert) => <tr key={alert.id}><td className="px-4 py-3 font-semibold text-cocoa">{alert.device_imei ? <Link href={`/machines/${alert.device_imei}`} className="hover:text-terracotta hover:underline">{alert.machine_name ?? alert.device_imei}</Link> : alert.machine_name ?? "—"}</td><td className="px-4 py-3 text-cocoa"><div className="font-semibold">{alert.title}</div><div className="text-xs text-taupe">{alert.message}</div>{alert.incident_id && <Link href={`/incidents#incident-${alert.incident_id}`} className="mt-1 inline-block text-xs font-semibold text-terracotta">{alert.incident_status === "resolved" || alert.incident_status === "closed" ? "View resolved incident" : "Review active incident"}</Link>}</td><td className="px-4 py-3 text-taupe">{formatDateTime(alert.created_at, tz)}</td><td className="px-4 py-3 font-semibold text-sage"><span className="block">{alert.resolved_by ? "Closed manually" : "Closed automatically"}</span><span className="text-xs font-normal text-taupe">{formatDateTime(alert.resolved_at!, tz)}</span></td></tr>)}
               {history.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-taupe">No recovered alerts yet. New alert cycles will remain here after recovery.</td></tr>}
             </tbody>
           </table>

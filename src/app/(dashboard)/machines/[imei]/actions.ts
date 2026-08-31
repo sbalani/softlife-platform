@@ -45,7 +45,7 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
     const warehouseValue = String(fd.get("odoo_warehouse_id") ?? "");
     const odooWarehouseId = warehouseValue ? Number(warehouseValue) : null;
     const deployed = fd.get("deployed") === "on";
-    const defrostEnabled = fd.get("defrost_enabled") === "on";
+    const defrostEnabled = deployed && fd.get("defrost_enabled") === "on";
     const defrostTime = String(fd.get("defrost_time") ?? "03:00");
     const defrostMinutes = Number(fd.get("defrost_minutes") ?? 4);
     const locationOverride = String(fd.get("location_override") ?? "").trim() || null;
@@ -53,7 +53,6 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
     if (lastClean && lastClean > ymd(new Date())) return { ok: false, error: "Cleaning date cannot be in the future." };
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(defrostTime)) return { ok: false, error: "Invalid defrost start time." };
     if (!Number.isInteger(defrostMinutes) || defrostMinutes < 1 || defrostMinutes > 30) return { ok: false, error: "Defrost duration must be between 1 and 30 minutes." };
-    if (defrostEnabled && !deployed) return { ok: false, error: "Deploy the machine before enabling its defrost schedule." };
 
     const { data: currentLocation, error: locationError } = await s
       .from("machines")

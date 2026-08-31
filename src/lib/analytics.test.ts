@@ -84,7 +84,7 @@ test("analytics payout presets use inclusive Madrid calendar periods", () => {
   assert.deepEqual(analyticsPresetRange("last-month", "Europe/Madrid", now), { from: "2026-07-01", to: "2026-07-31" });
 });
 
-test("topping consumption includes standalone and combo servings but excludes bases, sauces, legacy unknowns and refunds", () => {
+test("topping consumption includes solid and liquid servings but excludes bases, legacy unknowns and refunds", () => {
   const common = { order_state: "COMPLETE", is_admin_override: false, refund_status: null };
   const orders = [
     { ...common, nums: 2, products: [{ goodsName: "Vanilla", position: 1 }, { goodsName: "oreo", position: 2 }, { goodsName: "Nuts", position: 3 }, { goodsName: "Sauce", position: 5 }], product_name: "Combo" },
@@ -92,14 +92,18 @@ test("topping consumption includes standalone and combo servings but excludes ba
     { ...common, nums: 10, refund_status: "Refunded", products: [{ goodsName: "Oreo", position: 2 }], product_name: "Oreo" },
     { ...common, nums: 10, products: [], product_name: "Legacy base" },
   ] as unknown as Order[];
-  const aliases = new Map([["oreo", { productId: "1", productName: "Oreo" }]]);
+  const aliases = new Map([
+    ["oreo", { productId: "1", productName: "Oreo", productType: "topping" }],
+    ["sauce", { productId: "2", productName: "Chocolate sauce", productType: "sauce" }],
+  ]);
   assert.deepEqual(toppingConsumption(orders, aliases), [
     { name: "Oreo", servings: 3, orders: 2 },
+    { name: "Chocolate sauce", servings: 2, orders: 1 },
     { name: "Nuts", servings: 2, orders: 1 },
   ]);
 });
 
-test("topping consumption uses Huaxin lanes to exclude liquids even when the catalog type is wrong", () => {
+test("topping consumption accepts Huaxin solid and liquid lanes while excluding catalog bases", () => {
   const order = {
     order_state: "COMPLETE", is_admin_override: false, refund_status: null, nums: 2, product_name: "Combo",
     products: [{ goodsName: "Oreo", position: 2 }, { goodsName: "Avellana", position: 5 }, { goodsName: "Vanilla", position: 3 }],
@@ -110,17 +114,39 @@ test("topping consumption uses Huaxin lanes to exclude liquids even when the cat
     ["vanilla", { productId: "base-1", productName: "Soft Vainilla Nata", productType: "base" }],
   ]);
   assert.deepEqual(toppingConsumption([order], aliases), [
+    { name: "Avellana", servings: 2, orders: 1 },
     { name: "Galleta OREO", servings: 2, orders: 1 },
   ]);
 });
 
-test("topping consumption can use the catalog when legacy order positions are unavailable", () => {
+test("topping consumption can use solid and liquid catalog types when legacy positions are unavailable", () => {
   const order = {
-    order_state: "COMPLETE", is_admin_override: false, refund_status: null, nums: 1, product_name: "Oreo",
-    products: [{ goodsName: "Oreo", position: Number.NaN }],
+    order_state: "COMPLETE", is_admin_override: false, refund_status: null, nums: 1, product_name: "Combo",
+    products: [{ goodsName: "Oreo", position: Number.NaN }, { goodsName: "Caramel", position: Number.NaN }, { goodsName: "Unknown", position: Number.NaN }],
   } as unknown as Order;
-  const aliases = new Map([["oreo", { productId: "topping-1", productName: "Galleta OREO", productType: "topping" }]]);
-  assert.deepEqual(toppingConsumption([order], aliases), [{ name: "Galleta OREO", servings: 1, orders: 1 }]);
+  const aliases = new Map([
+    ["oreo", { productId: "topping-1", productName: "Galleta OREO", productType: "topping" }],
+    ["caramel", { productId: "sauce-1", productName: "Caramelo", productType: "sauce" }],
+  ]);
+  assert.deepEqual(toppingConsumption([order], aliases), [
+    { name: "Caramelo", servings: 1, orders: 1 },
+    { name: "Galleta OREO", servings: 1, orders: 1 },
+  ]);
+});
+
+test("topping consumption counts repeated topping entries as multiple servings in one order", () => {
+  const order = {
+    order_state: "COMPLETE", is_admin_override: false, refund_status: null, nums: 2, product_name: "Double Oreo",
+    products: [{ goodsName: "Oreo", position: 2 }, { goodsName: "Oreo", position: 2 }, { goodsName: "Caramel", position: 5 }],
+  } as unknown as Order;
+  const aliases = new Map([
+    ["oreo", { productId: "topping-1", productName: "Galleta OREO", productType: "topping" }],
+    ["caramel", { productId: "sauce-1", productName: "Caramelo", productType: "sauce" }],
+  ]);
+  assert.deepEqual(toppingConsumption([order], aliases), [
+    { name: "Galleta OREO", servings: 4, orders: 1 },
+    { name: "Caramelo", servings: 2, orders: 1 },
+  ]);
 });
 
 test("machine sales reports keep one stable machine across IMEI changes", () => {

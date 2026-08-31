@@ -1,8 +1,6 @@
 import { getApiSession } from "@/lib/auth/api-session";
 import { canAccessMobileMachine, hasMobileCapability } from "@/lib/auth/mobile-authorization";
 import { presentMachineStatuses, type MachineStatusSnapshot } from "@/lib/data/mobile-machine-status";
-import { recordMachineStatuses } from "@/lib/data/change-log";
-import { getConfigFromEnv, getDeviceStatus } from "@/lib/huaxin/client";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -28,24 +26,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     if (machineError) throw machineError;
     if (!machine) return Response.json({ error: { message: "Machine not found or not assigned to you" } }, { status: 404 });
     if (initialStatusResult.error) throw initialStatusResult.error;
-    let rows = (initialStatusResult.data as MachineStatusSnapshot[]) ?? [];
-    const current = presentMachineStatuses(rows);
-    const observedTime = current.status_observed_at ? Date.parse(current.status_observed_at) : 0;
-    const machineRow = machine as { id: string; name: string | null; device_imei: string | null };
-    const imei = machineRow.device_imei;
-    if (imei && (!Number.isFinite(observedTime) || Date.now() - observedTime > 60_000)) {
-      const config = getConfigFromEnv();
-      if (config) {
-        try {
-          await recordMachineStatuses(service, { ...machineRow, device_imei: imei }, await getDeviceStatus(config, imei));
-          const refreshed = await service.from("machine_status_snapshots").select("field,raw,observed_at").eq("machine_id", id).like("field", "raw:%");
-          if (refreshed.error) throw refreshed.error;
-          rows = (refreshed.data as MachineStatusSnapshot[]) ?? [];
-        } catch (error) {
-          console.error(`[mobile-status] Could not refresh ${id}:`, error);
-        }
-      }
-    }
+    const rows = (initialStatusResult.data as MachineStatusSnapshot[]) ?? [];
     return Response.json({ machine_id: id, ...presentMachineStatuses(rows) });
   } catch (error) {
     console.error(`[mobile-status] Request failed:`, error);

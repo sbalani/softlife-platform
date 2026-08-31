@@ -7,7 +7,7 @@ import type { DiyPushItem } from "@/lib/huaxin/client";
 import { generateAllergenComposite } from "@/lib/allergens/composite";
 import { getSessionProfile } from "@/lib/auth/session";
 import type { SessionProfile } from "@/lib/auth/session";
-import { recordMachinePush, recordMachineSync, recordProductChange, recordRemoteCommand } from "@/lib/data/change-log";
+import { recordMachinePush, recordProductChange, recordRemoteCommand } from "@/lib/data/change-log";
 import { syncMachineMedia } from "@/lib/data/machine-media";
 import { recordMachineClean } from "@/lib/data/clean-logs";
 import { cleanDay } from "@/lib/data/service-history-utils";
@@ -15,6 +15,7 @@ import { ymd } from "@/lib/dates";
 import { FRANCHISEE_CONFIGURABLE_COMMANDS, HUAXIN_REMOTE_COMMANDS } from "@/lib/huaxin/remote-commands";
 import { geocodeAddress } from "@/lib/geocode";
 import { translateLocation } from "@/lib/i18n/huaxin";
+import { parseMachineRefreshClaim } from "@/lib/data/huaxin-machine-refresh";
 
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
@@ -201,15 +202,34 @@ async function pushProductDiyWithLog(
   actor?: SessionProfile,
 ) {
   const effectiveActor = actor ?? await requireMenuAdmin();
-  const result = await pushProductDiy(cfg, imei, items);
-  const mutationError = huaxinMutationError(result);
-  if (mutationError) throw new Error(mutationError);
-  if (isSupabaseConfigured()) {
-    const s = await createServiceClient();
-    const { data: machine } = await s.from("machines").select("id,name,device_imei").eq("device_imei", imei).maybeSingle();
-    if (machine?.id) await recordMachinePush(s, machine as { id: string; name: string | null; device_imei: string }, items, effectiveActor);
+  if (!isSupabaseConfigured()) {
+    const result = await pushProductDiy(cfg, imei, items);
+    const mutationError = huaxinMutationError(result);
+    if (mutationError) throw new Error(mutationError);
+    return result;
   }
-  return result;
+  const s = await createServiceClient();
+  const { data: machine, error: machineError } = await s.from("machines").select("id,name,device_imei").eq("device_imei", imei).maybeSingle();
+  if (machineError) throw machineError;
+  if (!machine?.id) throw new Error("Machine not found.");
+  const owner = crypto.randomUUID();
+  const { data: claimData, error: claimError } = await s.rpc("claim_huaxin_machine_refresh", { p_machine_id: machine.id, p_owner: owner });
+  if (claimError) throw claimError;
+  const claim = parseMachineRefreshClaim(claimData);
+  if (!claim.claimed) throw new Error(`Another machine refresh is active. Try again in ${claim.retry_after_seconds} seconds.`);
+  try {
+    const result = await pushProductDiy(cfg, imei, items);
+    const mutationError = huaxinMutationError(result);
+    if (mutationError) throw new Error(mutationError);
+    const { data: renewed, error: renewError } = await s.rpc("renew_huaxin_machine_refresh", { p_machine_id: machine.id, p_owner: owner });
+    if (renewError) throw renewError;
+    if (!renewed) throw new Error("Machine refresh lease expired.");
+    await recordMachinePush(s, machine as { id: string; name: string | null; device_imei: string }, items, effectiveActor);
+    return result;
+  } finally {
+    const { error } = await s.rpc("release_huaxin_machine_write", { p_machine_id: machine.id, p_owner: owner });
+    if (error) console.error(`[machine-push] Could not release refresh lock for ${imei}:`, error);
+  }
 }
 
 /** Unions contains/may_contain allergens across a set of ingredients into one
@@ -576,19 +596,10 @@ export async function updateMachineStock(imei: string, position: string, rawStoc
   if (!isSupabaseConfigured()) return { ok: false, error: "Supabase not configured." };
 
   try {
-    const s = await createServiceClient();
-    const { data: machine, error: machineError } = await s.from("machines").select("id,name,device_imei").eq("device_imei", imei).maybeSingle();
-    if (machineError) throw machineError;
-    if (!machine) return { ok: false, error: "Machine not found." };
     const item: DiyPushItem = { position, code: "stock", value: String(stock) };
-    const result = await pushProductDiyWithLog(cfg, imei, [item]);
+    const result = await pushProductDiyWithLog(cfg, imei, [item], actor);
     if (String(result.code) !== "200") return { ok: false, error: result.msg ?? "Update rejected", sentPayload: [item] };
     try { await refreshProduct(cfg, imei); } catch { /* the stock update already landed */ }
-    try {
-      await recordMachineSync(s, machine, await listDeviceProducts(cfg, imei), actor);
-    } catch (error) {
-      console.error(`[stock] Snapshot refresh failed for ${imei}:`, error);
-    }
     revalidatePath(`/machines/${imei}`);
     revalidatePath("/alerts");
     return { ok: true, sentPayload: [item] };

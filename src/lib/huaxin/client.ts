@@ -68,6 +68,12 @@ export function huaxinMutationError(envelope: Envelope) {
   return null;
 }
 
+function huaxinReadData(envelope: Envelope, operation: string): unknown {
+  if (String(envelope.code) !== "200") throw new Error(`Huaxin ${operation} failed: ${envelope.msg ?? "unknown error"}`);
+  if (envelope.data === null || envelope.data === undefined) throw new Error(`Huaxin ${operation} returned no data`);
+  return envelope.data;
+}
+
 export const COUPON_PATHS = {
   edit: "/machine/cloud/api/coupon/edit",
   list: "/machine/cloud/api/coupon/list",
@@ -309,10 +315,11 @@ export function languagePackEntries(item: ProductDiyItem): { code: string; goods
 export async function listDeviceProducts(cfg: HuaxinConfig, deviceImei: string): Promise<{ diy: ProductDiyItem[]; unify: ProductDiyItem[] }> {
   const data = await call("/machine/cloud/api/device/product", cfg, { device_imei: deviceImei });
   console.log(`[huaxin] listDeviceProducts ${deviceImei}:`, JSON.stringify(data, null, 2));
-  const payload = data.data as { diy?: ProductDiyItem[]; unify?: ProductDiyItem[] } | null;
+  const payload = huaxinReadData(data, "menu read") as { diy?: unknown; unify?: unknown };
+  if (typeof payload !== "object" || Array.isArray(payload) || payload.diy == null && payload.unify == null || payload.diy != null && !Array.isArray(payload.diy) || payload.unify != null && !Array.isArray(payload.unify)) throw new Error("Huaxin menu read returned malformed data");
   return {
-    diy: payload?.diy ?? [],
-    unify: payload?.unify ?? [],
+    diy: (payload.diy ?? []) as ProductDiyItem[],
+    unify: (payload.unify ?? []) as ProductDiyItem[],
   };
 }
 
@@ -352,7 +359,9 @@ export async function refreshResource(cfg: HuaxinConfig, deviceImei: string) {
 
 export async function getDeviceStatus(cfg: HuaxinConfig, deviceImei: string) {
   const data = await call("/machine/cloud/api/device/configure/status/detail", cfg, { device_imei: deviceImei });
-  return (data.data as { code?: string; value?: string; desc?: string; data?: string | number }[]) ?? [];
+  const payload = huaxinReadData(data, "status read");
+  if (!Array.isArray(payload)) throw new Error("Huaxin status read returned malformed data");
+  return payload as { code?: string; value?: string; desc?: string; data?: string | number }[];
 }
 
 export async function listDeviceMedia(cfg: HuaxinConfig, deviceImei: string) {

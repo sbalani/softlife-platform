@@ -1,6 +1,56 @@
 SOFTLIFE PLATFORM NOTES FOR MOBILE DEVELOPER
 ============================================
 
+MACHINE STATUS + MENU REFRESH API (ADDED 2026-08-31)
+----------------------------------------------------
+
+Endpoint: POST /api/softlife/machines/{machine_id}/refresh
+
+Use the normal Bearer token. The session needs machines.read and current access
+to the machine. Missing and out-of-scope machines both return HTTP 404.
+
+The endpoint refreshes Huaxin status and menu independently. HTTP 200 means at
+least one component succeeded; partial=true means exactly one failed. HTTP 502
+means both failed. Each status/menu object contains outcome
+(succeeded|failed|skipped), freshness (fresh|stale|missing), age_seconds, its
+persisted timestamp (observed_at or synced_at), and a generic error on failure.
+
+Concurrent refreshes return HTTP 409. The 60-second success cooldown returns
+HTTP 429. Both include Retry-After and error.retry_after_seconds, plus skipped
+component outcomes with current persisted freshness. Clients should wait for
+Retry-After, then refetch the existing status and menu GET endpoints. Do not
+retry automatically on HTTP 500/502.
+
+Failed attempts use a 15-second cooldown and can therefore also return HTTP 429
+on an immediate retry. Menu writes and fleet synchronization share this lock.
+
+GET /api/softlife/machines/{machine_id}/status and /menu are snapshot-only.
+Only this POST endpoint triggers their live Huaxin refresh.
+
+Success/partial response shape:
+
+  {
+    "ok": true,
+    "machine_id": "uuid",
+    "partial": false,
+    "refresh": {
+      "started_at": "ISO timestamp",
+      "finished_at": "ISO timestamp",
+      "status": {
+        "outcome": "succeeded",
+        "freshness": "fresh",
+        "age_seconds": 0,
+        "observed_at": "ISO timestamp"
+      },
+      "menu": {
+        "outcome": "succeeded",
+        "freshness": "fresh",
+        "age_seconds": 0,
+        "synced_at": "ISO timestamp"
+      }
+    }
+  }
+
 MACHINE MENU READ API (ADDED 2026-08-24)
 ----------------------------------------
 

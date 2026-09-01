@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth/session";
 import { recordProductChange } from "@/lib/data/change-log";
-import { confirmManufacturingPeriod, prepareManufacturingPeriod } from "@/lib/data/odoo-production";
+import { cancelUnconfirmedManufacturingPeriod, confirmManufacturingPeriod, prepareManufacturingPeriod } from "@/lib/data/odoo-production";
 
 export type OdooActionResult = { ok: boolean; error?: string };
 
@@ -101,7 +101,15 @@ export async function preparePlatformPeriod(fd: FormData): Promise<void> {
 
 export async function confirmPlatformPeriod(fd: FormData): Promise<void> {
   const s = await productionAdminClient();
+  if (String(fd.get("release_acknowledgement") ?? "") !== "release_frozen_payload") throw new Error("Review and acknowledge the frozen payload before release.");
   await confirmManufacturingPeriod(s, String(fd.get("export_id") ?? ""), { payload_sha256: String(fd.get("payload_sha256") ?? "") }, "platform");
+  revalidatePath("/odoo");
+}
+
+export async function cancelPlatformPeriod(fd: FormData): Promise<void> {
+  const s = await productionAdminClient();
+  if (String(fd.get("cancel_acknowledgement") ?? "") !== "cancel_unconfirmed_preview") throw new Error("Confirm that you intend to cancel this preview.");
+  await cancelUnconfirmedManufacturingPeriod(s, String(fd.get("export_id") ?? ""), "platform");
   revalidatePath("/odoo");
 }
 

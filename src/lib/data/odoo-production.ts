@@ -325,8 +325,11 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
     }
     exportId = inserted.id;
   } else {
-    const { error } = await s.from("manufacturing_period_exports").update({ status: "preparing" }).eq("id", exportId);
-    if (error) throw error;
+    const { error } = await s.rpc("claim_manufacturing_export_preparation", { p_export_id: exportId, p_expected_updated_at: existing.updated_at });
+    if (error) {
+      if (error.code === "P0001") throw new OdooContractError("The production run changed while preparation was starting", 409, "invalid_status");
+      throw error;
+    }
   }
 
   try {
@@ -540,6 +543,16 @@ export async function confirmManufacturingPeriod(s: SupabaseClient, exportId: st
   const { data, error } = await s.rpc("confirm_manufacturing_export", { p_export_id: exportId, p_payload_sha256: hash, p_caller: caller });
   if (error) {
     if (["P0001", "P0002", "P0003", "P0005"].includes(error.code)) throw new OdooContractError(error.message, error.code === "P0005" ? 403 : 409, error.code === "P0002" ? "hash_mismatch" : error.code === "P0003" ? "order_changed" : error.code === "P0005" ? "wrong_initiator" : "invalid_status");
+    throw error;
+  }
+  return presentManufacturingExport(relation(data) ?? data as Record<string, unknown>);
+}
+
+export async function cancelUnconfirmedManufacturingPeriod(s: SupabaseClient, exportId: string, caller: "odoo" | "platform" = "odoo") {
+  if (!/^[0-9a-f-]{36}$/i.test(exportId)) throw new OdooContractError("Valid export ID is required");
+  const { data, error } = await s.rpc("cancel_unconfirmed_manufacturing_export", { p_export_id: exportId, p_caller: caller });
+  if (error) {
+    if (["P0001", "P0005"].includes(error.code)) throw new OdooContractError(error.message, error.code === "P0005" ? 403 : 409, error.code === "P0005" ? "wrong_initiator" : "invalid_status");
     throw error;
   }
   return presentManufacturingExport(relation(data) ?? data as Record<string, unknown>);

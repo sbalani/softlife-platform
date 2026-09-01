@@ -111,6 +111,12 @@ Do not put base64 images or audio in report JSON.
    }
    ```
 
+   Photos may be finalized while the report is either `draft` or `confirmed`.
+   Audio remains draft-only. Attachment lifecycle conflicts return HTTP 409 with
+   a stable `error.code`; invalid uploads return 400 and storage outages return
+   502. A photo linked to a refill line freezes that line's evidence-bearing
+   content while preserving the existing draft-to-confirmed rebind behavior.
+
 For audio, omit `refill_line_id`. Audio requires a draft and starts private
 transcription/extraction. Inform the user that retained audio is sent to OpenAI
 for processing and requires explicit review; AI never confirms the report.

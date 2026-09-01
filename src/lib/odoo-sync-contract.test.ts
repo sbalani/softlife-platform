@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  inclusiveLocalDatePeriod,
   canonicalJson, decodeSyncCursor, encodeSyncCursor, isEligibleManufacturingSale, isSyncCursor,
   localDateTimeToUtc, normalizeObservedName, productionDocumentDate, sha256,
 } from "./odoo-sync-contract.ts";
@@ -30,8 +31,10 @@ test("manufacturing eligibility excludes overrides, refunds, and invalid units",
 });
 
 test("Madrid period boundaries preserve DST and use the final included date", () => {
+  assert.deepEqual(inclusiveLocalDatePeriod("2026-07-09", "2026-07-10"), { localFrom: "2026-07-09T00:00", localTo: "2026-07-11T00:00" });
   assert.equal(localDateTimeToUtc("2026-03-28T00:00", "Europe/Madrid"), "2026-03-27T23:00:00.000Z");
   assert.equal(localDateTimeToUtc("2026-03-30T00:00", "Europe/Madrid"), "2026-03-29T22:00:00.000Z");
   assert.equal(productionDocumentDate("2026-09-01T00:00:00"), "2026-08-31");
   assert.equal(productionDocumentDate("2026-09-01T15:00:00"), "2026-09-01");
+  assert.throws(() => inclusiveLocalDatePeriod("2026-07-10", "2026-07-09"), /valid inclusive date range/);
 });

@@ -91,8 +91,8 @@ export function ProductionRunsPanel({ runs, timeZone }: { runs: Run[]; timeZone:
       <h3 className="text-sm font-bold text-cocoa">Manufacturing runs</h3>
       <p className="mt-1 text-[11px] text-taupe">Preparing calculates and freezes a reviewable payload. It does not release manufacturing work to Odoo.</p>
       <form action={preparePlatformPeriod} className="mt-3 grid grid-cols-2 gap-2">
-        <label className="text-xs text-taupe"><span className="mb-1 block">From</span><input name="local_from" type="datetime-local" required className="w-full rounded border border-line px-2 py-1.5 text-cocoa" /></label>
-        <label className="text-xs text-taupe"><span className="mb-1 block">To (exclusive)</span><input name="local_to" type="datetime-local" required className="w-full rounded border border-line px-2 py-1.5 text-cocoa" /></label>
+        <label className="text-xs text-taupe"><span className="mb-1 block">From date (included)</span><input name="date_from" type="date" required className="w-full rounded border border-line px-2 py-1.5 text-cocoa" /></label>
+        <label className="text-xs text-taupe"><span className="mb-1 block">Through date (included)</span><input name="date_to" type="date" required className="w-full rounded border border-line px-2 py-1.5 text-cocoa" /></label>
         <label className="col-span-2 text-xs text-taupe"><span className="mb-1 block">IANA timezone</span><input name="time_zone" required defaultValue={timeZone} className="w-full rounded border border-line px-2 py-1.5 text-cocoa" /></label>
         <button className="col-span-2 rounded bg-terracotta px-3 py-2 text-xs font-bold text-white">Prepare frozen preview only</button>
       </form>

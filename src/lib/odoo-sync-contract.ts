@@ -78,3 +78,13 @@ export function productionDocumentDate(localTo: string): string {
   previous.setUTCDate(previous.getUTCDate() - 1);
   return previous.toISOString().slice(0, 10);
 }
+
+export function inclusiveLocalDatePeriod(dateFrom: string, dateTo: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(dateTo) || dateTo < dateFrom) {
+    throw new Error("Select a valid inclusive date range");
+  }
+  const exclusiveTo = new Date(`${dateTo}T00:00:00Z`);
+  if (Number.isNaN(exclusiveTo.getTime()) || exclusiveTo.toISOString().slice(0, 10) !== dateTo) throw new Error("Select a valid inclusive date range");
+  exclusiveTo.setUTCDate(exclusiveTo.getUTCDate() + 1);
+  return { localFrom: `${dateFrom}T00:00`, localTo: `${exclusiveTo.toISOString().slice(0, 10)}T00:00` };
+}

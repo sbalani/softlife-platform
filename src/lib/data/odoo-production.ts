@@ -388,6 +388,11 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       for (const assignment of operation.assignments ?? []) pendingMenuKeys.add(`${operation.machine_id}:${String(assignment.menu_kind)}:${String(assignment.menu_position)}`);
     }
     const blocked: Record<string, unknown>[] = [];
+    if (orders.length === 0) blocked.push({
+      problem_code: "no_eligible_orders",
+      message: "No completed, non-refunded customer orders exist in the selected period.",
+      raw_order_count: orderRows.length,
+    });
     const groups = new Map<string, Record<string, unknown>>();
     const resolutionRows: Record<string, unknown>[] = [];
 

@@ -12,6 +12,7 @@ import { getFranchiseeAssignments } from "@/lib/data/franchisee-profit";
 import { formatDateTime, formatDate, ymd } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { MachineConfigForm } from "./MachineConfigForm";
+import { WarehouseAssignmentPeriods } from "./WarehouseAssignmentPeriods";
 import { DraftBulkActions } from "./DraftBulkActions";
 import { DismissDraftButton } from "./DismissDraftButton";
 import { MachinePushButton } from "./MachinePushButton";
@@ -236,6 +237,7 @@ export default async function MachineDetailPage({
         {config ? (
           <>
             <MachineConfigForm config={config} imei={imei} today={defaultTo} lastCleanDate={config.lastFullClean ? ymd(new Date(config.lastFullClean), tz) : ""} />
+            {config.machineId && <WarehouseAssignmentPeriods config={config} imei={imei} today={defaultTo} />}
             {config.machineId && config.defrostSchedule && <DefrostRunPanel machineId={config.machineId} machineName={config.displayName || config.name} imei={imei} deployed={config.deployed} durationMinutes={config.defrostSchedule.defrostMinutes} requiresIntervention={config.defrostSchedule.requiresIntervention} runs={config.defrostRuns} />}
             {config.machineId && (
               <div className="mt-5 border-t border-line pt-4">

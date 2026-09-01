@@ -16,9 +16,45 @@ import { FRANCHISEE_CONFIGURABLE_COMMANDS, HUAXIN_REMOTE_COMMANDS } from "@/lib/
 import { geocodeAddress } from "@/lib/geocode";
 import { translateLocation } from "@/lib/i18n/huaxin";
 import { parseMachineRefreshClaim } from "@/lib/data/huaxin-machine-refresh";
+import { inclusiveLocalDatePeriod, localDateTimeToUtc } from "@/lib/odoo-sync-contract";
 
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
+
+export async function saveMachineWarehousePeriod(_prev: SaveResult | null, fd: FormData): Promise<SaveResult> {
+  const actor = await getSessionProfile();
+  if (!actor || actor.role !== "admin") return { ok: false, error: "Admin access required." };
+  const machineId = String(fd.get("machine_id") ?? "");
+  const imei = String(fd.get("imei") ?? "");
+  const warehouseId = Number(fd.get("warehouse_id"));
+  const dateFrom = String(fd.get("date_from") ?? "");
+  const dateTo = String(fd.get("date_to") ?? "");
+  const allHistory = fd.get("all_history") === "on";
+  if (!/^[0-9a-f-]{36}$/i.test(machineId) || !Number.isInteger(warehouseId) || warehouseId <= 0) return { ok: false, error: "Invalid machine or warehouse." };
+  try {
+    const s = await createServiceClient();
+    let localFrom: string;
+    if (allHistory) {
+      const { data: firstOrder, error: firstOrderError } = await s.from("huaxin_orders").select("order_time").eq("machine_id", machineId).order("order_time").limit(1).maybeSingle();
+      if (firstOrderError) throw firstOrderError;
+      if (!firstOrder) return { ok: false, error: "No stored sales exist for this machine." };
+      localFrom = String(firstOrder.order_time);
+    } else {
+      localFrom = localDateTimeToUtc(`${dateFrom}T00:00`, "Europe/Madrid");
+    }
+    if (allHistory && dateTo) return { ok: false, error: "All stored history must be open ended." };
+    const localTo = dateTo ? localDateTimeToUtc(inclusiveLocalDatePeriod(dateFrom, dateTo).localTo, "Europe/Madrid") : null;
+    const { error } = await s.rpc("set_machine_warehouse_assignment_period", {
+      p_machine_id: machineId, p_odoo_warehouse_id: warehouseId, p_valid_from: localFrom, p_valid_to: localTo, p_actor_id: actor.id,
+    });
+    if (error) return { ok: false, error: error.message };
+    revalidatePath(`/machines/${imei}`);
+    revalidatePath("/odoo");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
 
 export async function clearDefrostIntervention(machineId: string, imei: string): Promise<SaveResult> {
   const actor = await getSessionProfile();

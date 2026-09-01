@@ -39,6 +39,7 @@ export type MachineConfig = {
   latestDefrostRun: { state: string; scheduledFor: string; lastFormationPct: number | null; failureDetail: string | null } | null;
   defrostRuns: DefrostRunSummary[];
   odooWarehouses: OdooWarehouseOpt[];
+  warehouseAssignments: { id: string; odooWarehouseId: number; warehouseName: string; validFrom: string; validTo: string | null }[];
   ingredients: { position: string; product_id: string | null; product_type: string; current_lot_name: string | null; last_loaded_date: string | null }[];
   bases: ProductOpt[];
   toppings: ProductOpt[];
@@ -71,16 +72,18 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
     let defrostSchedule: MachineConfig["defrostSchedule"] = null;
     let latestDefrostRun: MachineConfig["latestDefrostRun"] = null;
     if (machine?.id) {
-      const [ingredientResult, scheduleResult, runResult, interventionAlertResult] = await Promise.all([
+      const [ingredientResult, scheduleResult, runResult, interventionAlertResult, warehouseAssignmentResult] = await Promise.all([
         s.from("machine_ingredients").select("position,product_id,product_type,current_lot_name,last_loaded_date").eq("machine_id", machine.id as string),
         s.from("machine_defrost_schedules").select("enabled,local_start_time,defrost_seconds,requires_intervention").eq("machine_id", machine.id as string).maybeSingle(),
         s.from("machine_defrost_runs").select("id,state,trigger_kind,scheduled_for,started_at,completed_at,next_action_at,last_formation_pct,refrigeration_attempts,sales_attempts,failure_detail,outcome").eq("machine_id", machine.id as string).order("created_at", { ascending: false }).limit(10),
         s.from("alerts").select("id").eq("machine_id", machine.id as string).eq("type", "defrost_automation_failed").is("resolved_at", null).limit(1),
+        s.from("machine_warehouse_assignments").select("id,odoo_warehouse_id,valid_from,valid_to,odoo_warehouses(name)").eq("machine_id", machine.id as string).order("valid_from"),
       ]);
       if (ingredientResult.error) throw ingredientResult.error;
       if (scheduleResult.error) throw scheduleResult.error;
       if (runResult.error) throw runResult.error;
       if (interventionAlertResult.error) throw interventionAlertResult.error;
+      if (warehouseAssignmentResult.error) throw warehouseAssignmentResult.error;
       const { data: ings } = ingredientResult;
       const { data: schedule } = scheduleResult;
       const runRows = (runResult.data as Record<string, unknown>[]) ?? [];
@@ -103,7 +106,13 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
         customerId: (machine?.customer_id as string) ?? null, nayaxId: (machine?.nayax_id as string) ?? null,
         displayName: (machine?.display_name as string) ?? null, odooWarehouseId: (machine?.odoo_warehouse_id as number) ?? null,
         deployed: machine?.deployed !== false, defrostSchedule, latestDefrostRun, defrostRuns,
-        odooWarehouses: (warehouseRows as OdooWarehouseOpt[]) ?? [], ingredients,
+        odooWarehouses: (warehouseRows as OdooWarehouseOpt[]) ?? [],
+        warehouseAssignments: (warehouseAssignmentResult.data as unknown as Record<string, unknown>[] ?? []).map((row) => ({
+          id: String(row.id), odooWarehouseId: Number(row.odoo_warehouse_id),
+          warehouseName: String((Array.isArray(row.odoo_warehouses) ? row.odoo_warehouses[0] : row.odoo_warehouses as { name?: string } | null)?.name ?? `Odoo ${row.odoo_warehouse_id}`),
+          validFrom: String(row.valid_from), validTo: row.valid_to as string | null,
+        })),
+        ingredients,
         bases: products.filter((p) => p.type === "base"), toppings: products.filter((p) => p.type === "topping"), sauces: products.filter((p) => p.type === "sauce"), source: "supabase",
       };
     }
@@ -128,6 +137,7 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
       latestDefrostRun,
       defrostRuns: [],
       odooWarehouses: (warehouseRows as OdooWarehouseOpt[]) ?? [],
+      warehouseAssignments: [],
       ingredients,
       bases: products.filter((p) => p.type === "base"),
       toppings: products.filter((p) => p.type === "topping"),

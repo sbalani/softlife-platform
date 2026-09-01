@@ -35,12 +35,12 @@ export function MachineConfigForm({ config, imei, today, lastCleanDate }: { conf
           </select>
         </label>
         <label className="block">
-          <span className={labelClass}>Service warehouse</span>
+          <span className={labelClass}>Current service warehouse</span>
           <select name="odoo_warehouse_id" defaultValue={config.odooWarehouseId ?? ""} className={selectClass}>
             <option value="">Not assigned</option>
             {config.odooWarehouses.map((warehouse) => <option key={warehouse.odoo_id} value={warehouse.odoo_id}>{warehouse.name}{warehouse.code ? ` (${warehouse.code})` : ""}</option>)}
           </select>
-          <span className="mt-1 block text-[10px] text-taupe">Required before QR refills can be recorded.</span>
+          <span className="mt-1 block text-[10px] text-taupe">Effective now. Use assignment periods below for historical or temporary locations.</span>
         </label>
         <label className="block">
           <span className={labelClass}>Display name</span>

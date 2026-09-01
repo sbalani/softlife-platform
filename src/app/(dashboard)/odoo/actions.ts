@@ -5,6 +5,7 @@ import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server
 import { getSessionProfile } from "@/lib/auth/session";
 import { recordProductChange } from "@/lib/data/change-log";
 import { cancelUnconfirmedManufacturingPeriod, confirmManufacturingPeriod, prepareManufacturingPeriod } from "@/lib/data/odoo-production";
+import { inclusiveLocalDatePeriod } from "@/lib/odoo-sync-contract";
 
 export type OdooActionResult = { ok: boolean; error?: string };
 
@@ -92,8 +93,7 @@ export async function resolveProductionLine(fd: FormData): Promise<void> {
 
 export async function preparePlatformPeriod(fd: FormData): Promise<void> {
   const s = await productionAdminClient();
-  const localFrom = String(fd.get("local_from") ?? "");
-  const localTo = String(fd.get("local_to") ?? "");
+  const { localFrom, localTo } = inclusiveLocalDatePeriod(String(fd.get("date_from") ?? ""), String(fd.get("date_to") ?? ""));
   const timeZone = String(fd.get("time_zone") ?? "Europe/Madrid");
   await prepareManufacturingPeriod(s, { idempotency_key: `platform:${crypto.randomUUID()}`, local_from: localFrom, local_to: localTo, time_zone: timeZone, initiated_by: "platform" }, "platform");
   revalidatePath("/odoo");

@@ -320,7 +320,12 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       period_from: input.periodFrom, period_to: input.periodTo, time_zone: input.timeZone, document_date: input.documentDate, status: "preparing",
     }).select("id").single();
     if (error) {
-      if (error.code === "23505") throw new OdooContractError("The period overlaps a concurrent request", 409, "idempotency_conflict");
+      if (error.code === "23505") {
+        const { data: concurrent, error: concurrentError } = await s.from("manufacturing_period_exports").select("*").eq("idempotency_key", input.idempotencyKey).maybeSingle();
+        if (concurrentError) throw concurrentError;
+        if (concurrent?.request_fingerprint === input.fingerprint) return presentManufacturingExport(concurrent as Record<string, unknown>);
+        throw new OdooContractError("The period overlaps a concurrent request", 409, "idempotency_conflict");
+      }
       throw error;
     }
     exportId = inserted.id;
@@ -401,7 +406,7 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       const machineId = String(order.machine_id ?? "");
       const machineName = String(relation(order.machines)?.name ?? order.device_imei ?? "Unknown machine");
       const orderCode = String(order.order_code);
-      if (occupied.has(orderId)) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "already_in_production_run" }); continue; }
+      if (occupied.has(orderId)) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "already_in_production_run", blocking_export_id: occupied.get(orderId) }); continue; }
       if (!Number.isInteger(Number(order.nums)) || Number(order.nums) <= 0) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "invalid_units" }); continue; }
       const priorByLine = existingResolutions.get(orderId) ?? new Map();
       const resolutions = resolveOrderLines(order, productsByName, (assignmentsResult.data as unknown as Record<string, unknown>[]) ?? [], priorByLine, pendingMenuKeys);

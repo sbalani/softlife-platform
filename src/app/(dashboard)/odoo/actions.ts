@@ -5,7 +5,7 @@ import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server
 import { getSessionProfile } from "@/lib/auth/session";
 import { recordProductChange } from "@/lib/data/change-log";
 import { cancelUnconfirmedManufacturingPeriod, confirmManufacturingPeriod, prepareManufacturingPeriod } from "@/lib/data/odoo-production";
-import { inclusiveLocalDatePeriod } from "@/lib/odoo-sync-contract";
+import { inclusiveLocalDatePeriod, localDateTimeToUtc } from "@/lib/odoo-sync-contract";
 
 export type OdooActionResult = { ok: boolean; error?: string };
 
@@ -95,7 +95,17 @@ export async function preparePlatformPeriod(fd: FormData): Promise<void> {
   const s = await productionAdminClient();
   const { localFrom, localTo } = inclusiveLocalDatePeriod(String(fd.get("date_from") ?? ""), String(fd.get("date_to") ?? ""));
   const timeZone = String(fd.get("time_zone") ?? "Europe/Madrid");
-  await prepareManufacturingPeriod(s, { idempotency_key: `platform:${crypto.randomUUID()}`, local_from: localFrom, local_to: localTo, time_zone: timeZone, initiated_by: "platform" }, "platform");
+  const requestId = String(fd.get("request_id") ?? "");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) throw new Error("Invalid preview request ID.");
+  const periodFrom = localDateTimeToUtc(localFrom, timeZone);
+  const periodTo = localDateTimeToUtc(localTo, timeZone);
+  const { data: active, error: activeError } = await s.from("manufacturing_period_exports").select("id,idempotency_key,status")
+    .eq("initiated_by", "platform").eq("period_from", periodFrom).eq("period_to", periodTo)
+    .in("status", ["preparing", "draft", "blocked", "ready", "processing"]).limit(1).maybeSingle();
+  if (activeError) throw activeError;
+  if (active?.idempotency_key === `platform:${requestId}`) { revalidatePath("/odoo"); return; }
+  if (active) throw new Error(`An active run already exists for these dates: ${active.idempotency_key} (${active.status}). Review or cancel it below.`);
+  await prepareManufacturingPeriod(s, { idempotency_key: `platform:${requestId}`, local_from: localFrom, local_to: localTo, time_zone: timeZone, initiated_by: "platform" }, "platform");
   revalidatePath("/odoo");
 }
 

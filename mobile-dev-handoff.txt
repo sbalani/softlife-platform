@@ -1,6 +1,21 @@
 SOFTLIFE PLATFORM NOTES FOR MOBILE DEVELOPER
 ============================================
 
+MOBILE ALERT DISMISSAL API (ADDED 2026-09-01)
+---------------------------------------------
+
+Endpoint: POST /api/softlife/alerts/{alert_id}/dismiss
+
+Use the normal Bearer token. The session needs alerts.read and the role must be
+admin or franchisee. Franchisees may dismiss only alerts for machines in their
+current mobile scope; only admins may dismiss global alerts. Missing and
+out-of-scope alerts both return HTTP 404. The request has no body.
+
+Success is HTTP 200 with {"ok":true}, including an already-resolved alert. The
+operation only sets resolved_at/resolved_by. It never clears machine safety
+locks, intervention latches, telemetry, or active workflows. Mobile must show a
+confirmation warning with that distinction, then remove/refetch the alert.
+
 MACHINE STATUS + MENU REFRESH API (ADDED 2026-08-31)
 ----------------------------------------------------
 

@@ -49,6 +49,10 @@ export function hasMobileCapability(session: MobileSession, capability: MobileCa
   return session.capabilities.includes(capability);
 }
 
+export function canDismissMobileAlert(session: MobileSession) {
+  return hasMobileCapability(session, "alerts.read") && (session.role === "admin" || session.role === "franchisee");
+}
+
 export function canReceiveMobileAlert(role: MobileSession["role"], machineIds: string[] | null | undefined, machineId: string | null) {
   if (!machineId) return role === "admin";
   return machineIds === null || machineIds?.includes(machineId) === true;

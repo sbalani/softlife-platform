@@ -1,9 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getSessionProfile, type SessionProfile } from "@/lib/auth/session";
+import { passwordSetupUrl } from "@/lib/auth/password-redirect";
 
 export type UserResult = { ok: boolean; error?: string; message?: string };
 
@@ -65,13 +65,10 @@ export async function createUser(_prev: UserResult | null, fd: FormData): Promis
       if (employerKind === "franchisee" && tenant.kind !== "franchisee") return { ok: false, error: "Select a franchisee employer account." };
     }
     const metadata = { full_name: fullName, role, employer_kind: employerKind, tenant_id: tenantId };
-    const requestHeaders = await headers();
-    const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
-    const origin = requestHeaders.get("origin") ?? `${requestHeaders.get("x-forwarded-proto") ?? "https"}://${host}`;
     const { data, error } = creationMode === "invite"
       ? await s.auth.admin.inviteUserByEmail(email, {
           data: metadata,
-          redirectTo: `${origin}/auth/callback?next=/set-password`,
+          redirectTo: await passwordSetupUrl(),
         })
       : await s.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: metadata });
     if (error) {
@@ -98,6 +95,26 @@ export async function createUser(_prev: UserResult | null, fd: FormData): Promis
   } catch (e) {
     logUserError("creation", e);
     return { ok: false, error: errorMessage(e, "The user could not be created.") };
+  }
+}
+
+export async function sendUserPasswordReset(userId: string): Promise<UserResult> {
+  const { denied } = await requireAdmin();
+  if (denied) return denied;
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) return { ok: false, error: "Invalid user." };
+  try {
+    const s = await createServiceClient();
+    const { data, error: userError } = await s.auth.admin.getUserById(userId);
+    if (userError || !data.user?.email) return { ok: false, error: errorMessage(userError, "User email not found.") };
+    const { error } = await s.auth.resetPasswordForEmail(data.user.email, { redirectTo: await passwordSetupUrl() });
+    if (error) {
+      logUserError("password reset", error);
+      return { ok: false, error: errorMessage(error, "Could not send the password reset email.") };
+    }
+    return { ok: true, message: `Password reset sent to ${data.user.email}.` };
+  } catch (error) {
+    logUserError("password reset", error);
+    return { ok: false, error: errorMessage(error, "Could not send the password reset email.") };
   }
 }
 

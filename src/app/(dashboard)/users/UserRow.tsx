@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { deleteUser, setUserAccess, setUserMachines } from "./actions";
+import { deleteUser, sendUserPasswordReset, setUserAccess, setUserMachines } from "./actions";
 
 export type UserRole = "admin" | "operator" | "franchisee";
 export type EmployerKind = "softlife" | "franchisee" | "contractor";
@@ -49,7 +49,10 @@ export function UserRow({ user, tenants, machines }: { user: UserRowData; tenant
         {role === "operator" && !user.isSelf && <details className="mt-3"><summary className="cursor-pointer text-xs font-semibold text-cocoa">Assigned machines ({machineIds.length})</summary><div className="mt-2 grid max-h-44 gap-1 overflow-y-auto sm:grid-cols-2">{machines.map((machine) => <label key={machine.id} className="flex items-center gap-2 text-xs text-taupe"><input type="checkbox" checked={machineIds.includes(machine.id)} onChange={(event) => setMachineIds((current) => event.target.checked ? [...current, machine.id] : current.filter((id) => id !== machine.id))} />{machine.name}</label>)}</div><button disabled={pending} onClick={() => run(() => setUserMachines(user.id, machineIds), "Assignments saved.")} className="mt-2 text-xs font-bold text-terracotta">Save assignments</button></details>}
       </td>
       <td className="px-4 py-3 text-right">
-        {user.isSelf ? <span className="text-xs text-taupe">You</span> : <button onClick={() => confirm(`Remove ${user.email ?? "this user"}? This can't be undone.`) && run(() => deleteUser(user.id), "Removed.")} disabled={pending} className="text-xs font-semibold text-danger">Remove</button>}
+        <div className="flex flex-wrap justify-end gap-3">
+          <button onClick={() => run(() => sendUserPasswordReset(user.id), "Password reset email sent.")} disabled={pending || !user.email} className="text-xs font-semibold text-terracotta disabled:opacity-50">Send password reset</button>
+          {user.isSelf ? <span className="text-xs text-taupe">You</span> : <button onClick={() => confirm(`Remove ${user.email ?? "this user"}? This can't be undone.`) && run(() => deleteUser(user.id), "Removed.")} disabled={pending} className="text-xs font-semibold text-danger">Remove</button>}
+        </div>
         {error && <div className="mt-1 text-[11px] text-danger">{error}</div>}
         {message && <div className="mt-1 text-[11px] text-sage">{message}</div>}
       </td>

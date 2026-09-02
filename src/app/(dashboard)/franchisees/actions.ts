@@ -1,9 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth/session";
+import { passwordSetupUrl } from "@/lib/auth/password-redirect";
 import { FRANCHISEE_CONFIGURABLE_COMMANDS } from "@/lib/huaxin/remote-commands";
 import { bankDetailsFromForm } from "@/lib/bank-details";
 
@@ -224,11 +224,8 @@ export async function approveFranchiseeSignup(_previous: TenantResult | null, fd
       }).eq("id", userId);
       if (error) throw error;
     } else {
-      const requestHeaders = await headers();
-      const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
-      const origin = requestHeaders.get("origin") ?? `${requestHeaders.get("x-forwarded-proto") ?? "https"}://${host}`;
       const metadata = { full_name: request.full_name, role: "franchisee", employer_kind: "franchisee", tenant_id: tenantId };
-      const { data, error } = await s.auth.admin.inviteUserByEmail(email, { data: metadata, redirectTo: `${origin}/auth/callback?next=/set-password` });
+      const { data, error } = await s.auth.admin.inviteUserByEmail(email, { data: metadata, redirectTo: await passwordSetupUrl() });
       if (error || !data.user) throw error ?? new Error("The invitation did not create a user.");
       userId = data.user.id;
       invitedUserId = userId;

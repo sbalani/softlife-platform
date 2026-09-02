@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
 const input = "w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa focus:border-terracotta focus:outline-none";
@@ -22,21 +23,17 @@ export function SetPasswordForm() {
     const query = new URLSearchParams(window.location.search);
     const accessToken = hash.get("access_token");
     const refreshToken = hash.get("refresh_token");
+    const flowType = hash.get("type");
     const linkError = hash.get("error") || hash.get("error_code") || hash.get("error_description") || query.get("error") || query.get("error_code") || query.get("error_description");
     if (window.location.hash || linkError) window.history.replaceState(window.history.state, "", window.location.pathname);
     (async () => {
-      if (linkError || (hash.size > 0 && (!accessToken || !refreshToken))) {
+      if (linkError || !accessToken || !refreshToken || (flowType !== "invite" && flowType !== "recovery")) {
         setError("This password link is invalid or expired.");
         return;
       }
-      if (accessToken && refreshToken) {
-        const { error: sessionError } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
-        if (sessionError) { setError("This password link is invalid or expired."); return; }
-        setRecovery(hash.get("type") === "recovery");
-      } else {
-        const { data } = await supabase.auth.getSession();
-        if (!data.session) { setError("This password link is invalid or expired."); return; }
-      }
+      const { error: sessionError } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+      if (sessionError) { setError("This password link is invalid or expired."); return; }
+      setRecovery(flowType === "recovery");
       setReady(true);
     })();
   }, []);
@@ -60,7 +57,7 @@ export function SetPasswordForm() {
     });
   };
 
-  if (saved) return <p className="text-sm text-sage">Password updated. You can return to the SoftLife HACCP app and sign in.</p>;
+  if (saved) return <div className="space-y-3"><p className="text-sm text-sage">Password updated successfully.</p><Link href="/login" className="text-sm font-semibold text-terracotta hover:underline">Return to sign in</Link></div>;
 
   return (
     <div className="space-y-4">

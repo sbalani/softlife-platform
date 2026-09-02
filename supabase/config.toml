@@ -394,8 +394,8 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 project_id = "awsfqnymosevmhawbukf"
 
 [remotes.production.auth]
-site_url = "https://softlife-platform.vercel.app"
-additional_redirect_urls = ["https://softlife-platform.vercel.app/**", "http://localhost:3000/**", "https://*-sbalanis-projects.vercel.app/**"]
+site_url = "https://platform.softlife.es"
+additional_redirect_urls = ["https://platform.softlife.es/**", "https://softlife-platform.vercel.app/**", "http://localhost:3000/**", "https://*-sbalanis-projects.vercel.app/**"]
 
 [remotes.production.auth.mfa.totp]
 enroll_enabled = true

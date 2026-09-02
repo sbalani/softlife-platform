@@ -8,6 +8,8 @@ export type OdooSku = {
   barcode: string | null;
   qty_available: number;
   uom: string | null;
+  package_content_quantity: number | null;
+  package_content_uom: string | null;
   category: string | null;
   linked_product_id: string | null;
   linked_product_name: string | null;
@@ -24,9 +26,9 @@ export type OdooLotRow = {
 };
 
 const SAMPLE_SKUS: OdooSku[] = [
-  { id: 1, name: "Vanilla Soft-Serve Base 10L", sku: "BASE-VAN-10L", barcode: "8410000000012", qty_available: 42, uom: "Units", category: "Bases", linked_product_id: null, linked_product_name: null },
-  { id: 2, name: "Chocolate Sauce 5L", sku: "SAUCE-CHOC-5L", barcode: "8410000000029", qty_available: 18, uom: "Units", category: "Sauces", linked_product_id: null, linked_product_name: null },
-  { id: 3, name: "Oreo Crumble Topping 2kg", sku: "TOP-OREO-2KG", barcode: "8410000000036", qty_available: 7, uom: "Units", category: "Toppings", linked_product_id: null, linked_product_name: null },
+  { id: 1, name: "Vanilla Soft-Serve Base 10L", sku: "BASE-VAN-10L", barcode: "8410000000012", qty_available: 42, uom: "Units", package_content_quantity: null, package_content_uom: null, category: "Bases", linked_product_id: null, linked_product_name: null },
+  { id: 2, name: "Chocolate Sauce 5L", sku: "SAUCE-CHOC-5L", barcode: "8410000000029", qty_available: 18, uom: "Units", package_content_quantity: null, package_content_uom: null, category: "Sauces", linked_product_id: null, linked_product_name: null },
+  { id: 3, name: "Oreo Crumble Topping 2kg", sku: "TOP-OREO-2KG", barcode: "8410000000036", qty_available: 7, uom: "Units", package_content_quantity: null, package_content_uom: null, category: "Toppings", linked_product_id: null, linked_product_name: null },
 ];
 
 const SAMPLE_LOTS: OdooLotRow[] = [
@@ -39,7 +41,7 @@ export async function getOdooSkus(): Promise<{ skus: OdooSku[]; source: Source }
   try {
     const s = await createServiceClient();
     const [{ data }, { data: linkedRows }] = await Promise.all([
-      s.from("odoo_products").select("odoo_id,name,sku,barcode,qty_available,uom,category").order("name"),
+      s.from("odoo_products").select("odoo_id,name,sku,barcode,qty_available,uom,package_content_quantity,package_content_uom,category").order("name"),
       s.from("products").select("id,name,odoo_id").not("odoo_id", "is", null),
     ]);
     const rows = (data as Record<string, unknown>[]) ?? [];
@@ -57,6 +59,8 @@ export async function getOdooSkus(): Promise<{ skus: OdooSku[]; source: Source }
           barcode: (r.barcode as string) ?? null,
           qty_available: Number(r.qty_available ?? 0),
           uom: (r.uom as string) ?? null,
+          package_content_quantity: r.package_content_quantity == null ? null : Number(r.package_content_quantity),
+          package_content_uom: (r.package_content_uom as string) ?? null,
           category: (r.category as string) ?? null,
           linked_product_id: linked?.id ?? null,
           linked_product_name: linked?.name ?? null,

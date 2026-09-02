@@ -2,8 +2,8 @@ import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server
 
 export type ProductionAdminData = {
   available: boolean;
-  products: { id: string; name: string; consumption_type: string | null; default_portion_size: number | null; default_portion_uom: string | null; odoo_id: number | null; override_quantity: number | null; override_uom: string | null }[];
-  odooProducts: { odoo_id: number; name: string; sku: string | null }[];
+  products: { id: string; name: string; consumption_type: string | null; default_portion_size: number | null; default_portion_uom: string | null; odoo_id: number | null; override_quantity: number | null; override_uom: string | null; effective_quantity: number | null; effective_uom: string | null; effective_source: string; odoo_stock_uom: string | null; package_content_quantity: number | null; package_content_uom: string | null }[];
+  odooProducts: { odoo_id: number; name: string; sku: string | null; uom: string | null; package_content_quantity: number | null; package_content_uom: string | null }[];
   recipes: { id: string; name: string }[];
   defaults: { consumption_type: string; quantity: number; uom: string }[];
   settings: { cup_odoo_product_id: number | null; currency: string } | null;
@@ -23,9 +23,9 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
   try {
     const s = await createServiceClient();
     const [products, productOverrides, odooProducts, recipes, defaults, settings, warehouses, pending, runs] = await Promise.all([
-      s.from("products").select("id,name,consumption_type,default_portion_size,default_portion_uom,odoo_id").order("name"),
+      s.from("products").select("id,name,consumption_type,default_portion_size,default_portion_uom,odoo_id,odoo_products(uom,package_content_quantity,package_content_uom)").order("name"),
       s.from("production_product_consumption_overrides").select("product_id,quantity,uom"),
-      s.from("odoo_products").select("odoo_id,name,sku").order("name"),
+      s.from("odoo_products").select("odoo_id,name,sku,uom,package_content_quantity,package_content_uom").order("name"),
       s.from("recipes").select("id,name").eq("active", true).order("name"),
       s.from("production_consumption_defaults").select("consumption_type,quantity,uom").order("consumption_type"),
       s.from("production_settings").select("cup_odoo_product_id,currency").eq("singleton", true).maybeSingle(),
@@ -35,6 +35,7 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
     ]);
     for (const result of [products, productOverrides, odooProducts, recipes, defaults, settings, warehouses, pending, runs]) if (result.error) throw result.error;
     const overrides = new Map((productOverrides.data ?? []).map((row) => [row.product_id, row]));
+    const defaultsByType = new Map((defaults.data ?? []).map((row) => [row.consumption_type, row]));
     const runRows = (runs.data as unknown as Record<string, unknown>[]) ?? [];
     const blockedOrderIds = [...new Set(runRows.flatMap((run) => objectRecords(run.blocked_reasons)
       .filter((item) => item.problem_code === "already_in_production_run")
@@ -57,12 +58,24 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
     }
     return {
       available: true,
-      products: (products.data ?? []).map((row) => ({
-        ...row,
-        default_portion_size: row.default_portion_size == null ? null : Number(row.default_portion_size),
-        override_quantity: overrides.get(row.id)?.quantity == null ? null : Number(overrides.get(row.id)?.quantity),
-        override_uom: overrides.get(row.id)?.uom ?? null,
-      })),
+      products: (products.data as unknown as Record<string, unknown>[] ?? []).map((row) => {
+        const override = overrides.get(String(row.id));
+        const defaultPortion = row.consumption_type ? defaultsByType.get(String(row.consumption_type)) : undefined;
+        const odooProduct = Array.isArray(row.odoo_products) ? row.odoo_products[0] : row.odoo_products as Record<string, unknown> | null;
+        const effective = override ? { quantity: Number(override.quantity), uom: override.uom, source: "Production override" }
+          : row.default_portion_size != null && row.default_portion_uom ? { quantity: Number(row.default_portion_size), uom: String(row.default_portion_uom), source: "Legacy product default" }
+            : defaultPortion ? { quantity: Number(defaultPortion.quantity), uom: defaultPortion.uom, source: "Global type default" } : null;
+        return {
+          id: String(row.id), name: String(row.name), consumption_type: row.consumption_type as string | null,
+          default_portion_size: row.default_portion_size == null ? null : Number(row.default_portion_size), default_portion_uom: row.default_portion_uom as string | null,
+          odoo_id: row.odoo_id == null ? null : Number(row.odoo_id),
+          override_quantity: override?.quantity == null ? null : Number(override.quantity), override_uom: override?.uom ?? null,
+          effective_quantity: effective?.quantity ?? null, effective_uom: effective?.uom ?? null, effective_source: effective?.source ?? "Missing",
+          odoo_stock_uom: odooProduct?.uom == null ? null : String(odooProduct.uom),
+          package_content_quantity: odooProduct?.package_content_quantity == null ? null : Number(odooProduct.package_content_quantity),
+          package_content_uom: odooProduct?.package_content_uom == null ? null : String(odooProduct.package_content_uom),
+        };
+      }),
       odooProducts: odooProducts.data ?? [],
       recipes: recipes.data ?? [],
       defaults: (defaults.data ?? []).map((row) => ({ ...row, quantity: Number(row.quantity) })),

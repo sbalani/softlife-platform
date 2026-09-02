@@ -3,6 +3,7 @@ import {
   canonicalJson, decodeSyncCursor, encodeSyncCursor, isSyncCursor, localDateTimeToUtc,
   normalizeObservedName, productionDocumentDate, sha256, type SyncCursor,
 } from "../odoo-sync-contract.ts";
+import { convertPortionToStock } from "../production-units.ts";
 
 export class OdooContractError extends Error {
   status: number;
@@ -22,6 +23,7 @@ type ProductRow = {
   id: string; name: string; type: string; consumption_type: string | null; odoo_id: number | null;
   default_portion_size: number | null; default_portion_uom: string | null; updated_at: string;
   product_aliases: { alias: string; normalized_alias: string }[] | null;
+  odoo_products: { uom: string | null; package_content_quantity: number | null; package_content_uom: string | null } | { uom: string | null; package_content_quantity: number | null; package_content_uom: string | null }[] | null;
 };
 type Resolution = {
   lineIndex: number; rawName: string; normalizedName: string; rawPosition: string | null;
@@ -32,6 +34,8 @@ type Resolution = {
 type RecipeVersionComponent = {
   platform_product_id: string | null; odoo_product_id: number | null;
   quantity: number; uom: unknown; sequence: number;
+  stock_quantity?: number | null; stock_uom?: unknown;
+  package_content_quantity?: number | null; package_content_uom?: unknown;
 };
 
 function catalogCursor(value: unknown): value is CatalogCursor {
@@ -70,10 +74,10 @@ export async function getOdooCatalog(s: SupabaseClient, url: URL) {
   if (updatedAfter && Number.isNaN(Date.parse(updatedAfter))) throw new OdooContractError("updated_after must be an ISO timestamp");
 
   let productQuery = s.from("products")
-    .select("id,name,type,consumption_type,odoo_id,default_portion_size,default_portion_uom,updated_at,product_aliases(alias,normalized_alias)")
+    .select("id,name,type,consumption_type,odoo_id,default_portion_size,default_portion_uom,updated_at,product_aliases(alias,normalized_alias),odoo_products(uom,package_content_quantity,package_content_uom)")
     .order("updated_at").order("id").limit(cursor?.ingredients === "done" ? 0 : limit + 1);
   let versionQuery = s.from("recipe_versions")
-    .select("id,recipe_id,version,component_hash,odoo_bom_id,updated_at,recipes(name,odoo_finished_product_id),recipe_version_components(product_id,odoo_product_id,quantity,uom,sequence),recipe_version_odoo_components(odoo_product_id,quantity,uom,sequence)")
+    .select("id,recipe_id,version,component_hash,odoo_bom_id,updated_at,recipes(name,odoo_finished_product_id),recipe_version_components(product_id,odoo_product_id,quantity,uom,sequence,stock_quantity,stock_uom,package_content_quantity,package_content_uom),recipe_version_odoo_components(odoo_product_id,quantity,uom,sequence)")
     .order("updated_at").order("id").limit(cursor?.recipes === "done" ? 0 : limit + 1);
   if (updatedAfter) { productQuery = productQuery.gt("updated_at", updatedAfter); versionQuery = versionQuery.gt("updated_at", updatedAfter); }
   productQuery = applyCursor(productQuery, isSyncCursor(cursor?.ingredients) ? cursor.ingredients : null);
@@ -104,6 +108,11 @@ export async function getOdooCatalog(s: SupabaseClient, url: URL) {
         consumption_type: product.consumption_type,
         default_portion: override ? { quantity: Number(override.quantity), uom: override.uom }
           : product.default_portion_size && product.default_portion_uom ? { quantity: Number(product.default_portion_size), uom: product.default_portion_uom } : null,
+        stock_uom: relation(product.odoo_products)?.uom ?? null,
+        package_content: relation(product.odoo_products)?.package_content_quantity == null ? null : {
+          quantity: Number(relation(product.odoo_products)?.package_content_quantity),
+          uom: relation(product.odoo_products)?.package_content_uom,
+        },
         updated_at: product.updated_at,
       };
     }),
@@ -116,6 +125,7 @@ export async function getOdooCatalog(s: SupabaseClient, url: URL) {
       return {
         recipe_id: row.recipe_id,
         recipe_version_id: row.id,
+        payload_contract_version: components.some((component) => component.platform_product_id !== null && component.stock_quantity != null) ? 2 : 1,
         version: row.version,
         name: recipe?.name,
         odoo_finished_product_id: recipe?.odoo_finished_product_id ?? null,
@@ -126,6 +136,12 @@ export async function getOdooCatalog(s: SupabaseClient, url: URL) {
           odoo_product_id: component.odoo_product_id,
           quantity: component.quantity,
           uom: component.uom,
+          ...(component.stock_quantity == null ? {} : {
+            stock_quantity: component.stock_quantity,
+            stock_uom: component.stock_uom,
+            package_content_quantity: component.package_content_quantity ?? null,
+            package_content_uom: component.package_content_uom ?? null,
+          }),
         })),
         updated_at: row.updated_at,
       };
@@ -144,6 +160,8 @@ export function mergeRecipeVersionComponents(
       platform_product_id: String(component.product_id),
       odoo_product_id: Number(component.odoo_product_id) || null,
       quantity: Number(component.quantity), uom: component.uom, sequence: Number(component.sequence),
+      stock_quantity: component.stock_quantity == null ? null : Number(component.stock_quantity), stock_uom: component.stock_uom,
+      package_content_quantity: component.package_content_quantity == null ? null : Number(component.package_content_quantity), package_content_uom: component.package_content_uom,
     })),
     ...odooComponents.map((component) => ({
       platform_product_id: null,
@@ -271,8 +289,8 @@ async function createRecipeVersion(s: SupabaseClient, recipeId: string, machineI
   const { data: stableRows, error: stableError } = await s.from("recipe_components").select("product_id,sequence").eq("recipe_id", recipeId).order("sequence");
   if (stableError) throw stableError;
   const ids = (stableRows ?? []).map((row) => String(row.product_id));
-  const components: { platform_product_id: string | null; odoo_product_id: number; quantity: number; uom: string; sequence: number }[] = [];
-  const problems: { problem_code: string; platform_product_id: string | null }[] = [];
+  const components: { platform_product_id: string | null; odoo_product_id: number; quantity: number; uom: string; sequence: number; stock_quantity: number; stock_uom: string; package_content_quantity: number | null; package_content_uom: string | null }[] = [];
+  const problems: { problem_code: string; platform_product_id: string | null; message?: string }[] = [];
   for (const [index, productId] of ids.entries()) {
     const product = context.products.get(productId);
     if (!product) { problems.push({ problem_code: "unknown_ingredient_name", platform_product_id: productId }); continue; }
@@ -281,9 +299,23 @@ async function createRecipeVersion(s: SupabaseClient, recipeId: string, machineI
         ?? (product.consumption_type ? context.defaults.get(product.consumption_type) : undefined);
     if (!quantity) { problems.push({ problem_code: "missing_component_quantity", platform_product_id: productId }); continue; }
     if (!product.odoo_id) { problems.push({ problem_code: "missing_ingredient_odoo_link", platform_product_id: productId }); continue; }
+    const odooProduct = relation(product.odoo_products);
+    let conversion;
+    try {
+      conversion = convertPortionToStock({
+        quantity: Number(quantity.quantity), uom: quantity.uom, stockUom: String(odooProduct?.uom ?? ""),
+        packageContentQuantity: odooProduct?.package_content_quantity == null ? null : Number(odooProduct.package_content_quantity),
+        packageContentUom: odooProduct?.package_content_uom == null ? null : String(odooProduct.package_content_uom),
+      });
+    } catch (error) {
+      problems.push({ problem_code: "invalid_stock_conversion", platform_product_id: productId, message: error instanceof Error ? error.message : String(error) });
+      continue;
+    }
     components.push({
       platform_product_id: productId, odoo_product_id: product.odoo_id,
       quantity: Number(quantity.quantity), uom: quantity.uom.trim(), sequence: index + 1,
+      stock_quantity: conversion.stockQuantity, stock_uom: conversion.stockUom,
+      package_content_quantity: conversion.packageContentQuantity, package_content_uom: conversion.packageContentUom,
     });
   }
   const cupOdooProductId = context.cupOdooProductId;
@@ -292,11 +324,11 @@ async function createRecipeVersion(s: SupabaseClient, recipeId: string, machineI
     problems.push({ problem_code: "cup_matches_food_ingredient", platform_product_id: null });
   }
   if (problems.length || !cupOdooProductId) return { version: null, components: [], problems };
-  const cupComponent = { platform_product_id: null, odoo_product_id: cupOdooProductId, quantity: 1, uom: "unit", sequence: components.length + 1 };
+  const cupComponent = { platform_product_id: null, odoo_product_id: cupOdooProductId, quantity: 1, uom: "unit", sequence: components.length + 1, stock_quantity: 1, stock_uom: "unit", package_content_quantity: null, package_content_uom: null };
   components.push(cupComponent);
-  const { data: version, error } = await s.rpc("create_or_reuse_recipe_version", {
+  const { data: version, error } = await s.rpc("create_or_reuse_recipe_version_v2", {
     p_recipe_id: recipeId,
-    p_components: components.filter((component) => component.platform_product_id !== null).map((component) => ({ product_id: component.platform_product_id, odoo_product_id: component.odoo_product_id, quantity: component.quantity, uom: component.uom, sequence: component.sequence })),
+    p_components: components.filter((component) => component.platform_product_id !== null).map((component) => ({ product_id: component.platform_product_id, odoo_product_id: component.odoo_product_id, quantity: component.quantity, uom: component.uom, sequence: component.sequence, stock_quantity: component.stock_quantity, stock_uom: component.stock_uom, package_content_quantity: component.package_content_quantity, package_content_uom: component.package_content_uom })),
     p_odoo_components: [{ odoo_product_id: cupComponent.odoo_product_id, quantity: cupComponent.quantity, uom: cupComponent.uom, sequence: cupComponent.sequence }],
   });
   if (error) throw error;
@@ -360,7 +392,7 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       }
     }
     const [productsResult, assignmentsResult, defaultsResult, productOverridesResult, machineOverridesResult, settingsResult, warehousesResult, membershipsResult, pendingPushesResult] = await Promise.all([
-      s.from("products").select("id,name,type,consumption_type,odoo_id,default_portion_size,default_portion_uom,updated_at,product_aliases(alias,normalized_alias)"),
+      s.from("products").select("id,name,type,consumption_type,odoo_id,default_portion_size,default_portion_uom,updated_at,product_aliases(alias,normalized_alias),odoo_products(uom,package_content_quantity,package_content_uom)"),
       machineIds.length ? s.from("machine_menu_recipe_assignments").select("machine_id,menu_kind,menu_position,recipe_id,valid_from,valid_to,recipes(name)").in("machine_id", machineIds).lt("valid_from", input.periodTo).or(`valid_to.is.null,valid_to.gt.${input.periodFrom}`) : Promise.resolve({ data: [], error: null }),
       s.from("production_consumption_defaults").select("consumption_type,quantity,uom"),
       s.from("production_product_consumption_overrides").select("product_id,quantity,uom"),
@@ -472,16 +504,21 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
     for (const group of groups.values()) {
       const warehouseId = Number(group.odoo_warehouse_id);
       const warehouse = warehouses.get(warehouseId) ?? { odoo_warehouse_id: warehouseId, odoo_customer_id: group.odoo_customer_id, recipes: [] };
-      const components = (group.components as { odoo_product_id: number; quantity: number; uom: string }[]).map((component) => ({
+      const components = (group.components as { odoo_product_id: number; quantity: number; uom: string; stock_quantity: number; stock_uom: string; package_content_quantity: number | null; package_content_uom: string | null }[]).map((component) => ({
         odoo_product_id: component.odoo_product_id, quantity_per_unit: component.quantity,
         total_quantity: component.quantity * Number(group.units_sold), uom: component.uom,
+        stock_quantity_per_unit: component.stock_quantity,
+        stock_total_quantity: component.stock_quantity * Number(group.units_sold), stock_uom: component.stock_uom,
+        package_content_quantity: component.package_content_quantity, package_content_uom: component.package_content_uom,
       }));
       (warehouse.recipes as Record<string, unknown>[]).push({ ...group, components });
       warehouses.set(warehouseId, warehouse);
     }
-    const payload = { export_id: exportId, period_from: input.periodFrom, period_to: input.periodTo, time_zone: input.timeZone, document_date: input.documentDate, warehouses: [...warehouses.values()] };
+    const payload = { payload_contract_version: 2, export_id: exportId, period_from: input.periodFrom, period_to: input.periodTo, time_zone: input.timeZone, document_date: input.documentDate, warehouses: [...warehouses.values()] };
     const payloadHash = sha256(payload);
-    const configSnapshot = { defaults: defaultsResult.data, product_overrides: productOverridesResult.data, machine_overrides: machineOverridesResult.data, settings };
+    const configSnapshot = { defaults: defaultsResult.data, product_overrides: productOverridesResult.data, machine_overrides: machineOverridesResult.data, settings,
+      resolved_products: products.map((product) => ({ id: product.id, odoo_id: product.odoo_id, default_portion_size: product.default_portion_size, default_portion_uom: product.default_portion_uom, odoo_product: relation(product.odoo_products) })),
+    };
     const claimableOrders = orders.filter((order) => !occupied.has(String(order.id)));
     const refreshedOrders = new Map<string, Record<string, unknown>>();
     for (let offset = 0; offset < claimableOrders.length; offset += 200) {
@@ -520,6 +557,7 @@ export function presentManufacturingExport(row: Record<string, unknown>) {
   return {
     export_id: row.id, idempotency_key: row.idempotency_key, initiated_by: row.initiated_by, status: row.status,
     period_from: row.period_from, period_to: row.period_to, time_zone: row.time_zone, document_date: row.document_date,
+    payload_contract_version: payload.payload_contract_version ?? 1,
     payload_sha256: row.payload_sha256, warehouses: payload.warehouses ?? [], blocked_items: row.blocked_reasons ?? [],
     odoo_result: row.odoo_result ?? null, created_at: row.created_at, updated_at: row.updated_at,
   };

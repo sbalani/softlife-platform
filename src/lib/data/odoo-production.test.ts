@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mergeRecipeVersionComponents, OdooContractError, parsePeriodInput, validateManufacturingResult } from "./odoo-production.ts";
+import { mergeRecipeVersionComponents, OdooContractError, parsePeriodInput, presentManufacturingExport, validateManufacturingResult } from "./odoo-production.ts";
 
 test("period requests freeze exact UTC boundaries and a deterministic fingerprint", () => {
   const input = parsePeriodInput({
@@ -50,4 +50,10 @@ test("accepted manufacturing results must cover every frozen warehouse", () => {
     { odoo_warehouse_id: 8, manufacturing_order_ids: [1], sales_order_id: 2, delivery_id: 3 },
   ] }, payload), OdooContractError);
   assert.throws(() => validateManufacturingResult({ accepted: false, error: "" }, payload), OdooContractError);
+});
+
+test("manufacturing responses expose the frozen payload contract version", () => {
+  const response = presentManufacturingExport({ id: "run", payload: { payload_contract_version: 2, warehouses: [] } });
+  assert.equal(response.payload_contract_version, 2);
+  assert.equal(presentManufacturingExport({ id: "historical", payload: { warehouses: [] } }).payload_contract_version, 1);
 });

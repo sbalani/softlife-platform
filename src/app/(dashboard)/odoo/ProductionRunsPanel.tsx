@@ -73,8 +73,13 @@ function RunDetails({ run, displayTimeZone }: { run: Run; displayTimeZone: strin
                   <p className="font-semibold text-cocoa">{value(recipe.name, "Unnamed recipe")} · {value(recipe.units_sold, "0")} units · {value(recipe.gross_sales, "0")} {value(recipe.currency, "")}</p>
                   <p className="text-[10px] text-taupe">Recipe version {value(recipe.version)} · Finished product Odoo ID {value(recipe.odoo_finished_product_id)}</p>
                   <div className="mt-1 flex flex-wrap gap-1">{records(recipe.components).map((component, componentIndex) => (
-                    <span key={`${value(component.odoo_product_id)}-${componentIndex}`} className="rounded bg-sand px-2 py-1 text-[10px] text-cocoa">
-                      Odoo {value(component.odoo_product_id)}: {value(component.total_quantity)} {value(component.uom)} total ({value(component.quantity_per_unit)} per unit)
+                    <span key={`${value(component.odoo_product_id)}-${componentIndex}`} className="contents">
+                      <span className="rounded bg-sand px-2 py-1 text-[10px] text-cocoa">
+                        Odoo {value(component.odoo_product_id)}: {value(component.total_quantity)} {value(component.uom)} physical ({value(component.quantity_per_unit)} per sale)
+                      </span>
+                      {component.stock_quantity_per_unit != null && <span className="rounded bg-sage/10 px-2 py-1 text-[10px] text-cocoa">
+                        Odoo stock: {value(component.stock_total_quantity)} {value(component.stock_uom)} total ({value(component.stock_quantity_per_unit)} per sale){component.package_content_quantity != null ? ` · 1 unit = ${value(component.package_content_quantity)} ${value(component.package_content_uom)}` : ""}
+                      </span>}
                     </span>
                   ))}</div>
                 </div>

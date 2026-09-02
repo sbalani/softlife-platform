@@ -48,7 +48,7 @@ export default async function OdooPage() {
               </div>
             </div>
 
-            <details className="rounded-xl border border-line"><summary className="cursor-pointer px-4 py-3 text-sm font-bold text-cocoa">Ingredient consumption overrides ({production.products.length})</summary><div className="max-h-[28rem] overflow-auto border-t border-line"><table className="w-full min-w-[720px] text-xs"><thead className="sticky top-0 bg-sand text-left uppercase text-taupe"><tr><th className="px-3 py-2">Ingredient</th><th>Odoo</th><th>Type</th><th>Override</th><th>UoM</th><th /></tr></thead><tbody className="divide-y divide-line">{production.products.map((product) => <tr key={product.id}><td className="px-3 py-2 font-semibold text-cocoa">{product.name}</td><td className="text-taupe">{product.odoo_id ?? "Missing"}</td><td colSpan={4}><form action={saveProductionProduct} className="grid grid-cols-[10rem_7rem_5rem_auto] items-center gap-2 py-1"><input type="hidden" name="product_id" value={product.id} /><select name="consumption_type" defaultValue={product.consumption_type ?? ""} className="rounded border border-line px-2 py-1.5"><option value="">Unclassified</option><option value="base">Base</option><option value="solid_topping">Solid topping</option><option value="liquid_topping">Liquid topping</option></select><input name="quantity" type="number" min="0.001" step="0.001" defaultValue={product.override_quantity ?? ""} placeholder="Use type default" className="rounded border border-line px-2 py-1.5" /><input name="uom" defaultValue={product.override_uom ?? ""} placeholder="g" className="rounded border border-line px-2 py-1.5" /><button className="text-xs font-bold text-terracotta">Save</button></form></td></tr>)}</tbody></table></div></details>
+            <details className="rounded-xl border border-line"><summary className="cursor-pointer px-4 py-3 text-sm font-bold text-cocoa">Ingredient consumption and stock conversion ({production.products.length})</summary><p className="border-t border-line bg-cream/40 px-4 py-2 text-[11px] text-taupe">Baseline portions show product and global precedence. A machine-specific override, when configured, takes priority and is frozen in the run preview.</p><div className="max-h-[28rem] overflow-auto border-t border-line"><table className="w-full min-w-[980px] text-xs"><thead className="sticky top-0 bg-sand text-left uppercase text-taupe"><tr><th className="px-3 py-2">Ingredient</th><th>Odoo</th><th>Baseline portion</th><th>Stock conversion</th><th>Type / override</th></tr></thead><tbody className="divide-y divide-line">{production.products.map((product) => <tr key={product.id}><td className="px-3 py-2 font-semibold text-cocoa">{product.name}</td><td className="text-taupe">{product.odoo_id ?? "Missing"}<span className="block text-[10px]">{product.odoo_stock_uom ?? "No stock UoM"}</span></td><td className="pr-3 font-semibold text-cocoa">{product.effective_quantity ?? "Missing"} {product.effective_uom ?? ""}<span className="block text-[10px] font-normal text-taupe">{product.effective_source}</span></td><td className="pr-3 text-cocoa">{product.package_content_quantity == null ? <span className={product.odoo_stock_uom?.toLowerCase().startsWith("unit") ? "font-semibold text-warning" : "text-taupe"}>Not mirrored</span> : <>1 unit = {product.package_content_quantity} {product.package_content_uom}</>}</td><td><form action={saveProductionProduct} className="grid grid-cols-[10rem_7rem_5rem_auto] items-center gap-2 py-1"><input type="hidden" name="product_id" value={product.id} /><select name="consumption_type" defaultValue={product.consumption_type ?? ""} className="rounded border border-line px-2 py-1.5"><option value="">Unclassified</option><option value="base">Base</option><option value="solid_topping">Solid topping</option><option value="liquid_topping">Liquid topping</option></select><input name="quantity" type="number" min="0.001" step="0.001" defaultValue={product.override_quantity ?? ""} placeholder="Use baseline" className="rounded border border-line px-2 py-1.5" /><input name="uom" defaultValue={product.override_uom ?? ""} placeholder="g" className="rounded border border-line px-2 py-1.5" /><button className="text-xs font-bold text-terracotta">Save</button></form></td></tr>)}</tbody></table></div></details>
 
             <details className="rounded-xl border border-line"><summary className="cursor-pointer px-4 py-3 text-sm font-bold text-cocoa">Warehouse sales customers</summary><div className="grid gap-2 border-t border-line p-4 sm:grid-cols-2">{production.warehouses.map((warehouse) => <form action={saveWarehouseCustomer} key={warehouse.odoo_id} className="flex items-end gap-2 rounded-lg bg-cream/60 p-3"><input type="hidden" name="warehouse_id" value={warehouse.odoo_id} /><label className="min-w-0 flex-1 text-xs text-taupe"><span className="mb-1 block truncate">{warehouse.name}</span><input name="customer_id" type="number" min="1" defaultValue={warehouse.sales_customer_odoo_id ?? ""} placeholder="Odoo customer ID" className="w-full rounded border border-line px-2 py-1.5 text-cocoa" /></label><button className="rounded bg-cocoa px-3 py-1.5 text-xs font-bold text-white">Save</button></form>)}</div></details>
 
@@ -71,6 +71,7 @@ export default async function OdooPage() {
                 <th className="px-4 py-3">Barcode</th>
                 <th className="px-4 py-3">Category</th>
                 <th className="px-4 py-3 text-right">On hand</th>
+                <th className="px-4 py-3">Net content</th>
                 <th className="px-4 py-3 text-right">Ingredient</th>
               </tr>
             </thead>
@@ -84,6 +85,7 @@ export default async function OdooPage() {
                   <td className="px-4 py-3 text-right text-cocoa">
                     {s.qty_available} {s.uom ?? ""}
                   </td>
+                  <td className="px-4 py-3 text-taupe">{s.package_content_quantity == null ? "Not configured" : `${s.package_content_quantity} ${s.package_content_uom}`}</td>
                   <td className="px-4 py-3 text-right">
                     {s.linked_product_id ? (
                       <span className="text-xs font-semibold text-sage">⇄ {s.linked_product_name}</span>
@@ -95,7 +97,7 @@ export default async function OdooPage() {
               ))}
               {skus.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-taupe">No SKUs found.</td>
+                  <td colSpan={7} className="px-4 py-6 text-center text-taupe">No SKUs found.</td>
                 </tr>
               )}
             </tbody>

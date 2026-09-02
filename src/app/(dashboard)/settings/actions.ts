@@ -118,7 +118,7 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
     revalidatePath("/settings");
     return {
       ok: orderSync.ok && !couponSync.failed.length,
-      summary: `Synced ${machines} machine(s), ${temps} temperature reading(s), ${orders} order(s), and coupons for ${couponSync.synced} machine(s); ${orderSync.failedMachines.length + couponSync.failed.length} order/coupon machine sync(s) failed, geocoded ${geocoded} location(s).`,
+      summary: `Synced ${machines} machine(s), ${temps} temperature reading(s), ${orders} order(s), and coupons for ${couponSync.synced} machine(s); ${orderSync.failedMachines.length + couponSync.failed.length} order/coupon machine sync(s) failed, geocoded ${geocoded} location(s).${orderSync.error ? ` Order sync: ${orderSync.error}` : ""}`,
     };
   } catch (e) {
     return {

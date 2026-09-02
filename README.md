@@ -39,6 +39,9 @@ live against UAT). Set the five `HUAXIN_*` values in `.env.local`.
 - **Device sync** — `GET /api/cron/huaxin-sync` pulls the Huaxin device list
   and upserts machines. Wire it up in `vercel.json` as a daily cron and protect
   it with `CRON_SECRET`.
+- **Sales reconciliation** — Supabase `pg_cron` calls `GET /api/cron/order-sync`
+  every 15 minutes with a generated token stored in Vault. The best-effort GitHub
+  schedule and daily Vercel full-fleet sync remain as telemetry and sales fallbacks.
 
 > Huaxin has confirmed it will not renew the expired **UAT TLS certificate**.
 > Keep `HUAXIN_VERIFY_SSL=false` for UAT. The web and defrost clients deliberately

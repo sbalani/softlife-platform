@@ -60,6 +60,14 @@ export async function ingestOrders(from: string, to: string, selectedImeis: stri
   const began = `${from} 00:00:00`;
   const end = `${to} 23:59:59`;
   const supabase = await createServiceClient();
+  const owner = crypto.randomUUID();
+  const { data: claimed, error: claimError } = await supabase.rpc("claim_order_sync_lock", { p_owner: owner });
+  if (claimError) return failedResult(claimError.message);
+  if (!claimed) return failedResult("An order sync is already running.");
+  const renewLease = async () => {
+    const { data, error } = await supabase.rpc("renew_order_sync_lock", { p_owner: owner });
+    if (error || !data) throw error ?? new Error("The order sync lease expired.");
+  };
   let runId: string | undefined;
   let orders = 0;
   let succeededMachines = 0;
@@ -105,7 +113,7 @@ export async function ingestOrders(from: string, to: string, selectedImeis: stri
       let machineOrders = 0;
       let failure: OrderMachineSyncFailure | null = null;
       try {
-        const ords = (await listAllOrders(cfg, d.deviceImei, began, end)).filter((o) => o.orderCode);
+        const ords = (await listAllOrders(cfg, d.deviceImei, began, end, 50, renewLease)).filter((o) => o.orderCode);
         const rows = ords.map((order) => orderRowFromHuaxin(order, {
           id: machine?.id ?? null,
           tenantId: tenantForOrder(assignments, machine?.id ?? null, huaxinOrderTime(order)) ?? machine?.tenant_id ?? null,
@@ -166,5 +174,8 @@ export async function ingestOrders(from: string, to: string, selectedImeis: stri
       }).eq("id", runId);
     }
     return { ...failedResult(error), orders, machines: succeededMachines + failedMachines.length, succeededMachines, failedMachines, runId };
+  } finally {
+    const { error } = await supabase.rpc("release_order_sync_lock", { p_owner: owner });
+    if (error) console.error("[order-sync] Could not release sync lock:", error);
   }
 }

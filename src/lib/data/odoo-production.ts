@@ -470,7 +470,17 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
         const { data, error } = await s.rpc("create_or_reuse_recipe", { p_product_ids: productIds, p_name: displayName });
         if (error) throw error;
         recipeId = String(data);
-      } else { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "missing_recipe" }); continue; }
+      } else {
+        blocked.push({
+          order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "missing_recipe",
+          resolution_evidence: activeResolutions.map((resolution) => ({
+            raw_name: resolution.rawName, raw_position: resolution.rawPosition, mapping_method: resolution.method,
+            platform_product_id: resolution.productId, ingredient_name: resolution.productId ? productsById.get(resolution.productId)?.name ?? null : null,
+            recipe_id: resolution.recipeId,
+          })),
+        });
+        continue;
+      }
       const warehouseId = Number(order.odoo_warehouse_id_at_sale);
       const warehouse = warehouseMap.get(warehouseId);
       if (!warehouseId || !warehouse) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "missing_warehouse_assignment" }); continue; }
@@ -478,7 +488,19 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       const currency = String(order.currency ?? settings.currency ?? "EUR");
       if (currency !== settings.currency) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "currency_mismatch", currency, expected_currency: settings.currency }); continue; }
       const versionResult = await createRecipeVersion(s, recipeId, machineId, { products: productsById, defaults, productOverrides, machineOverrides, cupOdooProductId: settings.cup_odoo_product_id == null ? null : Number(settings.cup_odoo_product_id) });
-      if (!versionResult.version) { for (const problem of versionResult.problems) blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, ...problem }); continue; }
+      if (!versionResult.version) {
+        for (const problem of versionResult.problems) {
+          const ingredient = problem.platform_product_id ? productsById.get(problem.platform_product_id) : null;
+          const mirror = ingredient ? relation(ingredient.odoo_products) : null;
+          blocked.push({
+            order_id: orderId, order_code: orderCode, machine: machineName, ...problem,
+            ingredient_name: ingredient?.name ?? null, ingredient_odoo_id: ingredient?.odoo_id ?? null,
+            odoo_stock_uom: mirror?.uom ?? null, package_content_quantity: mirror?.package_content_quantity ?? null,
+            package_content_uom: mirror?.package_content_uom ?? null,
+          });
+        }
+        continue;
+      }
       for (const row of resolutionRows) if (row.order_id === orderId && row.resolution_status !== "ignored") {
         row.recipe_id = recipeId;
         row.recipe_version_id = versionResult.version.id;

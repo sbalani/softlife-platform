@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { formatDateTime } from "@/lib/dates";
 import type { ProductionAdminData } from "@/lib/data/odoo-production-admin";
-import { cancelPlatformPeriod, confirmPlatformPeriod, preparePlatformPeriod } from "./actions";
+import { cancelPlatformPeriod, confirmPlatformPeriod, preparePlatformPeriod, resolveProductionOrdersToRecipe } from "./actions";
 import { RunSubmitButton } from "./RunSubmitButton";
+import { OdooSaveForm } from "./OdooSaveForm";
 
 type Run = ProductionAdminData["runs"][number];
 
@@ -29,24 +30,52 @@ function blockerMessage(item: Record<string, unknown>) {
   if (item.problem_code === "already_in_production_run") return "Reserved by another manufacturing run.";
   if (item.problem_code === "missing_warehouse_customer") return `Odoo warehouse ${value(item.odoo_warehouse_id)} has no sales customer mapping.`;
   if (item.problem_code === "unknown_ingredient_name") return `Unknown ingredient: ${value(item.raw_text)}.`;
+  if (item.problem_code === "invalid_stock_conversion") return `${value(item.ingredient_name, "Ingredient")} (Odoo ID ${value(item.ingredient_odoo_id)}) cannot convert its physical portion into ${value(item.odoo_stock_uom, "the Odoo stock UoM")}. ${value(item.message, "Review its mirrored net content.")}`;
+  if (item.problem_code === "missing_recipe") return "These sale lines do not resolve to one complete recipe. Choose the complete recipe below.";
   return value(item.message, value(item.problem_code, "Unknown preparation problem"));
 }
 
-function BlockedItems({ items }: { items: Record<string, unknown>[] }) {
+function BlockedItems({ items, recipes, remediable, exportId }: { items: Record<string, unknown>[]; recipes: { id: string; name: string }[]; remediable: boolean; exportId: string }) {
+  const recipeGroups = new Map<string, { items: Record<string, unknown>[]; evidence: Record<string, unknown>[] }>();
+  for (const item of items.filter((candidate) => candidate.problem_code === "missing_recipe" && candidate.order_id)) {
+    const evidence = records(item.resolution_evidence);
+    const signature = evidence.length
+      ? `${value(item.machine)}:${evidence.map((line) => [
+        value(line.raw_position), value(line.raw_name), value(line.mapping_method), value(line.resolution_status),
+        value(line.platform_product_id), value(line.recipe_id),
+      ].join(":")).sort().join("|")}`
+      : String(item.order_id);
+    const group = recipeGroups.get(signature) ?? { items: [], evidence };
+    group.items.push(item);
+    recipeGroups.set(signature, group);
+  }
   return <div>
     <h4 className="font-bold text-warning">Blocked items</h4>
     <div className="mt-2 space-y-2">{items.map((item, index) => {
       const ownerId = String(item.blocking_export_id ?? "");
+      const evidence = records(item.resolution_evidence);
       return <div key={`${value(item.order_id)}-${index}`} className="rounded border border-warning/30 bg-warning/10 p-2 text-[11px] text-cocoa">
         <p className="font-semibold">{value(item.machine, "Unknown machine")} · order {value(item.order_code, value(item.order_id))}</p>
         <p>{blockerMessage(item)}</p>
+        {item.problem_code === "invalid_stock_conversion" && <p className="mt-1 text-taupe">Mirror value: {item.package_content_quantity == null ? "not present" : `1 unit = ${value(item.package_content_quantity)} ${value(item.package_content_uom)}`}. <Link href="#production-conversion" className="font-semibold underline">Review ingredient conversion</Link></p>}
+        {evidence.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{evidence.map((line, lineIndex) => <span key={`${value(line.line_index)}-${lineIndex}`} className="rounded bg-white/70 px-1.5 py-0.5">{value(line.raw_name, "Unnamed line")} · position {value(line.raw_position)} → {value(line.recipe_name, value(line.ingredient_name, value(line.mapping_method)))}</span>)}</div>}
         {ownerId && <p className="mt-1">Owner run: <Link href={`#run-${ownerId}`} className="break-all font-mono font-semibold underline">{value(item.blocking_idempotency_key, ownerId)}</Link>{item.blocking_status ? ` (${value(item.blocking_status)})` : ""}</p>}
       </div>;
     })}</div>
+    {remediable && recipeGroups.size > 0 && <div className="mt-3 space-y-2">{[...recipeGroups.entries()].map(([signature, group]) => (
+      <OdooSaveForm action={resolveProductionOrdersToRecipe} key={signature} className="rounded-lg border border-terracotta/30 bg-white p-3">
+        <input type="hidden" name="export_id" value={exportId} />
+        {group.items.map((item) => <input key={String(item.order_id)} type="hidden" name="order_id" value={String(item.order_id)} />)}
+        <p className="font-semibold text-cocoa">Resolve {group.items.length} matching {value(group.items[0].machine, "machine")} order{group.items.length === 1 ? "" : "s"}</p>
+        <p className="mt-1 text-[10px] text-taupe">{group.evidence.map((line) => `${value(line.raw_name, "Unnamed line")} (position ${value(line.raw_position)})`).join(" + ") || "No line evidence available"}</p>
+        <div className="mt-2 flex gap-2"><select name="recipe_id" required defaultValue="" className="min-w-0 flex-1 rounded border border-line px-2 py-1.5"><option value="" disabled>Choose the complete recipe</option>{recipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}</select><button className="rounded bg-terracotta px-3 py-1.5 font-bold text-white">Apply to orders</button></div>
+        <p className="mt-1 text-[10px] text-warning">This fixes the durable sale resolution only. Then cancel this blocked preview and prepare a new one.</p>
+      </OdooSaveForm>
+    ))}</div>}
   </div>;
 }
 
-function RunDetails({ run, displayTimeZone }: { run: Run; displayTimeZone: string }) {
+function RunDetails({ run, displayTimeZone, recipes }: { run: Run; displayTimeZone: string; recipes: { id: string; name: string }[] }) {
   const warehouses = records(run.payload?.warehouses);
   return (
     <details className="mt-3 rounded-lg border border-line bg-white">
@@ -88,7 +117,7 @@ function RunDetails({ run, displayTimeZone }: { run: Run; displayTimeZone: strin
           ))}</div> : <p className="mt-1 text-taupe">No warehouse production is present in this payload.</p>}
         </div>
 
-        {run.blocked_items.length > 0 && <BlockedItems items={run.blocked_items} />}
+        {run.blocked_items.length > 0 && <BlockedItems items={run.blocked_items} recipes={recipes} remediable={run.status === "blocked" && run.initiated_by === "platform"} exportId={run.id} />}
         {run.odoo_result && <div><h4 className="font-bold text-cocoa">Odoo result</h4><pre className="mt-1 max-h-52 overflow-auto whitespace-pre-wrap rounded bg-cream p-2 text-[10px] text-cocoa">{JSON.stringify(run.odoo_result, null, 2)}</pre></div>}
 
         {run.initiated_by === "platform" && run.status === "draft" && run.payload_sha256 && (
@@ -113,7 +142,7 @@ function RunDetails({ run, displayTimeZone }: { run: Run; displayTimeZone: strin
   );
 }
 
-export function ProductionRunsPanel({ runs, timeZone }: { runs: Run[]; timeZone: string }) {
+export function ProductionRunsPanel({ runs, timeZone, recipes }: { runs: Run[]; timeZone: string; recipes: { id: string; name: string }[] }) {
   return (
     <div className="rounded-xl border border-line p-4">
       <h3 className="text-sm font-bold text-cocoa">Manufacturing runs</h3>
@@ -131,7 +160,7 @@ export function ProductionRunsPanel({ runs, timeZone }: { runs: Run[]; timeZone:
           <div className="flex flex-wrap items-center justify-between gap-2"><span className="break-all font-mono font-semibold text-cocoa">{run.idempotency_key}</span><span className="font-bold uppercase text-taupe">{run.status} · {run.initiated_by}</span></div>
           <p className="mt-1 font-semibold text-cocoa">{run.status === "blocked" && !run.order_count && run.blocked_items.length > 0 && run.blocked_items.every((item) => item.problem_code === "already_in_production_run") ? "This duplicate reserved no orders and sent nothing to Odoo. It can be removed safely." : STATUS_COPY[run.status] ?? "Review this run before taking another action."}</p>
           <p className="mt-1 text-taupe">{formatDateTime(run.period_from, run.time_zone)} to {formatDateTime(run.period_to, run.time_zone)} ({run.time_zone}, end exclusive) · {run.order_count} reserved order rows{run.blocked_items.length ? ` · ${run.blocked_items.length} blocker findings` : ""}</p>
-          <RunDetails run={run} displayTimeZone={timeZone} />
+          <RunDetails run={run} displayTimeZone={timeZone} recipes={recipes} />
         </div>
       ))}{!runs.length && <p className="text-sm text-taupe">No manufacturing runs prepared.</p>}</div>
     </div>

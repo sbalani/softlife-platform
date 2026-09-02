@@ -22,6 +22,7 @@ export type Product = {
   nf_sugar: number | null;
   nf_fat: number | null;
   default_portion_size: number | null;
+  default_portion_uom: string | null;
   cost_per_kg: number | null;
   price: number;
   image_url: string | null;
@@ -39,12 +40,14 @@ async function _getProducts(): Promise<Product[]> {
     const s = await createServiceClient();
     const { data } = await s
       .from("products")
-      .select("*, ingredient_allergens(presence, allergens(id,name,slug,logo_url)), odoo_products(sku,qty_available), product_aliases(id,alias)")
+      .select("*, ingredient_allergens(presence, allergens(id,name,slug,logo_url)), odoo_products(sku,qty_available), product_aliases(id,alias), production_product_consumption_overrides(quantity,uom)")
       .order("name");
     return ((data as Record<string, unknown>[]) ?? []).map((p) => {
       const ia = (p.ingredient_allergens as { presence: string; allergens: ProductAllergen }[]) ?? [];
       const odoo = p.odoo_products as { sku: string | null; qty_available: number } | null;
       const aliases = (p.product_aliases as ProductAlias[]) ?? [];
+      const rawOverride = p.production_product_consumption_overrides;
+      const override = (Array.isArray(rawOverride) ? rawOverride[0] : rawOverride) as { quantity: number; uom: string } | null;
       return {
         id: p.id as string,
         name: p.name as string,
@@ -64,7 +67,8 @@ async function _getProducts(): Promise<Product[]> {
         nf_carbs: (p.nf_carbs as number) ?? null,
         nf_sugar: (p.nf_sugar as number) ?? null,
         nf_fat: (p.nf_fat as number) ?? null,
-        default_portion_size: (p.default_portion_size as number) ?? null,
+        default_portion_size: override?.quantity == null ? (p.default_portion_size as number) ?? null : Number(override.quantity),
+        default_portion_uom: override?.uom ?? (p.default_portion_uom as string) ?? null,
         cost_per_kg: (p.cost_per_kg as number) ?? null,
         price: Number(p.price ?? 0),
         image_url: (p.image_url as string) ?? null,

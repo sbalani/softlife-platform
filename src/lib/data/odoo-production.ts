@@ -24,6 +24,7 @@ type ProductRow = {
   default_portion_size: number | null; default_portion_uom: string | null; updated_at: string;
   product_aliases: { alias: string; normalized_alias: string }[] | null;
   odoo_products: { uom: string | null; package_content_quantity: number | null; package_content_uom: string | null } | { uom: string | null; package_content_quantity: number | null; package_content_uom: string | null }[] | null;
+  production_product_consumption_overrides: { quantity: number; uom: string } | { quantity: number; uom: string }[] | null;
 };
 type Resolution = {
   lineIndex: number; rawName: string; normalizedName: string; rawPosition: string | null;
@@ -74,7 +75,7 @@ export async function getOdooCatalog(s: SupabaseClient, url: URL) {
   if (updatedAfter && Number.isNaN(Date.parse(updatedAfter))) throw new OdooContractError("updated_after must be an ISO timestamp");
 
   let productQuery = s.from("products")
-    .select("id,name,type,consumption_type,odoo_id,default_portion_size,default_portion_uom,updated_at,product_aliases(alias,normalized_alias),odoo_products(uom,package_content_quantity,package_content_uom)")
+    .select("id,name,type,consumption_type,odoo_id,default_portion_size,default_portion_uom,updated_at,product_aliases(alias,normalized_alias),odoo_products(uom,package_content_quantity,package_content_uom),production_product_consumption_overrides(quantity,uom)")
     .order("updated_at").order("id").limit(cursor?.ingredients === "done" ? 0 : limit + 1);
   let versionQuery = s.from("recipe_versions")
     .select("id,recipe_id,version,component_hash,odoo_bom_id,updated_at,recipes(name,odoo_finished_product_id),recipe_version_components(product_id,odoo_product_id,quantity,uom,sequence,stock_quantity,stock_uom,package_content_quantity,package_content_uom),recipe_version_odoo_components(odoo_product_id,quantity,uom,sequence)")
@@ -82,15 +83,11 @@ export async function getOdooCatalog(s: SupabaseClient, url: URL) {
   if (updatedAfter) { productQuery = productQuery.gt("updated_at", updatedAfter); versionQuery = versionQuery.gt("updated_at", updatedAfter); }
   productQuery = applyCursor(productQuery, isSyncCursor(cursor?.ingredients) ? cursor.ingredients : null);
   versionQuery = applyCursor(versionQuery, isSyncCursor(cursor?.recipes) ? cursor.recipes : null);
-  const [productsResult, versionsResult, overrideResult] = await Promise.all([
-    productQuery, versionQuery, s.from("production_product_consumption_overrides").select("product_id,quantity,uom"),
-  ]);
+  const [productsResult, versionsResult] = await Promise.all([productQuery, versionQuery]);
   if (productsResult.error) throw productsResult.error;
   if (versionsResult.error) throw versionsResult.error;
-  if (overrideResult.error) throw overrideResult.error;
   const productRows = ((productsResult.data as unknown as ProductRow[]) ?? []).slice(0, limit);
   const versionRows = ((versionsResult.data as unknown as Record<string, unknown>[]) ?? []).slice(0, limit);
-  const overrides = new Map(((overrideResult.data as { product_id: string; quantity: number; uom: string }[]) ?? []).map((row) => [row.product_id, row]));
   const ingredientHasMore = (productsResult.data?.length ?? 0) > limit;
   const recipeHasMore = (versionsResult.data?.length ?? 0) > limit;
   const nextIngredients: CatalogPosition = ingredientHasMore ? nextRowCursor(productRows as unknown as Record<string, unknown>[], true) : "done";
@@ -98,7 +95,7 @@ export async function getOdooCatalog(s: SupabaseClient, url: URL) {
   const catalogDone = nextIngredients === "done" && nextRecipes === "done";
   return {
     ingredients: productRows.map((product) => {
-      const override = overrides.get(product.id);
+      const override = relation(product.production_product_consumption_overrides);
       return {
         platform_product_id: product.id,
         odoo_product_id: product.odoo_id,
@@ -391,18 +388,17 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
         existingResolutions.set(String(row.order_id), byLine);
       }
     }
-    const [productsResult, assignmentsResult, defaultsResult, productOverridesResult, machineOverridesResult, settingsResult, warehousesResult, membershipsResult, pendingPushesResult] = await Promise.all([
-      s.from("products").select("id,name,type,consumption_type,odoo_id,default_portion_size,default_portion_uom,updated_at,product_aliases(alias,normalized_alias),odoo_products(uom,package_content_quantity,package_content_uom)"),
+    const [productsResult, assignmentsResult, defaultsResult, machineOverridesResult, settingsResult, warehousesResult, membershipsResult, pendingPushesResult] = await Promise.all([
+      s.from("products").select("id,name,type,consumption_type,odoo_id,default_portion_size,default_portion_uom,updated_at,product_aliases(alias,normalized_alias),odoo_products(uom,package_content_quantity,package_content_uom),production_product_consumption_overrides(quantity,uom)"),
       machineIds.length ? s.from("machine_menu_recipe_assignments").select("machine_id,menu_kind,menu_position,recipe_id,valid_from,valid_to,recipes(name)").in("machine_id", machineIds).lt("valid_from", input.periodTo).or(`valid_to.is.null,valid_to.gt.${input.periodFrom}`) : Promise.resolve({ data: [], error: null }),
       s.from("production_consumption_defaults").select("consumption_type,quantity,uom"),
-      s.from("production_product_consumption_overrides").select("product_id,quantity,uom"),
       machineIds.length ? s.from("machine_product_consumption_overrides").select("machine_id,product_id,quantity,uom").in("machine_id", machineIds) : Promise.resolve({ data: [], error: null }),
       s.from("production_settings").select("cup_odoo_product_id,currency").eq("singleton", true).single(),
       s.from("odoo_warehouses").select("odoo_id,name,sales_customer_odoo_id"),
       orders.length ? s.from("manufacturing_period_export_orders").select("order_id,export_id").in("order_id", orders.map((order) => order.id as string)).is("released_at", null) : Promise.resolve({ data: [], error: null }),
       machineIds.length ? s.from("menu_recipe_push_operations").select("machine_id,assignments").in("machine_id", machineIds).eq("status", "pending") : Promise.resolve({ data: [], error: null }),
     ]);
-    for (const result of [productsResult, assignmentsResult, defaultsResult, productOverridesResult, machineOverridesResult, settingsResult, warehousesResult, membershipsResult, pendingPushesResult]) if (result.error) throw result.error;
+    for (const result of [productsResult, assignmentsResult, defaultsResult, machineOverridesResult, settingsResult, warehousesResult, membershipsResult, pendingPushesResult]) if (result.error) throw result.error;
     if (!settingsResult.data) throw new OdooContractError("Production settings are unavailable", 503, "not_configured");
     const settings = settingsResult.data;
     const products = (productsResult.data as unknown as ProductRow[]) ?? [];
@@ -416,7 +412,13 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       }
     }
     const defaults = new Map(((defaultsResult.data as { consumption_type: string; quantity: number; uom: string }[]) ?? []).map((row) => [row.consumption_type, { quantity: Number(row.quantity), uom: row.uom }]));
-    const productOverrides = new Map(((productOverridesResult.data as { product_id: string; quantity: number; uom: string }[]) ?? []).map((row) => [row.product_id, { quantity: Number(row.quantity), uom: row.uom }]));
+    const productOverrides = new Map(products.flatMap((product) => {
+      const override = relation(product.production_product_consumption_overrides);
+      if (override) return [[product.id, { quantity: Number(override.quantity), uom: String(override.uom) }] as const];
+      return product.default_portion_size && product.default_portion_uom
+        ? [[product.id, { quantity: Number(product.default_portion_size), uom: product.default_portion_uom }] as const]
+        : [];
+    }));
     const machineOverrides = new Map(((machineOverridesResult.data as { machine_id: string; product_id: string; quantity: number; uom: string }[]) ?? []).map((row) => [`${row.machine_id}:${row.product_id}`, { quantity: Number(row.quantity), uom: row.uom }]));
     const warehouseMap = new Map(((warehousesResult.data as { odoo_id: number; name: string; sales_customer_odoo_id: number | null }[]) ?? []).map((row) => [row.odoo_id, row]));
     const occupied = new Map(((membershipsResult.data as { order_id: string; export_id: string }[]) ?? []).filter((row) => row.export_id !== exportId).map((row) => [row.order_id, row.export_id]));
@@ -538,8 +540,8 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
     }
     const payload = { payload_contract_version: 2, export_id: exportId, period_from: input.periodFrom, period_to: input.periodTo, time_zone: input.timeZone, document_date: input.documentDate, warehouses: [...warehouses.values()] };
     const payloadHash = sha256(payload);
-    const configSnapshot = { defaults: defaultsResult.data, product_overrides: productOverridesResult.data, machine_overrides: machineOverridesResult.data, settings,
-      resolved_products: products.map((product) => ({ id: product.id, odoo_id: product.odoo_id, default_portion_size: product.default_portion_size, default_portion_uom: product.default_portion_uom, odoo_product: relation(product.odoo_products) })),
+    const configSnapshot = { defaults: defaultsResult.data, product_overrides: [...productOverrides.entries()].map(([product_id, override]) => ({ product_id, ...override })), machine_overrides: machineOverridesResult.data, settings,
+      resolved_products: products.map((product) => ({ id: product.id, odoo_id: product.odoo_id, odoo_product: relation(product.odoo_products) })),
     };
     const claimableOrders = orders.filter((order) => !occupied.has(String(order.id)));
     const refreshedOrders = new Map<string, Record<string, unknown>>();

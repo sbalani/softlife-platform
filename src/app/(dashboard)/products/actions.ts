@@ -26,6 +26,10 @@ const num = (v: FormDataEntryValue | null) => {
   return Number.isFinite(n) && String(v ?? "").trim() !== "" ? n : null;
 };
 
+function samePortion(firstSize: number | null, firstUom: string | null, secondSize: number | null, secondUom: string | null) {
+  return firstSize === secondSize && (firstSize === null || firstUom === secondUom);
+}
+
 function buildTranslations(fd: FormData): Record<string, string> | null {
   const out: Record<string, string> = {};
   for (const field of ["name_es", "name_US", "name_CN", "name_KH", "name_fr"]) {
@@ -94,6 +98,9 @@ export async function createProduct(_prev: ProductResult | null, fd: FormData): 
     const s = await createServiceClient();
     const imageUrl = image instanceof File && image.size ? await uploadImage(s, image) : null;
     const uploadedAllergenUrl = allergen instanceof File && allergen.size ? await uploadImage(s, allergen) : null;
+    const defaultPortionSize = num(fd.get("default_portion_size"));
+    const defaultPortionUom = defaultPortionSize == null ? null : str(fd.get("default_portion_uom")) ?? "g";
+    let portionErrorMessage: string | null = null;
 
     const { data: inserted, error } = await s.from("products").insert({
       name,
@@ -110,7 +117,8 @@ export async function createProduct(_prev: ProductResult | null, fd: FormData): 
       nf_carbs: num(fd.get("nf_carbs")),
       nf_sugar: num(fd.get("nf_sugar")),
       nf_fat: num(fd.get("nf_fat")),
-      default_portion_size: num(fd.get("default_portion_size")),
+      default_portion_size: defaultPortionSize,
+      default_portion_uom: defaultPortionUom,
       cost_per_kg: num(fd.get("cost_per_kg")),
       price: Number(fd.get("price") ?? 0) || 0,
       image_url: imageUrl,
@@ -119,6 +127,14 @@ export async function createProduct(_prev: ProductResult | null, fd: FormData): 
     if (error) return { ok: false, error: error.message };
 
     const productId = (inserted as { id: string }).id;
+    if (defaultPortionSize !== null) {
+      const { error: portionError } = await s.rpc("set_product_consumption_override", {
+        p_product_id: productId, p_consumption_type: null, p_set_consumption_type: false,
+        p_quantity: defaultPortionSize, p_uom: defaultPortionUom,
+        p_expected_quantity: null, p_expected_uom: null, p_check_expected: false,
+      });
+      if (portionError) portionErrorMessage = portionError.message;
+    }
     const iaRows = [
       ...contains.map((aid) => ({ ingredient_id: productId, allergen_id: aid, presence: "contains" })),
       ...mayContain.map((aid) => ({ ingredient_id: productId, allergen_id: aid, presence: "may_contain" })),
@@ -142,6 +158,8 @@ export async function createProduct(_prev: ProductResult | null, fd: FormData): 
     await recordProductChange(s, null, product as Record<string, unknown>, await getSessionProfile());
 
     revalidatePath("/products");
+    revalidatePath("/odoo");
+    if (portionErrorMessage) return { ok: false, error: `Ingredient details were saved, but its production override is pending: ${portionErrorMessage}` };
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
@@ -160,10 +178,16 @@ export async function updateProduct(_prev: ProductResult | null, fd: FormData): 
   const image = fd.get("image");
   const allergen = fd.get("allergen");
   const explicitAllergenUrl = str(fd.get("allergen_url"));
+  let portionSaved = false;
 
   try {
     const s = await createServiceClient();
     const { data: before } = await s.from("products").select("*").eq("id", id).maybeSingle();
+    const defaultPortionSize = num(fd.get("default_portion_size"));
+    const defaultPortionUom = defaultPortionSize == null ? null : str(fd.get("default_portion_uom")) ?? "g";
+    const initialPortionSize = num(fd.get("initial_default_portion_size"));
+    const initialPortionUom = initialPortionSize == null ? null : str(fd.get("initial_default_portion_uom"));
+    const submittedPortionChanged = !samePortion(defaultPortionSize, defaultPortionUom, initialPortionSize, initialPortionUom);
     const vals: Record<string, unknown> = {
       name,
       name_translations: buildTranslations(fd),
@@ -179,10 +203,18 @@ export async function updateProduct(_prev: ProductResult | null, fd: FormData): 
       nf_carbs: num(fd.get("nf_carbs")),
       nf_sugar: num(fd.get("nf_sugar")),
       nf_fat: num(fd.get("nf_fat")),
-      default_portion_size: num(fd.get("default_portion_size")),
       cost_per_kg: num(fd.get("cost_per_kg")),
       price: Number(fd.get("price") ?? 0) || 0,
     };
+    if (submittedPortionChanged) {
+      const { error: portionError } = await s.rpc("set_product_consumption_override", {
+        p_product_id: id, p_consumption_type: null, p_set_consumption_type: false,
+        p_quantity: defaultPortionSize, p_uom: defaultPortionUom,
+        p_expected_quantity: initialPortionSize, p_expected_uom: initialPortionUom, p_check_expected: true,
+      });
+      if (portionError) return { ok: false, error: portionError.message };
+      portionSaved = true;
+    }
     // Only replace the image/allergen art if a new file was actually chosen —
     // otherwise leave the existing upload alone.
     if (image instanceof File && image.size) vals.image_url = await uploadImage(s, image);
@@ -196,7 +228,7 @@ export async function updateProduct(_prev: ProductResult | null, fd: FormData): 
     }
 
     const { error } = await s.from("products").update(vals).eq("id", id);
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: `${portionSaved ? "Production override saved, but " : ""}${error.message}` };
 
     await s.from("ingredient_allergens").delete().eq("ingredient_id", id);
     const iaRows = [
@@ -222,9 +254,11 @@ export async function updateProduct(_prev: ProductResult | null, fd: FormData): 
     await recordProductChange(s, (before as Record<string, unknown>) ?? null, after as Record<string, unknown>, await getSessionProfile());
 
     revalidatePath("/products");
+    revalidatePath("/odoo");
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    const message = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: portionSaved ? `Production override saved, but the remaining ingredient changes failed: ${message}` : message };
   }
 }
 

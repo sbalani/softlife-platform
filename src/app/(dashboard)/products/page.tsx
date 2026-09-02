@@ -84,7 +84,7 @@ export default async function IngredientsPage() {
               <dt className="text-taupe">Sale price</dt>
               <dd className="text-right font-semibold text-cocoa">€{p.price.toFixed(2)}</dd>
               {p.cost_per_kg != null && (<><dt className="text-taupe">Cost / kg</dt><dd className="text-right text-cocoa">€{p.cost_per_kg.toFixed(2)}</dd></>)}
-              {p.default_portion_size != null && (<><dt className="text-taupe">Default portion</dt><dd className="text-right text-cocoa">{p.default_portion_size} g</dd></>)}
+              {p.default_portion_size != null && (<><dt className="text-taupe">Production override</dt><dd className="text-right text-cocoa">{p.default_portion_size} {p.default_portion_uom ?? "g"}</dd></>)}
             </dl>
 
             {(p.nf_calories != null || p.nf_protein != null || p.nf_sugar != null) && (

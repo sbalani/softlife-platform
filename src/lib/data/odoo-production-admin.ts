@@ -22,9 +22,8 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
   if (!isSupabaseConfigured() || !process.env.SUPABASE_SERVICE_ROLE_KEY) return empty;
   try {
     const s = await createServiceClient();
-    const [products, productOverrides, odooProducts, recipes, defaults, settings, warehouses, pending, runs] = await Promise.all([
-      s.from("products").select("id,name,consumption_type,default_portion_size,default_portion_uom,odoo_id,odoo_products(uom,qty_available,package_content_quantity,package_content_uom)").order("name"),
-      s.from("production_product_consumption_overrides").select("product_id,quantity,uom"),
+    const [products, odooProducts, recipes, defaults, settings, warehouses, pending, runs] = await Promise.all([
+      s.from("products").select("id,name,consumption_type,default_portion_size,default_portion_uom,odoo_id,odoo_products(uom,qty_available,package_content_quantity,package_content_uom),production_product_consumption_overrides(quantity,uom)").order("name"),
       s.from("odoo_products").select("odoo_id,name,sku,uom,package_content_quantity,package_content_uom").order("name"),
       s.from("recipes").select("id,name").eq("active", true).order("name"),
       s.from("production_consumption_defaults").select("consumption_type,quantity,uom").order("consumption_type"),
@@ -33,22 +32,23 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
       s.from("order_product_resolutions").select("id,order_id,line_index,raw_name,normalized_name,raw_position,menu_kind,problem_code,huaxin_orders(order_code,order_time,machines(name))").eq("resolution_status", "pending").order("created_at").limit(100),
       s.from("manufacturing_period_exports").select("id,idempotency_key,initiated_by,status,period_from,period_to,time_zone,document_date,payload_sha256,payload,blocked_reasons,odoo_result,created_at,confirmed_at,updated_at,manufacturing_period_export_orders(count)").is("manufacturing_period_export_orders.released_at", null).order("created_at", { ascending: false }).limit(50),
     ]);
-    for (const result of [products, productOverrides, odooProducts, recipes, defaults, settings, warehouses, pending, runs]) if (result.error) throw result.error;
-    const overrides = new Map((productOverrides.data ?? []).map((row) => [row.product_id, row]));
+    for (const result of [products, odooProducts, recipes, defaults, settings, warehouses, pending, runs]) if (result.error) throw result.error;
     const defaultsByType = new Map((defaults.data ?? []).map((row) => [row.consumption_type, row]));
     const runRows = (runs.data as unknown as Record<string, unknown>[]) ?? [];
     const productionProducts = (products.data as unknown as Record<string, unknown>[] ?? []).map((row) => {
-      const override = overrides.get(String(row.id));
+      const rawOverride = row.production_product_consumption_overrides;
+      const override = (Array.isArray(rawOverride) ? rawOverride[0] : rawOverride) as Record<string, unknown> | null;
       const defaultPortion = row.consumption_type ? defaultsByType.get(String(row.consumption_type)) : undefined;
       const odooProduct = Array.isArray(row.odoo_products) ? row.odoo_products[0] : row.odoo_products as Record<string, unknown> | null;
-      const effective = override ? { quantity: Number(override.quantity), uom: override.uom, source: "Production override" }
-        : row.default_portion_size != null && row.default_portion_uom ? { quantity: Number(row.default_portion_size), uom: String(row.default_portion_uom), source: "Legacy product default" }
+      const effective = override ? { quantity: Number(override.quantity), uom: override.uom, source: "Ingredient override" }
+          : row.default_portion_size != null && row.default_portion_uom ? { quantity: Number(row.default_portion_size), uom: String(row.default_portion_uom), source: "Ingredient override" }
           : defaultPortion ? { quantity: Number(defaultPortion.quantity), uom: defaultPortion.uom, source: "Global type default" } : null;
       return {
         id: String(row.id), name: String(row.name), consumption_type: row.consumption_type as string | null,
         default_portion_size: row.default_portion_size == null ? null : Number(row.default_portion_size), default_portion_uom: row.default_portion_uom as string | null,
         odoo_id: row.odoo_id == null ? null : Number(row.odoo_id),
-        override_quantity: override?.quantity == null ? null : Number(override.quantity), override_uom: override?.uom ?? null,
+        override_quantity: override?.quantity == null ? row.default_portion_size == null ? null : Number(row.default_portion_size) : Number(override.quantity),
+        override_uom: override?.uom == null ? row.default_portion_uom as string | null : String(override.uom),
         effective_quantity: effective?.quantity ?? null, effective_uom: effective?.uom ?? null, effective_source: effective?.source ?? "Missing",
         odoo_stock_uom: odooProduct?.uom == null ? null : String(odooProduct.uom),
         odoo_qty_available: odooProduct?.qty_available == null ? null : Number(odooProduct.qty_available),

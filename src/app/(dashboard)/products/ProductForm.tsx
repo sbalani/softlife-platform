@@ -94,7 +94,7 @@ export function ProductForm({ allergens, product }: { allergens: Allergen[]; pro
 
       {/* Main form (remounts on extract to apply defaults) */}
       <form key={ex ? JSON.stringify(ex) : "default"} action={createAction} encType="multipart/form-data" className="space-y-4">
-        {product && <input type="hidden" name="id" value={product.id} />}
+        {product && <><input type="hidden" name="id" value={product.id} /><input type="hidden" name="initial_default_portion_size" value={product.default_portion_size ?? ""} /><input type="hidden" name="initial_default_portion_uom" value={product.default_portion_uom ?? ""} /></>}
         <Section title="Identity">
           <Field labelText="SKU / Item ID"><input name="sku" defaultValue={ex?.sku ?? product?.sku ?? ""} placeholder="SKU-001" className={`w-full ${input}`} /></Field>
           <Field labelText="Name *"><input name="name" required defaultValue={ex?.name ?? product?.name ?? ""} placeholder="Oreo Crumb" className={`w-full ${input}`} /></Field>
@@ -136,7 +136,7 @@ export function ProductForm({ allergens, product }: { allergens: Allergen[]; pro
         <Section title="Commercial">
           <Field labelText="Sale price (€)"><input name="price" type="number" step="0.01" min="0" defaultValue={String(ex?.price ?? product?.price ?? 0)} className={`w-full ${input}`} /></Field>
           <Field labelText="Cost / kg (€)"><input name="cost_per_kg" type="number" step="0.01" defaultValue={n(ex?.cost_per_kg ?? product?.cost_per_kg)} className={`w-full ${input}`} /></Field>
-          <Field labelText="Default portion size (g)"><input name="default_portion_size" type="number" step="0.1" defaultValue={n(ex?.default_portion_size ?? product?.default_portion_size)} className={`w-full ${input}`} /></Field>
+          <Field labelText="Production portion override"><div className="grid grid-cols-[1fr_5rem] gap-2"><input name="default_portion_size" type="number" min="0.001" step="0.001" placeholder="Use global" defaultValue={n(ex?.default_portion_size ?? product?.default_portion_size)} className={`w-full ${input}`} /><input name="default_portion_uom" aria-label="Production portion unit" placeholder="g" defaultValue={product?.default_portion_uom ?? "g"} className={`w-full ${input}`} /></div><span className="mt-1 block text-[10px] text-taupe">Leave quantity blank to use the global production portion for this ingredient type.</span></Field>
         </Section>
 
       <Section title="Product image">

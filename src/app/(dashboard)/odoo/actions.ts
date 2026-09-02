@@ -42,6 +42,9 @@ export async function saveProductionProduct(_state: OdooActionResult | null, fd:
     const rawQuantity = String(fd.get("quantity") ?? "").trim();
     const uom = String(fd.get("uom") ?? "").trim() || null;
     const quantity = rawQuantity ? Number(rawQuantity) : null;
+    const rawExpectedQuantity = String(fd.get("expected_quantity") ?? "").trim();
+    const expectedQuantity = rawExpectedQuantity ? Number(rawExpectedQuantity) : null;
+    const expectedUom = expectedQuantity == null ? null : String(fd.get("expected_uom") ?? "").trim() || null;
     const useGlobal = String(fd.get("intent") ?? "save") === "use_global";
     if (!/^[0-9a-f-]{36}$/i.test(productId) || (consumptionType && !["base", "solid_topping", "liquid_topping"].includes(consumptionType)) || (!useGlobal && quantity !== null && (!Number.isFinite(quantity) || quantity <= 0 || !uom))) throw new Error("Invalid product consumption configuration.");
     if (useGlobal) {
@@ -51,18 +54,17 @@ export async function saveProductionProduct(_state: OdooActionResult | null, fd:
       if (defaultError) throw defaultError;
       if (!globalDefault) throw new Error(`No global ${consumptionType.replaceAll("_", " ")} portion is configured.`);
     }
-    const { error: productError } = await s.from("products").update({
-      consumption_type: consumptionType,
-      ...(useGlobal ? { default_portion_size: null, default_portion_uom: null } : {}),
-    }).eq("id", productId);
-    if (productError) throw productError;
-    if (quantity === null || useGlobal) {
-      const { error } = await s.from("production_product_consumption_overrides").delete().eq("product_id", productId);
-      if (error) throw error;
-    } else {
-      const { error } = await s.from("production_product_consumption_overrides").upsert({ product_id: productId, quantity, uom });
-      if (error) throw error;
-    }
+    const { error: overrideError } = await s.rpc("set_product_consumption_override", {
+      p_product_id: productId,
+      p_consumption_type: consumptionType,
+      p_set_consumption_type: true,
+      p_quantity: useGlobal ? null : quantity,
+      p_uom: useGlobal ? null : quantity === null ? null : uom,
+      p_expected_quantity: expectedQuantity,
+      p_expected_uom: expectedUom,
+      p_check_expected: true,
+    });
+    if (overrideError) throw overrideError;
     revalidatePath("/odoo");
     revalidatePath("/products");
     return { ok: true };

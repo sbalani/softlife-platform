@@ -1,5 +1,7 @@
 -- Preserve current manufacturing behavior: an existing production override wins,
 -- while legacy ingredient-only portions become rows in the same canonical table.
+BEGIN;
+
 LOCK TABLE public.production_product_consumption_overrides IN SHARE ROW EXCLUSIVE MODE;
 LOCK TABLE public.products IN SHARE ROW EXCLUSIVE MODE;
 
@@ -78,3 +80,5 @@ REVOKE ALL ON FUNCTION public.set_product_consumption_override(UUID, TEXT, BOOLE
   FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.set_product_consumption_override(UUID, TEXT, BOOLEAN, NUMERIC, TEXT, NUMERIC, TEXT, BOOLEAN)
   TO service_role;
+
+COMMIT;

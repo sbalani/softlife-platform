@@ -139,7 +139,7 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
       } catch (snapshotError) {
         console.error("[action-report-stock-snapshot]", snapshotError);
         stockSnapshotStatus = "failed";
-        warnings.push("The report was saved, but the Huaxin menu stock baseline could not be captured. Retry it from this page.");
+        warnings.push("The report was saved, but the Huaxin menu stock observation could not be captured. Retry it from this page.");
       }
     }
 

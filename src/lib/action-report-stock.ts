@@ -27,11 +27,12 @@ export async function captureActionReportStockSnapshot(s: SupabaseClient, report
   const cfg = getConfigFromEnv();
   if (!cfg) throw new Error("Huaxin is not configured.");
 
-  const [{ data: ingredients, error: ingredientError }, menu] = await Promise.all([
+  const [{ data: ingredients, error: ingredientError }, observation] = await Promise.all([
     s.from("machine_ingredients").select("position,product_id").eq("machine_id", report.machine_id),
-    listDeviceProducts(cfg, machine.device_imei),
+    listDeviceProducts(cfg, machine.device_imei).then((menu) => ({ menu, capturedAt: new Date().toISOString() })),
   ]);
   if (ingredientError) throw ingredientError;
+  const { menu, capturedAt } = observation;
   const productByLane = new Map<string, string>();
   if (machine.base_product_id) productByLane.set("1", machine.base_product_id);
   const byPosition = new Map(((ingredients as { position: string; product_id: string | null }[]) ?? []).map((item) => [item.position, item.product_id]));
@@ -48,7 +49,7 @@ export async function captureActionReportStockSnapshot(s: SupabaseClient, report
     p_report_id: reportId,
     p_actor_id: actorId,
     p_device_imei: machine.device_imei,
-    p_captured_at: new Date().toISOString(),
+    p_captured_at: capturedAt,
     p_raw_payload: rawPayload,
     p_response_sha256: await sha256(canonical),
     p_items: items,

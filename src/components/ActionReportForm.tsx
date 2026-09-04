@@ -195,7 +195,7 @@ export function ActionReportForm({
     setStockMessage("Capturing live Huaxin menu stock...");
     const response = await fetch(`/api/action-reports/${result.reportId}/stock-snapshot`, { method: "POST" });
     const body = await response.json() as { status?: string; error?: string };
-    setStockMessage(response.ok ? `Menu stock baseline captured${body.status === "needs_review" ? "; some product mappings need review." : "."}` : body.error ?? "Unable to capture menu stock.");
+    setStockMessage(response.ok ? `Menu stock observation captured${body.status === "needs_review" ? "; some product mappings need review." : "."}` : body.error ?? "Unable to capture menu stock.");
   }
 
   return (
@@ -301,7 +301,7 @@ export function ActionReportForm({
         <label className="block"><span className={label}>General evidence photos</span><input type="file" accept="image/jpeg,image/png,image/webp,image/heic" multiple onChange={(event) => stageGeneralPhotos(Array.from(event.target.files ?? []))} className={`w-full ${input} text-xs`} /><span className="mt-1 block text-xs text-taupe">Choose up to 20 private images, maximum 4 MB each. They upload directly after confirmation.</span></label>
       </div>
 
-      {hasRefill && <p className="rounded-lg bg-sage/10 px-3 py-2 text-xs font-semibold text-sage">Confirming a refill also captures an immutable live Huaxin menu-stock baseline for later stock-versus-sales analysis.</p>}
+      {hasRefill && <p className="rounded-lg bg-sage/10 px-3 py-2 text-xs font-semibold text-sage">Confirming a refill captures Huaxin stock when the report is entered. For a backdated refill, completed sales since the action time are added back to reconstruct the stock shown at the refill time.</p>}
       {photos.length > 0 && <p className="text-xs font-semibold text-taupe">{photos.length} photo{photos.length === 1 ? "" : "s"} staged in this browser tab. Save a draft to keep the report; photos attach only after confirmation.</p>}
 
       <ActionReportVoice reportId={draftReportId ?? null} notesLength={notes.length} onPendingChange={setVoicePending} onTranscript={(transcript) => setNotes((current) => [current.trim(), transcript.trim()].filter(Boolean).join("\n\n"))} />

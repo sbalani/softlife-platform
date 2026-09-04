@@ -28,13 +28,14 @@ export default async function RefillsPage({ searchParams }: { searchParams: Prom
   if (machineError) throw machineError;
   const warehouseByMachine = new Map(((machineRows as { id: string; odoo_warehouse_id: number | null }[]) ?? []).map((row) => [row.id, row.odoo_warehouse_id]));
   const warehouseIds = [...new Set([...warehouseByMachine.values()].filter((id): id is number => id !== null))];
-  const tenantId = session?.role === "admin" ? undefined : session?.tenant_id ?? "no-tenant";
+  const tenantId = session?.role === "franchisee" ? session.tenant_id ?? undefined : undefined;
   const [lots, history, tz, requestedDraft, incidents] = await Promise.all([
     getActionReportLots(warehouseIds),
     getActionReportHistory({
       machineIds: allowedIds ?? undefined,
       tenantId,
       actorId: session?.role === "admin" ? undefined : session?.id,
+      operatorId: session?.role === "operator" ? session.id : undefined,
       canViewIncidents: session?.role === "admin" || session?.role === "franchisee",
       incidentTenantId: session?.role === "franchisee" ? session.tenant_id ?? undefined : undefined,
     }),

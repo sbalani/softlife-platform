@@ -61,12 +61,13 @@ export async function getActionReportLots(warehouseIds: number[]): Promise<Actio
     .map((lot) => ({ odooId: lot.odooId, name: lot.name, productName: lot.productName, available: lot.available, warehouseId: lot.warehouseId }));
 }
 
-export async function getActionReportHistory(filters: { machineIds?: string[]; tenantId?: string; actorId?: string; canViewIncidents?: boolean; incidentTenantId?: string }): Promise<ActionReportHistoryItem[]> {
+export async function getActionReportHistory(filters: { machineIds?: string[]; tenantId?: string; actorId?: string; operatorId?: string; canViewIncidents?: boolean; incidentTenantId?: string }): Promise<ActionReportHistoryItem[]> {
   if (!isSupabaseConfigured() || (!filters.tenantId && filters.machineIds?.length === 0)) return [];
   const s = await createServiceClient();
   let query = s.from("service_action_reports")
     .select("id,machine_id,operator_id,action_kind,action_modes,occurred_at,status,provenance_status,notes,machines(name,display_name),service_action_refill_lines(quantity,unit,observed_lot_code,product_name,provenance_status),service_action_stock_snapshots(device_imei,captured_at,status,service_action_stock_snapshot_items(menu_kind,position,goods_name_raw,stock_count)),service_action_report_incidents(incidents(id,title,assigned_tenant_id))")
     .order("occurred_at", { ascending: false }).limit(50);
+  if (filters.operatorId) query = query.eq("operator_id", filters.operatorId);
   if (filters.tenantId) query = query.eq("tenant_id", filters.tenantId);
   else if (filters.machineIds) query = query.in("machine_id", filters.machineIds);
   const { data, error } = await query;
@@ -170,6 +171,10 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
   let cleaningQuery = s.from("clean_logs")
     .select("id,device_event_time,machines(name,display_name)")
     .is("service_action_report_id", null).order("device_event_time", { ascending: false }).limit(50);
+  if (filters.operatorId) {
+    refillQuery = refillQuery.eq("operator_id", filters.operatorId);
+    cleaningQuery = cleaningQuery.eq("operator_id", filters.operatorId);
+  }
   if (filters.tenantId) {
     refillQuery = refillQuery.eq("tenant_id", filters.tenantId);
     cleaningQuery = cleaningQuery.eq("tenant_id", filters.tenantId);

@@ -133,6 +133,7 @@ export default async function MachineDetailPage({
   const online = telemetry?.online ?? false;
   const machineRow = allMachines.find((machine) => machine.id === config?.machineId);
   const refill = refillAge(machineRow?.last_refill_at ?? null);
+  const latestCleaning = cleanHistory[0] ?? null;
   const orderCoverageCurrent = telemetry?.orders_fresh_from && telemetry.orders_fresh_from <= dateFrom && telemetry.orders_fresh_through && telemetry.orders_fresh_through >= dateTo;
   const salesByDay = new Map<string, number>();
   for (const order of telemetry?.orders ?? []) {
@@ -215,8 +216,9 @@ export default async function MachineDetailPage({
         </section>
       )}
 
-      <section className="mb-6 grid gap-3 sm:grid-cols-2">
+      <section className="mb-6 grid gap-3 md:grid-cols-3">
         <div className={`rounded-xl border p-4 ${refill.state === "overdue" ? "border-danger/30 bg-danger/5" : refill.state === "due" ? "border-warning/30 bg-warning/5" : "border-sage/25 bg-sage/5"}`}><p className="text-[10px] font-bold uppercase tracking-wide text-taupe">Last refill</p><p className={`mt-1 font-display text-lg font-bold ${refill.state === "overdue" ? "text-danger" : refill.state === "due" ? "text-warning" : "text-cocoa"}`}>{machineRow?.last_refill_at ? formatDateTime(machineRow.last_refill_at, tz) : "Never recorded"}</p>{refill.days !== null && <p className="text-xs text-taupe">{refill.days} day{refill.days === 1 ? "" : "s"} ago</p>}{config?.machineId && (refill.state === "due" || refill.state === "overdue") && !machineRow?.open_refill_incident && <form action={createRefillIncident} className="mt-2"><input type="hidden" name="machine_id" value={config.machineId} /><button className="text-xs font-bold text-terracotta hover:underline">Create refill incident</button></form>}</div>
+        <div className="rounded-xl border border-sage/25 bg-sage/5 p-4"><p className="text-[10px] font-bold uppercase tracking-wide text-taupe">Last cleaning</p><p className="mt-1 font-display text-lg font-bold text-cocoa">{latestCleaning ? formatDateTime(latestCleaning.device_event_time, tz) : "Never recorded"}</p>{latestCleaning && <p className="text-xs capitalize text-taupe">{latestCleaning.kind} clean{latestCleaning.operator_name ? ` · ${latestCleaning.operator_name}` : ""}</p>}</div>
         <Link href="/incidents" className={`rounded-xl border p-4 ${machineIncidents.length ? "border-danger/30 bg-danger/5" : "border-sage/25 bg-sage/5"}`}><p className="text-[10px] font-bold uppercase tracking-wide text-taupe">Open incidents</p><p className={`mt-1 font-display text-lg font-bold ${machineIncidents.length ? "text-danger" : "text-sage"}`}>{machineIncidents.length}</p><p className="text-xs text-taupe">View incident workspace</p></Link>
       </section>
 

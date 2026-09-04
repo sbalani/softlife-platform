@@ -21,7 +21,7 @@ export default async function LotAuditPage({ searchParams }: { searchParams: Pro
   const sp = await searchParams;
   const session = await getSessionProfile();
   const machineIds = session ? await accessibleMachineIds(await createServiceClient(), session) : [];
-  const tenantId = session?.role === "admin" ? undefined : session?.tenant_id ?? "no-tenant";
+  const tenantId = session?.role === "admin" ? undefined : session?.tenant_id ?? undefined;
   const [usages, gaps, tz] = await Promise.all([
     getLotUsages(sp, { machineIds: machineIds ?? undefined, tenantId }),
     getProvenanceGaps({ machineIds: machineIds ?? undefined, tenantId }),

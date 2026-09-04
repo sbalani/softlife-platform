@@ -157,8 +157,8 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
       </header>
 
       <form className="mb-5 flex flex-wrap items-end gap-3 rounded-2xl border border-line bg-white p-4">
-        <label><span className={label}>From</span><input type="date" name="dateFrom" defaultValue={range.from} max={range.to} className={input} /></label>
-        <label><span className={label}>To</span><input type="date" name="dateTo" defaultValue={range.to} min={range.from} max={range.today} className={input} /></label>
+        <label><span className={label}>From</span><input type="date" name="dateFrom" defaultValue={range.from} max={range.today} className={input} /></label>
+        <label><span className={label}>To</span><input type="date" name="dateTo" defaultValue={range.to} max={range.today} className={input} /></label>
         <label><span className={label}>Machine</span><select name="machineId" defaultValue={selectedMachineId ?? ""} className={input}><option value="">All machines</option>{machineOptions.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}</select></label>
         <label><span className={label}>Product</span><input name="product" defaultValue={params.product} placeholder="Name or alias" className={`w-40 ${input}`} /></label>
         <label><span className={label}>Payment</span><select name="payType" defaultValue={params.payType ?? ""} className={input}><option value="">All methods</option>{paymentOptions.map((option) => <option key={option}>{option}</option>)}</select></label>

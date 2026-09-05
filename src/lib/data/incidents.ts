@@ -2,6 +2,9 @@ import type { SessionProfile } from "@/lib/auth/session";
 import { accessibleMachineIds } from "@/lib/data/service-access";
 import { incidentAccessFilter, incidentStatusesForView, type IncidentWorkflowStatus } from "@/lib/incident-workflow";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { ymd } from "@/lib/dates";
+import type { AnalyticsIncidentRow } from "@/lib/analytics";
+import type { MachineAccessPeriod } from "@/lib/machine-access";
 
 export type IncidentStatus = IncidentWorkflowStatus;
 
@@ -165,6 +168,52 @@ export async function getIncidentPolicies(): Promise<IncidentPolicy[]> {
     label: row.label as string,
     autoAssignToFranchisee: Boolean(row.auto_assign_to_franchisee),
   }));
+}
+
+function shiftDay(value: string, days: number) {
+  return new Date(Date.parse(`${value}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+export async function getAnalyticsIncidents(session: SessionProfile | null, options: {
+  from: string;
+  to: string;
+  timeZone: string;
+  machineIds?: string[];
+  machineId?: string;
+  incidentType?: string;
+  periods: MachineAccessPeriod[] | null;
+}): Promise<AnalyticsIncidentRow[]> {
+  if (!session || !isSupabaseConfigured() || options.machineIds?.length === 0) return [];
+  if (session.role === "franchisee" && !session.tenant_id) return [];
+  const s = await createServiceClient();
+  const rows: AnalyticsIncidentRow[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    let query = s.from("incidents").select("machine_id,incident_type,opened_at")
+      .eq("scope_kind", "machine")
+      .not("machine_id", "is", null)
+      .gte("opened_at", `${shiftDay(options.from, -1)}T00:00:00Z`)
+      .lte("opened_at", `${shiftDay(options.to, 1)}T23:59:59Z`)
+      .order("opened_at")
+      .order("id")
+      .range(offset, offset + 999);
+    if (options.machineIds) query = query.in("machine_id", options.machineIds);
+    if (options.machineId) query = query.eq("machine_id", options.machineId);
+    if (options.incidentType === "cup") query = query.in("incident_type", ["cup_empty", "cup_foreign_object", "cup_blocked", "cup_take_fault"]);
+    else if (options.incidentType && options.incidentType !== "all") query = query.eq("incident_type", options.incidentType);
+    const accessFilter = incidentAccessFilter(session);
+    if (accessFilter) query = query.or(accessFilter);
+    const { data, error } = await query;
+    if (error) throw error;
+    rows.push(...((data as AnalyticsIncidentRow[]) ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  if (options.periods === null) return rows;
+  const periodsByMachine = new Map<string, MachineAccessPeriod[]>();
+  for (const period of options.periods) periodsByMachine.set(period.machine_id, [...(periodsByMachine.get(period.machine_id) ?? []), period]);
+  return rows.filter((incident) => {
+    const day = ymd(new Date(incident.opened_at), options.timeZone);
+    return (periodsByMachine.get(incident.machine_id) ?? []).some((period) => period.start_date <= day && (!period.end_date || period.end_date >= day));
+  });
 }
 
 export async function getIncidentWorkspaceOptions(session: SessionProfile): Promise<IncidentWorkspaceOptions> {

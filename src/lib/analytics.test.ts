@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyticsPresetRange, analyticsRange, canonicalProductCombination, filterAnalyticsOrders, machineSalesReport, salesTimeBreakdown, toppingConsumption } from "./analytics.ts";
+import { analyticsPresetRange, analyticsRange, canonicalProductCombination, dailyIncidentCounts, filterAnalyticsOrders, machineSalesReport, salesTimeBreakdown, toppingConsumption } from "./analytics.ts";
 import type { Order } from "./data/orders.ts";
 
 test("analytics range creates an equal previous period", () => {
@@ -12,6 +12,28 @@ test("analytics range creates an equal previous period", () => {
     previousFrom: "2026-06-24",
     previousTo: "2026-06-30",
   });
+});
+
+test("daily incident counts use local days and zero-fill the sales range", () => {
+  const incidents = [
+    { machine_id: "one", incident_type: "cup_empty", opened_at: "2026-08-02T22:30:00Z" },
+    { machine_id: "one", incident_type: "temperature", opened_at: "2026-08-03T12:00:00Z" },
+    { machine_id: "one", incident_type: "cup_blocked", opened_at: "2026-08-04T21:59:00Z" },
+  ];
+  assert.deepEqual(dailyIncidentCounts(incidents, "2026-08-03", 3, "Europe/Madrid"), [
+    { day: "2026-08-03", value: 2 }, { day: "2026-08-04", value: 1 }, { day: "2026-08-05", value: 0 },
+  ]);
+});
+
+test("daily incident counts filter machine, exact type, and the cup group", () => {
+  const incidents = [
+    { machine_id: "one", incident_type: "cup_empty", opened_at: "2026-08-03T10:00:00Z" },
+    { machine_id: "one", incident_type: "temperature", opened_at: "2026-08-03T11:00:00Z" },
+    { machine_id: "two", incident_type: "cup_blocked", opened_at: "2026-08-03T12:00:00Z" },
+  ];
+  assert.equal(dailyIncidentCounts(incidents, "2026-08-03", 1, "UTC", { incidentType: "cup" })[0].value, 2);
+  assert.equal(dailyIncidentCounts(incidents, "2026-08-03", 1, "UTC", { machineId: "one", incidentType: "cup" })[0].value, 1);
+  assert.equal(dailyIncidentCounts(incidents, "2026-08-03", 1, "UTC", { incidentType: "temperature" })[0].value, 1);
 });
 
 test("machine sales reports group local weeks and exclude refunds from net sales", () => {

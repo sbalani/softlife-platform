@@ -8,9 +8,10 @@ import { getDisplayTimezone } from "@/lib/timezone";
 import { getAliasMap } from "@/lib/data/products";
 import { getSessionProfile } from "@/lib/auth/session";
 import { calculateFranchiseePayouts } from "@/lib/data/franchisee-profit";
-import { ANALYTICS_WEEKDAYS, analyticsPresetRange, analyticsRange, canonicalProductCombination, datesBetween, filterAnalyticsOrders, ordersInPeriod, salesTimeBreakdown, toppingConsumption, type AnalyticsParams, type AnalyticsPeriodPreset } from "@/lib/analytics";
+import { ANALYTICS_WEEKDAYS, analyticsPresetRange, analyticsRange, canonicalProductCombination, dailyIncidentCounts, datesBetween, filterAnalyticsOrders, ordersInPeriod, salesTimeBreakdown, toppingConsumption, type AnalyticsParams, type AnalyticsPeriodPreset } from "@/lib/analytics";
 import { OrderDataNote } from "@/components/order-data-note";
 import { filterOrdersByMachinePeriods, getAccessibleMachinePeriods } from "@/lib/data/accessible-machines";
+import { getAnalyticsIncidents, getIncidentPolicies } from "@/lib/data/incidents";
 import { HourlySalesChart } from "./HourlySalesChart";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +54,19 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     ...machines.map((machine) => [machine.id, { id: machine.id, name: machine.display_name || machine.name, imei: machine.device_imei }] as const),
     ...loadedOrders.flatMap((order) => order.machine_id ? [[order.machine_id, { id: order.machine_id, name: order.machine_name || "Historical machine", imei: order.device_imei } as const] as const] : []),
   ]).values()].sort((a, b) => a.name.localeCompare(b.name));
+  const selectedMachineId = params.machineId ?? machineOptions.find((machine) => machine.imei === params.machine)?.id;
+  const incidentPolicies = await getIncidentPolicies();
+  const incidentTypes = new Set(incidentPolicies.map((policy) => policy.incidentType));
+  const selectedIncidentFilter = params.incident === "off" || params.incident === "cup" || (params.incident && incidentTypes.has(params.incident)) ? params.incident : "all";
+  const incidentRows = selectedIncidentFilter === "off" ? [] : await getAnalyticsIncidents(session, {
+      from: range.from,
+      to: range.to,
+      timeZone: tz,
+      machineIds: machineAccess === null ? undefined : [...machineIds!],
+      machineId: selectedMachineId,
+      incidentType: selectedIncidentFilter,
+      periods: machineAccess,
+    });
   const filtered = filterAnalyticsOrders(loadedOrders, params, aliasMap);
   const currentOrders = ordersInPeriod(filtered, range.from, range.to, tz);
   const previousOrders = ordersInPeriod(filtered, range.previousFrom, range.previousTo, tz);
@@ -86,6 +100,15 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     label: new Date(`${day}T12:00:00Z`).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: "UTC" }),
     value: Number((revenueByDay.get(day) ?? 0).toFixed(2)),
   }));
+  const incidentTrend = selectedIncidentFilter === "off" ? undefined : dailyIncidentCounts(incidentRows, range.from, range.days, tz, {
+    machineId: selectedMachineId,
+    incidentType: selectedIncidentFilter,
+  }).map((row) => ({
+    label: new Date(`${row.day}T12:00:00Z`).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: "UTC" }),
+    value: row.value,
+  }));
+  const incidentFilterLabel = selectedIncidentFilter === "all" ? "All incidents" : selectedIncidentFilter === "cup" ? "All cup incidents" : incidentPolicies.find((policy) => policy.incidentType === selectedIncidentFilter)?.label ?? "Incidents";
+  const incidentCount = incidentTrend?.reduce((sum, day) => sum + day.value, 0) ?? 0;
 
   const timeBreakdown = salesTimeBreakdown(sales, range.from, range.days, tz);
   const weekdayData = timeBreakdown.weekdays.map((weekday) => ({ label: weekday.label, value: Number(weekday.average.toFixed(2)) }));
@@ -127,8 +150,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   }
   const paymentRows = [...paymentStats.entries()].map(([name, values]) => ({ name, ...values })).sort((a, b) => b.revenue - a.revenue);
   const paymentOptions = [...new Set(loadedOrders.map((order) => order.pay_type).filter((value): value is string => !!value))].sort();
-  const selectedMachineId = params.machineId ?? machineOptions.find((machine) => machine.imei === params.machine)?.id;
-  const query = new URLSearchParams(Object.entries({ dateFrom: range.from, dateTo: range.to, machineId: selectedMachineId, product: params.product, payType: params.payType }).filter((entry): entry is [string, string] => !!entry[1]));
+  const query = new URLSearchParams(Object.entries({ dateFrom: range.from, dateTo: range.to, machineId: selectedMachineId, product: params.product, payType: params.payType, incident: selectedIncidentFilter }).filter((entry): entry is [string, string] => !!entry[1]));
   const reportUrl = (report?: "weekly" | "monthly") => {
     const reportQuery = new URLSearchParams(query);
     if (report) reportQuery.set("report", report);
@@ -162,6 +184,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         <label><span className={label}>Machine</span><select name="machineId" defaultValue={selectedMachineId ?? ""} className={input}><option value="">All machines</option>{machineOptions.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}</select></label>
         <label><span className={label}>Product</span><input name="product" defaultValue={params.product} placeholder="Name or alias" className={`w-40 ${input}`} /></label>
         <label><span className={label}>Payment</span><select name="payType" defaultValue={params.payType ?? ""} className={input}><option value="">All methods</option>{paymentOptions.map((option) => <option key={option}>{option}</option>)}</select></label>
+        <label><span className={label}>Incident overlay</span><select name="incident" defaultValue={selectedIncidentFilter} className={input}><option value="off">Off</option><option value="all">All incidents</option><option value="cup">All cup incidents</option>{incidentPolicies.map((policy) => <option key={policy.incidentType} value={policy.incidentType}>{policy.label}</option>)}</select></label>
         <button className="rounded-lg bg-cocoa px-4 py-2 text-sm font-bold text-white">Apply</button>
         <Link href="/analytics" className="text-sm font-semibold text-terracotta">Clear</Link>
         <div className="basis-full border-t border-line pt-3"><span className={`${label} mb-2`}>Payout period shortcuts</span><div className="flex flex-wrap gap-2">{([
@@ -186,7 +209,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         <KpiCard label="Franchisee payout" value={`€${payoutRows.reduce((sum, row) => sum + row.payout, 0).toFixed(2)}`} hint="VAT removed before share" accent="#6fa98c" />
       </div>
 
-      <section className="mt-6 rounded-2xl border border-line bg-white p-5"><h2 className="font-display text-lg font-bold text-cocoa">Net sales trend</h2><p className="mb-2 text-xs text-taupe">Daily, refund-adjusted revenue</p><div className="overflow-x-auto"><div style={{ minWidth: Math.max(600, revenueTrend.length * 32) }}><LineChart data={revenueTrend} color="#d47e54" height={220} unit="€" /></div></div></section>
+      <section className="mt-6 rounded-2xl border border-line bg-white p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-display text-lg font-bold text-cocoa">Net sales trend</h2><p className="mb-2 text-xs text-taupe">Daily, refund-adjusted revenue{incidentTrend ? ` with ${incidentFilterLabel.toLowerCase()} by opening day` : ""}</p></div>{incidentTrend && <div className="flex items-center gap-2 rounded-full bg-danger/10 px-3 py-1 text-xs font-bold text-danger"><span className="h-0 w-5 border-t-2 border-dashed border-danger" />{incidentCount} incident{incidentCount === 1 ? "" : "s"}</div>}</div><div className="overflow-x-auto"><div style={{ minWidth: Math.max(600, revenueTrend.length * 32) }}><LineChart data={revenueTrend} color="#d47e54" height={220} unit="€" secondaryData={incidentTrend} secondaryColor="#b65d5d" secondaryLabel={incidentFilterLabel} /></div></div></section>
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <section className="rounded-2xl border border-line bg-white p-5"><h2 className="mb-1 font-display text-lg font-bold text-cocoa">Average sales by weekday</h2><p className="mb-3 text-xs text-taupe">Average per occurrence, avoiding unequal-weekday bias</p><VBarChart data={weekdayData} color="#d47e54" formatValue={(value) => `€${value.toFixed(0)}`} /></section>

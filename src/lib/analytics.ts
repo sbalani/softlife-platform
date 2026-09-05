@@ -10,6 +10,7 @@ export type AnalyticsParams = {
   machine?: string;
   product?: string;
   payType?: string;
+  incident?: string;
 };
 
 export function shiftDay(value: string, days: number): string {
@@ -63,6 +64,28 @@ export function analyticsRange(params: AnalyticsParams, timeZone: string) {
 
 export function datesBetween(from: string, days: number): string[] {
   return Array.from({ length: days }, (_, i) => shiftDay(from, i));
+}
+
+export type AnalyticsIncidentRow = { machine_id: string; incident_type: string; opened_at: string };
+
+export function dailyIncidentCounts(
+  incidents: AnalyticsIncidentRow[],
+  from: string,
+  days: number,
+  timeZone: string,
+  options: { machineId?: string; incidentType?: string } = {},
+) {
+  const to = shiftDay(from, Math.max(days - 1, 0));
+  const counts = new Map<string, number>();
+  for (const incident of incidents) {
+    if (options.machineId && incident.machine_id !== options.machineId) continue;
+    if (options.incidentType === "cup" && !incident.incident_type.startsWith("cup_")) continue;
+    if (options.incidentType && options.incidentType !== "all" && options.incidentType !== "cup" && incident.incident_type !== options.incidentType) continue;
+    const day = ymd(new Date(incident.opened_at), timeZone);
+    if (day < from || day > to) continue;
+    counts.set(day, (counts.get(day) ?? 0) + 1);
+  }
+  return datesBetween(from, days).map((day) => ({ day, value: counts.get(day) ?? 0 }));
 }
 
 export function salesTimeBreakdown(orders: Pick<Order, "order_time" | "price">[], from: string, days: number, timeZone: string) {

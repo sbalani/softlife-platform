@@ -11,6 +11,10 @@ export function LineChart({
   unit = "€",
   zoomable = false,
   dynamicScale = false,
+  secondaryData,
+  secondaryColor = "#b65d5d",
+  secondaryUnit = "",
+  secondaryLabel = "Incidents",
 }: {
   data: DataPoint[];
   color?: string;
@@ -18,6 +22,10 @@ export function LineChart({
   unit?: string;
   zoomable?: boolean;
   dynamicScale?: boolean;
+  secondaryData?: DataPoint[];
+  secondaryColor?: string;
+  secondaryUnit?: string;
+  secondaryLabel?: string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const [zoom, setZoom] = useState<{ start: number; end: number } | null>(null);
@@ -30,7 +38,7 @@ export function LineChart({
   const W = 600;
   const H = height;
   const padL = 50;
-  const padR = 20;
+  const padR = secondaryData ? 50 : 20;
   const padT = 20;
   const padB = 40;
   const chartW = W - padL - padR;
@@ -53,13 +61,26 @@ export function LineChart({
     label: d.label,
     value: d.value,
   }));
+  const visibleSecondaryData = secondaryData?.slice(zoomStart, zoomEnd + 1);
+  const secondaryMax = Math.max(1, Math.ceil(Math.max(...(visibleSecondaryData?.map((point) => point.value) ?? [0])) * 1.15));
+  const secondaryPts = secondaryData ? visibleData.map((point, i) => ({
+    x: padL + i * step,
+    y: padT + chartH - ((visibleSecondaryData?.[i]?.value ?? 0) / secondaryMax) * chartH,
+    label: point.label,
+    value: visibleSecondaryData?.[i]?.value ?? 0,
+  })) : [];
 
   const linePath = pts.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   const areaPath = `${linePath} L${pts[pts.length - 1].x.toFixed(1)},${padT + chartH} L${pts[0].x.toFixed(1)},${padT + chartH} Z`;
+  const secondaryPath = secondaryPts.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
 
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => ({
     y: padT + chartH - f * chartH,
     val: min + f * range,
+  }));
+  const secondaryTicks = [...new Set([0, 0.25, 0.5, 0.75, 1].map((fraction) => Math.round(fraction * secondaryMax)))].map((value) => ({
+    value,
+    y: padT + chartH - (value / secondaryMax) * chartH,
   }));
 
   const xStride = Math.ceil(visibleData.length / 8);
@@ -108,12 +129,18 @@ export function LineChart({
             </text>
           </g>
         ))}
+        {secondaryData && secondaryTicks.map((tick) => (
+          <text key={`secondary-${tick.value}`} x={W - padR + 6} y={tick.y + 3} textAnchor="start" fontSize={10} fill={secondaryColor}>
+            {tick.value}{secondaryUnit}
+          </text>
+        ))}
 
         {/* Area */}
         <path d={areaPath} fill={color} opacity={0.12} />
 
         {/* Line */}
         <path d={linePath} fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+        {secondaryData && <path d={secondaryPath} fill="none" stroke={secondaryColor} strokeWidth={2.5} strokeDasharray="6 4" strokeLinejoin="round" strokeLinecap="round" />}
 
         {selection && (
           <rect
@@ -143,8 +170,12 @@ export function LineChart({
               strokeWidth={2}
               className="cursor-pointer transition-all"
               onMouseEnter={() => setHover(i)}
+              onPointerDown={() => { if (!zoomable) setHover(i); }}
             />
           </g>
+        ))}
+        {secondaryPts.map((point, index) => (
+          <circle key={`secondary-point-${index}`} cx={point.x} cy={point.y} r={hover === index ? 5 : 3} fill="#fff" stroke={secondaryColor} strokeWidth={2} className="cursor-pointer transition-all" onMouseEnter={() => setHover(index)} onPointerDown={() => { if (!zoomable) setHover(index); }} />
         ))}
 
         {/* X labels */}
@@ -169,6 +200,7 @@ export function LineChart({
         >
           <div className="text-[10px] uppercase tracking-wide text-taupe">{pts[hover].label}</div>
           <div className="text-sm font-bold text-cocoa">{fmtVal(pts[hover].value)}</div>
+          {secondaryData && <div className="text-sm font-bold" style={{ color: secondaryColor }}>{secondaryLabel}: {secondaryPts[hover].value}{secondaryUnit}</div>}
         </div>
       )}
     </div>

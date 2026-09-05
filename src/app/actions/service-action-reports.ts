@@ -15,6 +15,7 @@ export type ActionReportResult = {
   error?: string;
   warning?: string;
   reportId?: string;
+  revision?: number;
   status?: "draft" | "confirmed";
   provenanceStatus?: string;
   stockSnapshotStatus?: "captured" | "needs_review" | "failed";
@@ -31,6 +32,7 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
   const clientUuid = String(formData.get("client_uuid") ?? "");
   const machineId = String(formData.get("machine_id") ?? "");
   const occurredAt = String(formData.get("occurred_at") ?? "");
+  const expectedRevision = Number(formData.get("expected_revision") ?? 0);
   const actionModes = parseActionReportModes(formData.getAll("action_modes").map(String));
   const intent = String(formData.get("intent") ?? "confirmed");
   const status = intent === "draft" ? "draft" : "confirmed";
@@ -38,6 +40,7 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
   if (!UUID.test(clientUuid) || !UUID.test(machineId) || !Number.isFinite(occurredMs) || occurredMs < Date.parse("2020-01-01") || occurredMs > Date.now() + 5 * 60_000) {
     return { ok: false, error: "Choose a valid machine and action time." };
   }
+  if (!Number.isInteger(expectedRevision) || expectedRevision < 0) return { ok: false, error: "This draft has an invalid revision." };
   if (!actionModes) return { ok: false, error: "Choose at least one valid action type." };
   const actionKind = legacyKindFromModes(actionModes);
   const incidentIds = [...new Set(formData.getAll("incident_ids").map(String))];
@@ -79,16 +82,9 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
   try {
     const s = await createServiceClient();
     if (!await canAccessMachine(s, actor, machineId, new Date(occurredMs).toISOString())) return { ok: false, error: "You do not have access to this machine at the action time." };
-    const { data: existingOwnedReport, error: ownershipError } = await s.from("service_action_reports").select("id,operator_id,status").eq("client_uuid", clientUuid).maybeSingle();
+    const { data: existingOwnedReport, error: ownershipError } = await s.from("service_action_reports").select("id,operator_id,status,revision").eq("client_uuid", clientUuid).maybeSingle();
     if (ownershipError) throw ownershipError;
     if (existingOwnedReport && actor.role !== "admin" && existingOwnedReport.operator_id !== actor.id) return { ok: false, error: "You do not own this draft." };
-    let hasExistingIncidentLinks = false;
-    if (existingOwnedReport && incidentIds.length === 0) {
-      const { count, error: linkError } = await s.from("service_action_report_incidents")
-        .select("incident_id", { count: "exact", head: true }).eq("report_id", existingOwnedReport.id);
-      if (linkError) throw linkError;
-      hasExistingIncidentLinks = Boolean(count);
-    }
     if (status === "confirmed") {
       const { data: existingReport } = await s.from("service_action_reports").select("id").eq("client_uuid", clientUuid).maybeSingle();
       if (existingReport) {
@@ -111,12 +107,28 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
         }
       }
     }
+    const occurredAtIso = new Date(occurredMs).toISOString();
+    const operatorId = existingOwnedReport?.operator_id ?? actor.id;
+    const draftPayload = {
+      client_uuid: clientUuid,
+      machine_id: machineId,
+      occurred_at: occurredAtIso,
+      status,
+      action_kind: actionKind,
+      action_modes: actionModes,
+      notes: notes || null,
+      cleaning: {
+        material_used: hasCleaning && materialValue ? materialValue === "yes" : null,
+        water_buckets: hasCleaning ? waterBucketCount : null,
+      },
+      refill_lines: refillLines,
+    };
     const reportArgs = {
       p_client_uuid: clientUuid,
       p_machine_id: machineId,
-      p_operator_id: actor.id,
-      p_occurred_at: new Date(occurredMs).toISOString(),
-      p_action_kind: actionKind,
+      p_operator_id: operatorId,
+      p_actor_id: actor.id,
+      p_occurred_at: occurredAtIso,
       p_status: status,
       p_notes: notes || null,
       p_cleaning_material_used: hasCleaning && materialValue ? materialValue === "yes" : null,
@@ -124,13 +136,14 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
       p_refill_lines: refillLines,
       p_source: source,
       p_action_modes: actionModes,
+      p_expected_revision: expectedRevision,
+      p_draft_payload: draftPayload,
+      p_incident_ids: incidentIds,
     };
-    const { data, error } = incidentIds.length > 0 || hasExistingIncidentLinks
-      ? await s.rpc("record_service_action_report_with_incidents", { ...reportArgs, p_incident_ids: incidentIds })
-      : await s.rpc("record_service_action_report", reportArgs);
+    const { data, error } = await s.rpc("record_revisioned_service_action_report", reportArgs);
     if (error) return { ok: false, error: error.message };
 
-    const result = data as { id: string; status: "draft" | "confirmed"; provenance_status: string; projection_error?: string | null };
+    const result = data as { id: string; status: "draft" | "confirmed"; revision: number; provenance_status: string; projection_error?: string | null };
     const warnings: string[] = result.projection_error ? ["The physical report was saved, but a legacy projection needs review."] : [];
     let stockSnapshotStatus: ActionReportResult["stockSnapshotStatus"];
     if (result.status === "confirmed" && hasRefill) {
@@ -152,6 +165,7 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
     return {
       ok: true,
       reportId: result.id,
+      revision: result.revision,
       status: result.status,
       provenanceStatus: result.provenance_status,
       stockSnapshotStatus,
@@ -181,12 +195,14 @@ export async function applyActionReportAiProposal(_previous: ActionReportResult 
     const s = await createServiceClient();
     const report = await authorizedActionReport(s, actor, reportId, true);
     if (!report) return { ok: false, error: "Draft not found." };
-    const [{ data: job, error: jobError }, { data: currentLines, error: lineError }] = await Promise.all([
+    const [{ data: job, error: jobError }, { data: currentLines, error: lineError }, { data: incidentLinks, error: incidentError }] = await Promise.all([
       s.from("service_action_ai_jobs").select("id,status,extraction").eq("id", jobId).eq("report_id", reportId).maybeSingle(),
       s.from("service_action_refill_lines").select("quantity,unit,product_name,observed_lot_code,observed_odoo_lot_id,line_number").eq("report_id", reportId).order("line_number"),
+      s.from("service_action_report_incidents").select("incident_id").eq("report_id", reportId),
     ]);
     if (jobError) throw jobError;
     if (lineError) throw lineError;
+    if (incidentError) throw incidentError;
     if (!job || job.status !== "complete") return { ok: false, error: "AI extraction is not ready." };
     const extraction = actionReportExtractionSchema.parse(job.extraction);
     let refillLines = ((currentLines as Record<string, unknown>[]) ?? []).map((line) => ({ quantity: Number(line.quantity), unit: line.unit, product_name: line.product_name, lot_code: line.observed_lot_code, odoo_lot_id: line.observed_odoo_lot_id }));
@@ -203,12 +219,26 @@ export async function applyActionReportAiProposal(_previous: ActionReportResult 
     const hasCleaning = actionModes.includes("cleaning");
     const aiNotes = [extraction.notes, ...extraction.otherActions].filter(Boolean).join("\n");
     const notes = [report.notes, aiNotes].filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join("\n") || null;
-    const { error } = await s.rpc("record_service_action_report", {
+    const draftPayload = {
+      client_uuid: report.client_uuid,
+      machine_id: report.machine_id,
+      occurred_at: report.occurred_at,
+      status: "draft",
+      action_kind: actionKind,
+      action_modes: actionModes,
+      notes,
+      cleaning: {
+        material_used: hasCleaning ? report.cleaning_material_used ?? extraction.cleaning.materialUsed : null,
+        water_buckets: hasCleaning ? report.water_bucket_count ?? extraction.cleaning.waterBucketCount : null,
+      },
+      refill_lines: actionModes.includes("refill") ? refillLines : [],
+    };
+    const { error } = await s.rpc("record_revisioned_service_action_report", {
       p_client_uuid: report.client_uuid,
       p_machine_id: report.machine_id,
       p_operator_id: report.operator_id,
+      p_actor_id: actor.id,
       p_occurred_at: report.occurred_at,
-      p_action_kind: actionKind,
       p_status: "draft",
       p_notes: notes,
       p_cleaning_material_used: hasCleaning ? report.cleaning_material_used ?? extraction.cleaning.materialUsed : null,
@@ -216,6 +246,9 @@ export async function applyActionReportAiProposal(_previous: ActionReportResult 
       p_refill_lines: actionModes.includes("refill") ? refillLines : [],
       p_source: report.source,
       p_action_modes: actionModes,
+      p_expected_revision: report.revision,
+      p_draft_payload: draftPayload,
+      p_incident_ids: (incidentLinks ?? []).map((link) => link.incident_id),
     });
     if (error) throw error;
     const { count: openQuestions, error: questionError } = await s.from("service_action_questions").select("id", { count: "exact", head: true }).eq("ai_job_id", jobId).eq("status", "open");

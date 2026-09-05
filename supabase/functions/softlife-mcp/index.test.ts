@@ -15,8 +15,8 @@ function principal(role: "admin" | "operator" | "franchisee", scopes: ("read" | 
 Deno.test("tool listing enforces key scopes and role command fencing", () => {
   const operatorTools = availableTools(principal("operator", ["read", "forms", "commands"])).map((tool) => tool.name);
   assert(operatorTools.includes("list_machines"));
+  assert(operatorTools.includes("get_inventory"));
   assert(operatorTools.includes("create_action_report_draft"));
-  assert(!operatorTools.includes("get_inventory"));
   assert(!operatorTools.includes("disable_machine_sales"));
   assert(!operatorTools.includes("dispense_free_cup"));
 
@@ -56,6 +56,29 @@ Deno.test("other Action Reports require notes only when confirmed", () => {
   assertThrows(() => reportPayload(base, 1, "confirmed"), Error, "Notes are required");
 });
 
+Deno.test("Action Report tool schemas separate creation idempotency from update identity", () => {
+  const tools = availableTools(principal("operator", ["forms"]));
+  const create = tools.find((tool) => tool.name === "create_action_report_draft")?.inputSchema as { required: string[]; properties: Record<string, unknown>; anyOf: { required: string[] }[] };
+  const update = tools.find((tool) => tool.name === "update_action_report_draft")?.inputSchema as { required: string[]; properties: Record<string, unknown> };
+  assert(create.anyOf.some((option) => option.required.includes("idempotency_key")));
+  assert(create.anyOf.some((option) => option.required.includes("client_uuid")));
+  assert(Object.hasOwn(create.properties, "client_uuid"));
+  assert(!create.required.includes("report_id"));
+  assert(update.required.includes("report_id"));
+  assert(update.required.includes("expected_revision"));
+  assert(!Object.hasOwn(update.properties, "client_uuid"));
+});
+
+Deno.test("Action Reports reject duplicate and malformed incident identifiers", () => {
+  const incidentId = crypto.randomUUID();
+  const base = {
+    client_uuid: crypto.randomUUID(), machine_id: crypto.randomUUID(), occurred_at: new Date().toISOString(),
+    action_modes: ["other"], notes: "Checked machine",
+  };
+  assertThrows(() => reportPayload({ ...base, incident_ids: [incidentId, incidentId] }, 0, "draft"), Error, "Invalid incident_ids");
+  assertThrows(() => reportPayload({ ...base, incident_ids: ["invalid"] }, 0, "draft"), Error, "Invalid incident_ids");
+});
+
 Deno.test("Madrid date boundaries use the correct seasonal UTC offset", () => {
   assertEquals(madridMidnightUtc("2026-01-15"), "2026-01-14T23:00:00.000Z");
   assertEquals(madridMidnightUtc("2026-08-15"), "2026-08-14T22:00:00.000Z");
@@ -69,4 +92,14 @@ Deno.test("notification-form tool calls are accepted without execution", async (
 Deno.test("initialize is rejected inside a JSON-RPC batch", async () => {
   const response = await dispatchMessage({ jsonrpc: "2.0", id: 1, method: "initialize" }, principal("admin", ["read"]), null as never, true);
   assertEquals((response?.error as { code?: number }).code, -32600);
+});
+
+Deno.test("initialize validates parameters and negotiates supported versions", async () => {
+  const actor = principal("admin", ["read"]);
+  const invalid = await dispatchMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }, actor, null as never);
+  assertEquals((invalid?.error as { code?: number }).code, -32602);
+  const valid = await dispatchMessage({ jsonrpc: "2.0", id: 2, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } } }, actor, null as never);
+  assertEquals((valid?.result as { protocolVersion?: string }).protocolVersion, "2025-03-26");
+  const unknown = await dispatchMessage({ jsonrpc: "2.0", id: 3, method: "initialize", params: { protocolVersion: "2099-01-01", capabilities: {}, clientInfo: { name: "test", version: "1" } } }, actor, null as never);
+  assertEquals((unknown?.result as { protocolVersion?: string }).protocolVersion, "2025-03-26");
 });

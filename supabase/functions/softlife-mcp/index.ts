@@ -3,7 +3,9 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BRIDGE_URL = Deno.env.get("HUAXIN_DEFROST_BRIDGE_URL") ?? "https://softlife-platform.vercel.app/api/internal/huaxin-defrost";
+const STOCK_BRIDGE_URL = Deno.env.get("ACTION_REPORT_STOCK_BRIDGE_URL") ?? "https://platform.softlife.es/api/internal/action-report-stock";
 const BRIDGE_TOKEN = Deno.env.get("HUAXIN_DEFROST_BRIDGE_TOKEN") ?? "";
+const STOCK_BRIDGE_TOKEN = Deno.env.get("ACTION_REPORT_STOCK_BRIDGE_TOKEN") ?? "";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ACTIVE_DEFROST_STATES = ["scheduled", "thawing", "thaw_closed", "refrigeration_check", "forming", "sales_check", "recovery"];
 const VALID_MODES = ["cleaning", "refill", "other"] as const;
@@ -13,7 +15,8 @@ const PAYMENT_TYPES: Record<string, string> = {
   "投币": "Coin", "扫码支付": "QR Payment", "免费": "Free",
 };
 const MCP_PROTOCOL_VERSION = "2025-03-26";
-const DEFAULT_ALLOWED_ORIGINS = ["https://chatgpt.com", "https://claude.ai", "https://softlife-platform.vercel.app"];
+const SUPPORTED_PROTOCOL_VERSIONS = new Set([MCP_PROTOCOL_VERSION]);
+const DEFAULT_ALLOWED_ORIGINS = ["https://platform.softlife.es", "https://softlife-platform.vercel.app", "https://chatgpt.com", "https://claude.ai"];
 
 type Scope = "read" | "forms" | "commands";
 export type Principal = {
@@ -52,31 +55,36 @@ const TOOLS: Tool[] = [
   { name: "get_analytics", description: "Calculate completed net sales, units, order count, machine count, and top product combinations for an authorized date range.", scope: "read", inputSchema: { type: "object", properties: { date_from: { type: "string" }, date_to: { type: "string" }, machine_id: { type: "string" } } } },
   { name: "get_machine_products", description: "Get configured hopper ingredients for one authorized machine.", scope: "read", inputSchema: { type: "object", properties: { machine_id: { type: "string" } }, required: ["machine_id"] } },
   { name: "list_alerts", description: "List unresolved alerts for authorized machines.", scope: "read", inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 100 } } } },
-  { name: "get_inventory", description: "Get lot inventory visible to the current tenant or administrator.", scope: "read", roles: ["admin", "franchisee"], inputSchema: { type: "object", properties: {} } },
+  { name: "get_inventory", description: "Get current positive effective Odoo lot balances for the warehouse assigned to an authorized machine at the action time.", scope: "read", inputSchema: { type: "object", properties: { machine_id: { type: "string" }, occurred_at: { type: "string", description: "Used for historical warehouse assignment and access; balances are current. Defaults to now." } }, required: ["machine_id"] } },
   { name: "get_machine_live_status", description: "Fetch current Huaxin status for an authorized machine and identify low-stock and compressor-overheat conditions.", scope: "read", inputSchema: { type: "object", properties: { machine_id: { type: "string" } }, required: ["machine_id"] } },
   { name: "get_machine_defrost_status", description: "Get the defrost schedule and recent audited cycles for an authorized machine.", scope: "read", inputSchema: { type: "object", properties: { machine_id: { type: "string" } }, required: ["machine_id"] } },
   { name: "create_action_report_draft", description: "Create an idempotent Action Report draft. This never confirms physical work.", scope: "forms", inputSchema: reportSchema(false) },
   { name: "update_action_report_draft", description: "Update an owned Action Report draft using its current revision.", scope: "forms", inputSchema: reportSchema(true) },
-  { name: "get_action_report_draft", description: "Get an owned Action Report draft and its revision.", scope: "forms", inputSchema: { type: "object", properties: { report_id: { type: "string" } }, required: ["report_id"] } },
+  { name: "get_action_report", description: "Get an owned Action Report with refill lines, incidents, attachment metadata, AI state, questions, and stock observations.", scope: "forms", inputSchema: { type: "object", properties: { report_id: { type: "string" } }, required: ["report_id"] } },
+  { name: "get_action_report_draft", description: "Compatibility alias for get_action_report.", scope: "forms", inputSchema: { type: "object", properties: { report_id: { type: "string" } }, required: ["report_id"] } },
   { name: "confirm_action_report", description: "Confirm the exact stored Action Report draft. Requires explicit confirm=true and the current revision.", scope: "forms", inputSchema: { type: "object", properties: { report_id: { type: "string" }, expected_revision: { type: "integer", minimum: 1 }, confirm: { type: "boolean", description: "Explicit authorization to confirm the physical report." } }, required: ["report_id", "expected_revision", "confirm"] } },
   { name: "disable_machine_sales", description: "Disable sales on an authorized machine. Requires explicit confirmation and a unique idempotency key.", scope: "commands", roles: ["admin", "franchisee"], inputSchema: commandSchema() },
   { name: "dispense_free_cup", description: "Physically dispense one free cup on an authorized machine. Requires explicit confirmation and a unique idempotency key. Never retry an ambiguous result.", scope: "commands", roles: ["admin", "franchisee"], inputSchema: commandSchema() },
 ];
 
 function reportSchema(update: boolean) {
-  const required = ["client_uuid", "machine_id", "occurred_at", "action_modes"];
+  const required = [update ? "report_id" : "machine_id", "occurred_at", "action_modes"];
   if (update) required.push("expected_revision");
   return {
     type: "object",
     properties: {
-      client_uuid: { type: "string" }, machine_id: { type: "string" }, occurred_at: { type: "string" },
+      idempotency_key: { type: "string", description: "A UUID unique to this report creation attempt." },
+      ...(update ? {} : { client_uuid: { type: "string", description: "Compatibility alias for idempotency_key." } }),
+      report_id: { type: "string" }, machine_id: { type: "string" }, occurred_at: { type: "string" },
       expected_revision: { type: "integer", minimum: 1 },
       action_modes: { type: "array", items: { type: "string", enum: VALID_MODES }, minItems: 1, maxItems: 3, uniqueItems: true },
       notes: { type: "string", maxLength: 5000 },
       cleaning: { type: "object", properties: { material_used: { type: ["boolean", "null"] }, water_buckets: { type: ["integer", "null"], minimum: 0, maximum: 20 } } },
       refill_lines: { type: "array", maxItems: 20, items: { type: "object", properties: { quantity: { type: ["number", "null"] }, unit: { type: "string", maxLength: 30 }, odoo_lot_id: { type: ["integer", "null"] }, lot_code: { type: ["string", "null"], maxLength: 200 }, product_name: { type: ["string", "null"], maxLength: 200 } } } },
+      incident_ids: { type: "array", maxItems: 20, uniqueItems: true, items: { type: "string" } },
     },
     required,
+    ...(update ? {} : { anyOf: [{ required: ["idempotency_key"] }, { required: ["client_uuid"] }] }),
   };
 }
 
@@ -225,6 +233,19 @@ async function huaxinBridge(path: string, extra: Record<string, unknown>) {
   return body;
 }
 
+async function captureReportStock(reportId: string, actorId: string) {
+  if (!STOCK_BRIDGE_TOKEN) throw new ToolError("Stock snapshot capture is not configured", -32603);
+  const response = await fetch(STOCK_BRIDGE_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-action-report-stock-token": STOCK_BRIDGE_TOKEN },
+    body: JSON.stringify({ report_id: reportId, actor_id: actorId }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  const body = await response.json().catch(() => ({})) as { id?: string; status?: string; duplicate?: boolean; error?: string };
+  if (!response.ok) throw new ToolError(body.error ?? "Stock snapshot capture failed", -32603);
+  return body;
+}
+
 function normalized(value: unknown) { return String(value ?? "").trim().toLowerCase(); }
 function isOpen(value: unknown) { return ["open", "on", "abrir", "开"].includes(normalized(value)); }
 function statusValue(rows: StatusRow[], code: string) { const row = rows.find((item) => item.code === code); return row?.value ?? row?.data ?? null; }
@@ -260,15 +281,17 @@ export function reportPayload(args: Record<string, unknown>, revision: number, s
     if (lotId !== null && (!Number.isInteger(lotId) || lotId < 0)) throw new ToolError("Invalid odoo_lot_id");
     return { quantity, unit, odoo_lot_id: lotId, lot_code: String(line.lot_code ?? "").trim().slice(0, 200) || null, product_name: String(line.product_name ?? "").trim().slice(0, 200) || null };
   }) : [];
+  const incidentIds = Array.isArray(args.incident_ids) ? args.incident_ids.map(String) : [];
+  if (incidentIds.length > 20 || new Set(incidentIds).size !== incidentIds.length || incidentIds.some((id) => !UUID.test(id))) throw new ToolError("Invalid incident_ids");
   if (status === "confirmed" && modes.includes("cleaning") && (materialUsed === null || waterBuckets === null)) throw new ToolError("Cleaning evidence is required before confirmation");
   if (status === "confirmed" && modes.includes("refill") && (!lines.length || lines.some((line) => line.quantity === null))) throw new ToolError("Valid refill lines are required before confirmation");
   if (status === "confirmed" && modes.includes("other") && !notes) throw new ToolError("Notes are required for other actions");
   const actionKind = modes.includes("cleaning") && modes.includes("refill") ? "both" : modes.includes("cleaning") ? "cleaning" : modes.includes("refill") ? "refill" : "other";
   const mobilePayload = { client_uuid: clientUuid, machine_id: machineId, occurred_at: new Date(occurredAt).toISOString(), status, revision, action_kind: actionKind, action_modes: modes, notes: notes || null, cleaning: { material_used: modes.includes("cleaning") ? materialUsed : null, water_buckets: modes.includes("cleaning") ? waterBuckets : null }, refill_lines: lines };
-  return { clientUuid, machineId, occurredAt: mobilePayload.occurred_at, modes, actionKind, notes: notes || null, materialUsed, waterBuckets, lines, revision, mobilePayload };
+  return { clientUuid, machineId, occurredAt: mobilePayload.occurred_at, modes, actionKind, notes: notes || null, materialUsed, waterBuckets, lines, incidentIds, revision, mobilePayload };
 }
 
-async function persistReport(s: SupabaseClient, principal: Principal, args: Record<string, unknown>, revision: number, status: "draft" | "confirmed", rejectConfirmed = false) {
+async function persistReport(s: SupabaseClient, principal: Principal, args: Record<string, unknown>, revision: number, status: "draft" | "confirmed", rejectConfirmed = false, operatorId = principal.profileId) {
   const payload = reportPayload(args, revision, status);
   const currentIds = await machineIdsAt(s, principal);
   const eventIds = await machineIdsAt(s, principal, payload.occurredAt);
@@ -278,12 +301,13 @@ async function persistReport(s: SupabaseClient, principal: Principal, args: Reco
   if (existing && principal.role !== "admin" && existing.operator_id !== principal.profileId) throw new ToolError("Action Report not found", -32004);
   if (rejectConfirmed && existing?.status !== undefined && existing.status !== "draft") throw new ToolError("Confirmed Action Reports cannot be edited", -32009);
   const canonicalLines = payload.lines.flatMap((line) => line.quantity === null ? [] : [{ ...line, quantity: line.quantity }]);
-  const { data, error } = await s.rpc("record_mobile_service_action_report", {
-    p_client_uuid: payload.clientUuid, p_machine_id: payload.machineId, p_operator_id: principal.profileId,
-    p_occurred_at: payload.occurredAt, p_action_kind: payload.actionKind, p_status: status, p_notes: payload.notes,
+  const { data, error } = await s.rpc("record_revisioned_service_action_report", {
+    p_client_uuid: payload.clientUuid, p_machine_id: payload.machineId, p_operator_id: operatorId, p_actor_id: principal.profileId,
+    p_occurred_at: payload.occurredAt, p_status: status, p_notes: payload.notes,
     p_cleaning_material_used: payload.modes.includes("cleaning") ? payload.materialUsed : null,
     p_water_bucket_count: payload.modes.includes("cleaning") ? payload.waterBuckets : null,
-    p_refill_lines: canonicalLines, p_expected_revision: payload.revision, p_mobile_payload: payload.mobilePayload, p_action_modes: payload.modes,
+    p_refill_lines: canonicalLines, p_source: "api", p_expected_revision: payload.revision,
+    p_draft_payload: payload.mobilePayload, p_action_modes: payload.modes, p_incident_ids: payload.incidentIds,
   });
   if (error) {
     if (/revision conflict|conflicts with/i.test(error.message)) throw new ToolError("Action Report revision conflict", -32009);
@@ -295,13 +319,30 @@ async function persistReport(s: SupabaseClient, principal: Principal, args: Reco
 async function getOwnedReport(s: SupabaseClient, principal: Principal, reportId: unknown) {
   if (typeof reportId !== "string" || !UUID.test(reportId)) throw new ToolError("Invalid report_id");
   const { data, error } = await s.from("service_action_reports")
-    .select("id,client_uuid,machine_id,operator_id,occurred_at,action_kind,action_modes,status,notes,cleaning_material_used,water_bucket_count,revision,mobile_draft_payload,updated_at,service_action_refill_lines(id,line_number,quantity,unit,observed_odoo_lot_id,observed_lot_code,product_name,provenance_status,unresolved_reason)")
+    .select("id,client_uuid,machine_id,operator_id,occurred_at,action_kind,action_modes,status,notes,cleaning_material_used,water_bucket_count,source,assigned_warehouse_id,provenance_status,cleaning_projection_status,refill_projection_status,projection_error,confirmed_at,revision,mobile_draft_payload,created_at,updated_at,service_action_refill_lines(id,line_number,quantity,unit,observed_odoo_lot_id,observed_lot_code,product_name,provenance_status,unresolved_reason)")
     .eq("id", reportId).maybeSingle();
   if (error) throw error;
   if (!data || (principal.role !== "admin" && data.operator_id !== principal.profileId)) throw new ToolError("Action Report not found", -32004);
-  const ids = await machineIdsAt(s, principal);
-  if (ids !== null && !ids.includes(data.machine_id)) throw new ToolError("Action Report not found", -32004);
+  const eventIds = await machineIdsAt(s, principal, data.occurred_at);
+  if (eventIds !== null && !eventIds.includes(data.machine_id)) throw new ToolError("Action Report not found", -32004);
+  if (data.status === "draft") {
+    const currentIds = await machineIdsAt(s, principal);
+    if (currentIds !== null && !currentIds.includes(data.machine_id)) throw new ToolError("Action Report not found", -32004);
+  }
   return data;
+}
+
+async function getReportDetails(s: SupabaseClient, principal: Principal, reportId: unknown) {
+  const report = await getOwnedReport(s, principal, reportId);
+  const [{ data: incidentLinks, error: incidentError }, { data: attachments, error: attachmentError }, { data: aiJob, error: aiError }, { data: questions, error: questionError }, { data: snapshot, error: snapshotError }] = await Promise.all([
+    s.from("service_action_report_incidents").select("closes_incident,incidents(id,title,status,severity,incident_type)").eq("report_id", report.id),
+    s.from("service_action_attachments").select("id,refill_line_id,kind,mime_type,size_bytes,created_at").eq("report_id", report.id).order("created_at"),
+    s.from("service_action_ai_jobs").select("id,attachment_id,status,attempt_count,transcript_text,transcript_language,duration_seconds,extraction,schema_version,last_error,reviewed_at,created_at,updated_at").eq("report_id", report.id).maybeSingle(),
+    s.from("service_action_questions").select("id,question,status,source,ai_job_id,created_at").eq("report_id", report.id).order("created_at"),
+    s.from("service_action_stock_snapshots").select("id,report_occurred_at,captured_at,status,source,service_action_stock_snapshot_items(menu_kind,position,goods_name_raw,stock_raw,stock_count,enabled,platform_product_id,mapping_method)").eq("report_id", report.id).maybeSingle(),
+  ]);
+  if (incidentError || attachmentError || aiError || questionError || snapshotError) throw incidentError ?? attachmentError ?? aiError ?? questionError ?? snapshotError;
+  return { ...report, incidents: incidentLinks ?? [], attachments: attachments ?? [], ai_job: aiJob, questions: questions ?? [], stock_snapshot: snapshot };
 }
 
 async function commandsFor(s: SupabaseClient, principal: Principal) {
@@ -461,12 +502,35 @@ async function handleTool(name: string, args: Record<string, unknown>, principal
       return data ?? [];
     }
     case "get_inventory": {
-      if (principal.role === "operator") throw new ToolError("Inventory is not available for operator keys", -32003);
-      let query = s.from("lots").select("id,name,product_name,qty_available,disposition,device_event_time,tenant_id").order("device_event_time", { ascending: false }).limit(1000);
-      if (principal.role === "franchisee") query = query.eq("tenant_id", principal.tenantId);
-      const { data, error } = await query;
-      if (error) throw error;
-      return data ?? [];
+      const occurredAt = args.occurred_at === undefined ? new Date().toISOString() : String(args.occurred_at);
+      if (!Number.isFinite(Date.parse(occurredAt)) || Date.parse(occurredAt) < Date.parse("2020-01-01") || Date.parse(occurredAt) > Date.now() + 5 * 60_000) throw new ToolError("Invalid occurred_at");
+      const machine = await authorizedMachine(s, principal, args.machine_id, true);
+      const eventIds = await machineIdsAt(s, principal, occurredAt);
+      if (eventIds !== null && !eventIds.includes(machine.id)) throw new ToolError("Machine not found", -32004);
+      const { data: assignment, error: assignmentError } = await s.from("machine_warehouse_assignments")
+        .select("odoo_warehouse_id").eq("machine_id", machine.id).lte("valid_from", occurredAt)
+        .or(`valid_to.is.null,valid_to.gt.${occurredAt}`).order("valid_from", { ascending: false }).limit(1).maybeSingle();
+      if (assignmentError) throw assignmentError;
+      if (!assignment) return { machine_id: machine.id, occurred_at: occurredAt, warehouse: null, lots: [] };
+      const [{ data: balances, error: balanceError }, { data: warehouse, error: warehouseError }] = await Promise.all([
+        s.from("warehouse_lot_effective_balances").select("odoo_lot_id,effective_quantity").eq("odoo_warehouse_id", assignment.odoo_warehouse_id).gt("effective_quantity", 0).limit(1000),
+        s.from("odoo_warehouses").select("odoo_id,name,code").eq("odoo_id", assignment.odoo_warehouse_id).maybeSingle(),
+      ]);
+      if (balanceError || warehouseError) throw balanceError ?? warehouseError;
+      const lotIds = (balances ?? []).map((row) => row.odoo_lot_id as number);
+      const { data: lots, error: lotError } = lotIds.length
+        ? await s.from("odoo_lots").select("odoo_id,name,product_name,expiration_date").in("odoo_id", lotIds)
+        : { data: [], error: null };
+      if (lotError) throw lotError;
+      const balanceByLot = new Map((balances ?? []).map((row) => [row.odoo_lot_id as number, Number(row.effective_quantity)]));
+      return {
+        machine_id: machine.id,
+        occurred_at: new Date(occurredAt).toISOString(),
+        balance_as_of: new Date().toISOString(),
+        warehouse,
+        lots: (lots ?? []).map((lot) => ({ odoo_lot_id: lot.odoo_id, lot_code: lot.name, product_name: lot.product_name, expiration_date: lot.expiration_date, effective_quantity: balanceByLot.get(lot.odoo_id) ?? 0 }))
+          .sort((a, b) => String(a.expiration_date ?? "9999").localeCompare(String(b.expiration_date ?? "9999")) || a.lot_code.localeCompare(b.lot_code)),
+      };
     }
     case "get_machine_live_status": {
       const machine = await authorizedMachine(s, principal, args.machine_id, true);
@@ -481,23 +545,48 @@ async function handleTool(name: string, args: Record<string, unknown>, principal
       if (scheduleError || runsError) throw scheduleError ?? runsError;
       return { machine_id: machine.id, schedule, runs: runs ?? [] };
     }
-    case "create_action_report_draft": return persistReport(s, principal, args, 0, "draft");
+    case "create_action_report_draft": {
+      const idempotencyKey = args.idempotency_key ?? args.client_uuid;
+      if (typeof idempotencyKey !== "string" || !UUID.test(idempotencyKey)) throw new ToolError("A UUID idempotency_key is required");
+      if (args.idempotency_key !== undefined && args.client_uuid !== undefined && args.idempotency_key !== args.client_uuid) throw new ToolError("idempotency_key and client_uuid must match");
+      return persistReport(s, principal, { ...args, client_uuid: idempotencyKey }, 0, "draft");
+    }
     case "update_action_report_draft": {
       const revision = Number(args.expected_revision);
       if (!Number.isInteger(revision) || revision < 1) throw new ToolError("expected_revision must be a positive integer");
-      return persistReport(s, principal, args, revision, "draft", true);
+      const report = await getOwnedReport(s, principal, args.report_id);
+      if (principal.role !== "admin" && report.operator_id !== principal.profileId) throw new ToolError("Action Report not found", -32004);
+      if (report.status !== "draft") throw new ToolError("Confirmed Action Reports cannot be edited", -32009);
+      return persistReport(s, principal, { ...args, client_uuid: report.client_uuid }, revision, "draft", true, report.operator_id);
     }
-    case "get_action_report_draft": return getOwnedReport(s, principal, args.report_id);
+    case "get_action_report":
+    case "get_action_report_draft": return getReportDetails(s, principal, args.report_id);
     case "confirm_action_report": {
       if (args.confirm !== true) throw new ToolError("Explicit confirm=true is required");
       const revision = Number(args.expected_revision);
       if (!Number.isInteger(revision) || revision < 1) throw new ToolError("expected_revision must be a positive integer");
-      const report = await getOwnedReport(s, principal, args.report_id);
-      if (report.status === "confirmed") return { id: report.id, status: report.status, revision: report.revision, duplicate: true };
-      if (report.status !== "draft" || report.revision !== revision) throw new ToolError("Action Report revision conflict", -32009);
-      const payload = report.mobile_draft_payload as Record<string, unknown> | null;
-      if (!payload) throw new ToolError("Draft is missing its canonical payload");
-      return persistReport(s, principal, { ...payload, action_modes: report.action_modes, expected_revision: revision }, revision, "confirmed");
+      const report = await getReportDetails(s, principal, args.report_id);
+      if (principal.role !== "admin" && report.operator_id !== principal.profileId) throw new ToolError("Action Report not found", -32004);
+      if (report.status !== "draft" && report.status !== "confirmed") throw new ToolError("Action Report cannot be confirmed", -32009);
+      const lines = ((report.service_action_refill_lines as Record<string, unknown>[]) ?? []).sort((a, b) => Number(a.line_number) - Number(b.line_number));
+      const incidentIds = ((report.incidents as { incidents?: { id?: string } | null }[]) ?? []).flatMap((link) => link.incidents?.id ? [link.incidents.id] : []);
+      const result = await persistReport(s, principal, {
+        client_uuid: report.client_uuid,
+        machine_id: report.machine_id,
+        occurred_at: report.occurred_at,
+        action_modes: report.action_modes,
+        notes: report.notes,
+        cleaning: { material_used: report.cleaning_material_used, water_buckets: report.water_bucket_count },
+        refill_lines: lines.map((line) => ({ quantity: line.quantity, unit: line.unit, odoo_lot_id: line.observed_odoo_lot_id, lot_code: line.observed_lot_code, product_name: line.product_name })),
+        incident_ids: incidentIds,
+      }, revision, "confirmed", false, report.operator_id);
+      if (!report.action_modes.includes("refill")) return { ...(result as Record<string, unknown>), stock_snapshot_status: "not_applicable" };
+      try {
+        const snapshot = await captureReportStock(report.id, principal.profileId);
+        return { ...(result as Record<string, unknown>), stock_snapshot_status: snapshot.status, stock_snapshot_id: snapshot.id };
+      } catch (error) {
+        return { ...(result as Record<string, unknown>), stock_snapshot_status: "failed", warning: error instanceof Error ? error.message : String(error) };
+      }
     }
     case "disable_machine_sales": return executeCommand(s, principal, args, "operate_sellout");
     case "dispense_free_cup": return executeCommand(s, principal, args, "operate_make");
@@ -535,7 +624,18 @@ export async function dispatchMessage(message: unknown, principal: Principal, s:
   }
   if (!Object.hasOwn(request, "id")) return null;
   if (inBatch && request.method === "initialize") return errorPayload(id, -32600, "initialize cannot be batched");
-  if (request.method === "initialize") return resultPayload(id, { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "2.0.0" } });
+  if (request.method === "initialize") {
+    const params = request.params;
+    if (!params || typeof params !== "object" || Array.isArray(params)) return errorPayload(id, -32602, "Invalid initialize parameters");
+    const initialize = params as Record<string, unknown>;
+    const clientInfo = initialize.clientInfo as Record<string, unknown> | null;
+    if (typeof initialize.protocolVersion !== "string" || !initialize.capabilities || typeof initialize.capabilities !== "object" || Array.isArray(initialize.capabilities)
+      || !clientInfo || typeof clientInfo !== "object" || typeof clientInfo.name !== "string" || typeof clientInfo.version !== "string") {
+      return errorPayload(id, -32602, "Invalid initialize parameters");
+    }
+    const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.has(initialize.protocolVersion) ? initialize.protocolVersion : MCP_PROTOCOL_VERSION;
+    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.0.0" } });
+  }
   if (request.method === "tools/list") return resultPayload(id, { tools: availableTools(principal) });
   if (request.method !== "tools/call") return errorPayload(id, -32601, `Method not found: ${request.method}`);
   const params = request.params;
@@ -561,6 +661,8 @@ export async function handleRequest(request: Request) {
   const allowedOrigins = (Deno.env.get("MCP_ALLOWED_ORIGINS")?.split(",").map((value) => value.trim()).filter(Boolean) ?? DEFAULT_ALLOWED_ORIGINS);
   if (origin && !allowedOrigins.includes(origin)) return rpcError(null, -32003, "Origin is not allowed", 403);
   if (request.method !== "POST") return rpcError(null, -32600, "POST required", 405);
+  const requestedProtocol = request.headers.get("mcp-protocol-version");
+  if (requestedProtocol && !SUPPORTED_PROTOCOL_VERSIONS.has(requestedProtocol)) return rpcError(null, -32600, "Unsupported MCP-Protocol-Version", 400);
   const accept = request.headers.get("accept") ?? "";
   if (!accept.includes("application/json") || !accept.includes("text/event-stream")) return rpcError(null, -32600, "Accept must include application/json and text/event-stream", 406);
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) return rpcError(null, -32600, "Content-Type must be application/json", 415);

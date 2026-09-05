@@ -73,6 +73,7 @@ export function ActionReportForm({
   const action = source === "machine_qr" ? submitQrActionReport : submitWebActionReport;
   const [result, formAction, pending] = useActionState<ActionReportResult | null, FormData>(action, null);
   const [clientUuid] = useState(() => initialDraft?.clientUuid ?? crypto.randomUUID());
+  const [revision, setRevision] = useState(initialDraft?.revision ?? 0);
   const [machineId, setMachineId] = useState(initialDraft?.machineId ?? initialMachineId ?? machines[0]?.id ?? "");
   const [modes, setModes] = useState<ActionReportMode[]>(() => initialActionReportModes(initialDraft?.actionModes, initialModes));
   const [occurredAt, setOccurredAt] = useState(initialDraft?.occurredAt ?? initialEventTime);
@@ -199,8 +200,9 @@ export function ActionReportForm({
   }
 
   return (
-    <form id="action-report-form" action={formAction} onSubmit={() => { submittedLineNumbers.current = new Map(lines.map((line, index) => [line.key, index + 1])); }} className="space-y-5">
+    <form id="action-report-form" action={formAction} onSubmit={() => { submittedLineNumbers.current = new Map(lines.map((line, index) => [line.key, index + 1])); setRevision(result?.revision ?? revision); }} className="space-y-5">
       <input type="hidden" name="client_uuid" value={clientUuid} />
+      <input type="hidden" name="expected_revision" value={result?.revision ?? revision} />
       <input type="hidden" name="occurred_at" value={occurredAt} />
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -297,14 +299,12 @@ export function ActionReportForm({
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block"><span className={label}>Notes</span><textarea name="notes" rows={4} value={notes} onChange={(event) => setNotes(event.target.value)} required={hasOther} placeholder={hasOther ? "Describe the other action" : "Optional context"} className={`w-full ${input}`} /></label>
+        <div className="block"><label htmlFor="action-report-notes" className={label}>Notes</label><textarea id="action-report-notes" name="notes" rows={4} maxLength={5000} value={notes} onChange={(event) => setNotes(event.target.value)} required={hasOther} placeholder={hasOther ? "Describe the other action" : "Optional context"} className={`w-full ${input}`} /><ActionReportVoice reportId={draftReportId ?? null} notesLength={notes.length} onPendingChange={setVoicePending} onTranscript={(transcript) => setNotes((current) => [current.trim(), transcript.trim()].filter(Boolean).join("\n\n"))} /></div>
         <label className="block"><span className={label}>General evidence photos</span><input type="file" accept="image/jpeg,image/png,image/webp,image/heic" multiple onChange={(event) => stageGeneralPhotos(Array.from(event.target.files ?? []))} className={`w-full ${input} text-xs`} /><span className="mt-1 block text-xs text-taupe">Choose up to 20 private images, maximum 4 MB each. They upload directly after confirmation.</span></label>
       </div>
 
       {hasRefill && <p className="rounded-lg bg-sage/10 px-3 py-2 text-xs font-semibold text-sage">Confirming a refill captures Huaxin stock when the report is entered. For a backdated refill, completed sales since the action time are added back to reconstruct the stock shown at the refill time.</p>}
       {photos.length > 0 && <p className="text-xs font-semibold text-taupe">{photos.length} photo{photos.length === 1 ? "" : "s"} staged in this browser tab. Save a draft to keep the report; photos attach only after confirmation.</p>}
-
-      <ActionReportVoice reportId={draftReportId ?? null} notesLength={notes.length} onPendingChange={setVoicePending} onTranscript={(transcript) => setNotes((current) => [current.trim(), transcript.trim()].filter(Boolean).join("\n\n"))} />
 
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" name="intent" value="confirmed" disabled={pending || voicePending || !machineId || modes.length === 0 || result?.status === "confirmed"} className="rounded-lg bg-terracotta px-4 py-2 text-sm font-bold text-white hover:bg-terracotta-dark disabled:opacity-60">{pending ? "Saving..." : voicePending ? "Attach or discard voice first" : "Confirm action"}</button>

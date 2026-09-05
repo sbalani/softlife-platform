@@ -29,6 +29,7 @@ export type ActionReportLotOption = {
 
 export type ActionReportDraft = {
   id: string;
+  revision: number;
   clientUuid: string;
   machineId: string;
   occurredAt: string;
@@ -234,7 +235,7 @@ export async function getActionReportDraft(id: string, tenantId?: string, actorI
   if (!isSupabaseConfigured() || !/^[0-9a-f-]{36}$/i.test(id)) return null;
   const s = await createServiceClient();
   let query = s.from("service_action_reports")
-    .select("id,client_uuid,machine_id,occurred_at,action_kind,action_modes,notes,cleaning_material_used,water_bucket_count,service_action_refill_lines(odoo_lot_id:observed_odoo_lot_id,lot_code:observed_lot_code,product_name,quantity,unit,line_number),service_action_report_incidents(incident_id)")
+    .select("id,revision,client_uuid,machine_id,occurred_at,action_kind,action_modes,notes,cleaning_material_used,water_bucket_count,service_action_refill_lines(odoo_lot_id:observed_odoo_lot_id,lot_code:observed_lot_code,product_name,quantity,unit,line_number),service_action_report_incidents(incident_id)")
     .eq("id", id).eq("status", "draft");
   if (tenantId) query = query.eq("tenant_id", tenantId);
   if (actorId) query = query.eq("operator_id", actorId);
@@ -246,6 +247,7 @@ export async function getActionReportDraft(id: string, tenantId?: string, actorI
     .sort((a, b) => Number(a.line_number) - Number(b.line_number));
   return {
     id: row.id as string,
+    revision: Number(row.revision),
     clientUuid: row.client_uuid as string,
     machineId: row.machine_id as string,
     occurredAt: row.occurred_at as string,

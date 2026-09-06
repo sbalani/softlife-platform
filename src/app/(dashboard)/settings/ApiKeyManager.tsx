@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { generateApiKey, revokeApiKey, type ApiKeyRow } from "./api-key-actions";
 
+export const MCP_ENDPOINT = "https://awsfqnymosevmhawbukf.supabase.co/functions/v1/softlife-mcp";
+
 export function ApiKeyManager({ keys, canCommand }: { keys: ApiKeyRow[]; canCommand: boolean }) {
   const [pending, startTransition] = useTransition();
   const [name, setName] = useState("");
@@ -33,7 +35,7 @@ export function ApiKeyManager({ keys, canCommand }: { keys: ApiKeyRow[]; canComm
 
   const copy = () => {
     if (newKey) {
-      navigator.clipboard.writeText(`Authorization: Bearer ${newKey}`);
+      navigator.clipboard.writeText(`${MCP_ENDPOINT}?key=${encodeURIComponent(newKey)}`);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -43,15 +45,16 @@ export function ApiKeyManager({ keys, canCommand }: { keys: ApiKeyRow[]; canComm
     <div className="space-y-4">
       {newKey && (
         <div className="rounded-xl border border-sage/40 bg-sage/5 p-4">
-          <p className="mb-2 text-xs font-bold text-sage">Key created — copy it now, it won&apos;t be shown again.</p>
+          <p className="mb-2 text-xs font-bold text-sage">Key created. In Codex, choose no authentication and paste this URL. It won&apos;t be shown again.</p>
           <div className="flex items-center gap-2">
             <code className="flex-1 truncate rounded bg-white px-2 py-1.5 text-xs text-cocoa">
-              Authorization: Bearer {newKey}
+              {MCP_ENDPOINT}?key={newKey}
             </code>
             <button onClick={copy} className="shrink-0 rounded bg-sage px-3 py-1.5 text-xs font-bold text-white hover:bg-sage/80">
               {copied ? "Copied!" : "Copy"}
             </button>
           </div>
+          <p className="mt-2 text-[10px] text-taupe">Treat the entire URL as a secret. Revoke this key if the URL is exposed.</p>
         </div>
       )}
 

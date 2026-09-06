@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertThrows } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { availableTools, dispatchMessage, isLowStock, isOverheated, madridMidnightUtc, reportPayload, type Principal } from "./index.ts";
+import { apiKeyFromRequest, availableTools, dispatchMessage, isLowStock, isOverheated, madridMidnightUtc, reportPayload, type Principal } from "./index.ts";
 
 function principal(role: "admin" | "operator" | "franchisee", scopes: ("read" | "forms" | "commands")[]): Principal {
   return {
@@ -22,6 +22,15 @@ Deno.test("tool listing enforces key scopes and role command fencing", () => {
 
   const franchiseeTools = availableTools(principal("franchisee", ["commands"])).map((tool) => tool.name);
   assertEquals(franchiseeTools.sort(), ["disable_machine_sales", "dispense_free_cup"]);
+});
+
+Deno.test("MCP keys support bearer headers and the Codex URL fallback", () => {
+  const urlKey = `sl_mcp_${"a".repeat(64)}`;
+  const headerKey = `sl_mcp_${"b".repeat(64)}`;
+  const endpoint = `https://example.com/softlife-mcp?key=${encodeURIComponent(urlKey)}`;
+  assertEquals(apiKeyFromRequest(new Request(endpoint)), urlKey);
+  assertEquals(apiKeyFromRequest(new Request(endpoint, { headers: { authorization: `Bearer ${headerKey}` } })), headerKey);
+  assertEquals(apiKeyFromRequest(new Request(endpoint, { headers: { authorization: "OAuth value" } })), null);
 });
 
 Deno.test("Huaxin safety states detect low stock and compressor overheat", () => {

@@ -2,7 +2,7 @@ import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server
 import { getConfigFromEnv } from "@/lib/huaxin/client";
 import { SyncButton } from "./SyncButton";
 import { TimezoneSelector } from "./TimezoneSelector";
-import { ApiKeyManager } from "./ApiKeyManager";
+import { ApiKeyManager, MCP_ENDPOINT } from "./ApiKeyManager";
 import { listApiKeys } from "./api-key-actions";
 import { formatDateTime, tzAbbrev } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
@@ -152,7 +152,7 @@ export default async function SettingsPage() {
         <h2 className="font-display text-lg font-bold text-cocoa">MCP API keys</h2>
         <p className="mt-1 mb-4 max-w-2xl text-sm text-taupe">
           Generate scoped keys to connect ChatGPT, Claude, or other AI tools to your SoftLife data and approved workflows.
-          Endpoint: <code className="rounded bg-cream px-1 text-xs">https://awsfqnymosevmhawbukf.supabase.co/functions/v1/softlife-mcp</code>. Configure the key as <code className="rounded bg-cream px-1 text-xs">Authorization: Bearer sl_mcp_...</code>.
+          Endpoint: <code className="rounded bg-cream px-1 text-xs">{MCP_ENDPOINT}</code>. Use <code className="rounded bg-cream px-1 text-xs">Authorization: Bearer sl_mcp_...</code> where supported. For Codex, generate a key below and use the provided URL with no authentication.
         </p>
         <ApiKeyManager keys={apiKeys} canCommand={profile?.role === "admin" || profile?.role === "franchisee"} />
       </section>

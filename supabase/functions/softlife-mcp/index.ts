@@ -105,10 +105,18 @@ function normalizeRole(value: unknown): Principal["role"] {
   return value === "admin" || value === "franchisee" ? value : "operator";
 }
 
+export function apiKeyFromRequest(request: Request) {
+  const authorization = request.headers.get("authorization");
+  if (authorization !== null) {
+    if (!authorization.startsWith("Bearer ") || authorization.slice(7).includes(" ")) return null;
+    return authorization.slice(7);
+  }
+  return new URL(request.url).searchParams.get("key");
+}
+
 async function authenticate(request: Request, s: SupabaseClient): Promise<Principal> {
-  const authorization = request.headers.get("authorization") ?? "";
-  if (!authorization.startsWith("Bearer ") || authorization.slice(7).includes(" ")) throw new ToolError("Authentication required", -32001);
-  const raw = authorization.slice(7);
+  const raw = apiKeyFromRequest(request);
+  if (!raw) throw new ToolError("Authentication required", -32001);
   if (!raw.startsWith("sl_mcp_") || raw.length < 40) throw new ToolError("Invalid MCP key", -32001);
   const { data, error } = await s.from("mcp_api_keys")
     .select("id,profile_id,scopes,expires_at,profiles!inner(role,tenant_id,full_name)")
@@ -634,7 +642,7 @@ export async function dispatchMessage(message: unknown, principal: Principal, s:
       return errorPayload(id, -32602, "Invalid initialize parameters");
     }
     const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.has(initialize.protocolVersion) ? initialize.protocolVersion : MCP_PROTOCOL_VERSION;
-    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.0.0" } });
+    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.1.0" } });
   }
   if (request.method === "tools/list") return resultPayload(id, { tools: availableTools(principal) });
   if (request.method !== "tools/call") return errorPayload(id, -32601, `Method not found: ${request.method}`);

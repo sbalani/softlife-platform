@@ -8,9 +8,9 @@ import {
   deleteCouponApi,
   generateCouponCodes,
   getConfigFromEnv,
-  getCouponRecords,
 } from "@/lib/huaxin/client";
 import { createServiceClient } from "@/lib/supabase/server";
+import { deleteCouponCodeMetadata, getCouponCodesWithMetadata, updateCouponCodeMetadata } from "@/lib/data/coupon-code-metadata";
 
 export type CreateCouponInput = {
   couponType: string;
@@ -116,10 +116,11 @@ export async function generateAdminCouponCodes(couponId: string, num: number, ac
 }
 
 export async function getAdminCouponCodes(couponId: string) {
-  const cfg = getConfigFromEnv();
-  if (!cfg) throw new Error("Huaxin not configured.");
-  if (!validCouponId(couponId)) throw new Error("Invalid coupon ID.");
-  return getCouponRecords(cfg, couponId, "");
+  return getCouponCodesWithMetadata(couponId);
+}
+
+export async function updateAdminCouponCode(couponId: string, code: string, distributed: boolean, extraInformation: string, expectedRevision: number | null, actor: CouponActor) {
+  return updateCouponCodeMetadata(couponId, code, distributed, extraInformation, expectedRevision, actor);
 }
 
 export async function deleteAdminCoupon(couponId: string, actor: CouponActor): Promise<CouponResult> {
@@ -131,7 +132,8 @@ export async function deleteAdminCoupon(couponId: string, actor: CouponActor): P
     await logCoupon("delete", { couponIds: couponId }, result, actor);
     const error = couponApiError(result);
     if (error) return { ok: false, error };
-    return { ok: true, warning: await refreshCouponSnapshots() };
+    const [warning, cleanupError] = await Promise.all([refreshCouponSnapshots(), deleteCouponCodeMetadata(couponId)]);
+    return { ok: true, warning: [warning, cleanupError ? `Coupon was deleted, but local distribution information could not be removed: ${cleanupError}` : null].filter(Boolean).join(" ") || undefined };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }

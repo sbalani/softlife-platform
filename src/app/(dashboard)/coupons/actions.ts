@@ -5,8 +5,6 @@ import {
   getConfigFromEnv,
   createCoupon,
   generateCouponCodes,
-  getCouponRecords,
-  deleteCouponApi,
   couponApiError,
 } from "@/lib/huaxin/client";
 import { couponDaysBetween } from "@/lib/coupon-dates";
@@ -15,10 +13,10 @@ import { getSessionProfile } from "@/lib/auth/session";
 import { recordCouponExchange } from "@/lib/data/change-log";
 import { refreshCouponSnapshots } from "@/lib/data/coupons";
 import { buildCouponContent, parseCouponUseCount } from "@/lib/coupon-content";
-import type { CreateCouponInput } from "@/lib/data/coupon-admin";
-import { createCouponRequest, getGrantedCouponRecords, grantCouponRequest, rejectCouponRequest } from "@/lib/data/coupon-requests";
+import { deleteAdminCoupon, getAdminCouponCodes, updateAdminCouponCode, type CreateCouponInput } from "@/lib/data/coupon-admin";
+import { createCouponRequest, getGrantedCouponRecords, grantCouponRequest, rejectCouponRequest, updateGrantedCouponCode } from "@/lib/data/coupon-requests";
 
-export type CouponResult = { ok: boolean; error?: string; warning?: string };
+export type CouponResult = { ok: boolean; error?: string; warning?: string; revision?: number };
 
 function requestInput(fd: FormData): CreateCouponInput {
   return {
@@ -70,6 +68,13 @@ export async function fetchGrantedCouponRecordsAction(requestId: string): Promis
   const session = await getSessionProfile();
   if (!session) return { records: [], error: "Sign in required." };
   return getGrantedCouponRecords(session, requestId);
+}
+
+export async function updateGrantedCouponCodeAction(requestId: string, code: string, distributed: boolean, extraInformation: string, expectedRevision: number | null): Promise<CouponResult> {
+  const session = await getSessionProfile();
+  if (!session) return { ok: false, error: "Sign in required." };
+  if (typeof requestId !== "string" || typeof code !== "string" || typeof distributed !== "boolean" || typeof extraInformation !== "string" || expectedRevision !== null && !Number.isInteger(expectedRevision)) return { ok: false, error: "Invalid coupon distribution update." };
+  return updateGrantedCouponCode(session, requestId, code, distributed, extraInformation, expectedRevision);
 }
 
 export async function createCouponAction(_prev: CouponResult | null, fd: FormData): Promise<CouponResult> {
@@ -177,33 +182,25 @@ export async function generateCodes(couponId: string, num: number): Promise<Coup
 
 export async function fetchRecords(couponId: string): Promise<{ records: unknown[]; error?: string }> {
   if (!await isAdmin()) return { records: [], error: "Admin access required." };
-  const cfg = getConfigFromEnv();
-  if (!cfg) return { records: [], error: "Huaxin not configured." };
   if (!/^\d+$/.test(couponId) || Number(couponId) < 1) return { records: [], error: "Invalid coupon ID." };
   try {
-    return { records: await getCouponRecords(cfg, couponId, "") };
+    return { records: await getAdminCouponCodes(couponId) };
   } catch (e) {
     return { records: [], error: e instanceof Error ? e.message : String(e) };
   }
 }
 
+export async function updateCouponCodeAction(couponId: string, code: string, distributed: boolean, extraInformation: string, expectedRevision: number | null): Promise<CouponResult> {
+  const session = await getSessionProfile();
+  if (!session || session.role !== "admin") return { ok: false, error: "Admin access required." };
+  if (typeof couponId !== "string" || typeof code !== "string" || typeof distributed !== "boolean" || typeof extraInformation !== "string" || expectedRevision !== null && !Number.isInteger(expectedRevision)) return { ok: false, error: "Invalid coupon distribution update." };
+  return updateAdminCouponCode(couponId, code, distributed, extraInformation, expectedRevision, session);
+}
+
 export async function deleteCouponAction(couponId: string): Promise<CouponResult> {
-  if (!await isAdmin()) return { ok: false, error: "Admin access required." };
-  const cfg = getConfigFromEnv();
-  if (!cfg) return { ok: false, error: "Huaxin not configured." };
-  if (!/^\d+$/.test(couponId) || Number(couponId) < 1) return { ok: false, error: "Invalid coupon ID." };
-  try {
-    const result = await deleteCouponApi(cfg, couponId);
-    await logCouponExchange("delete", { couponIds: couponId }, result);
-    const error = couponApiError(result);
-    if (!error) {
-      const warning = await refreshCouponSnapshots();
-      revalidatePath("/coupons");
-      return { ok: true, warning };
-    }
-    return { ok: false, error };
-  } catch (e) {
-    await logCouponExchange("delete", { couponIds: couponId }, { error: e instanceof Error ? e.message : String(e) });
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
+  const session = await getSessionProfile();
+  if (!session || session.role !== "admin") return { ok: false, error: "Admin access required." };
+  const result = await deleteAdminCoupon(couponId, session);
+  if (result.ok) revalidatePath("/coupons");
+  return result;
 }

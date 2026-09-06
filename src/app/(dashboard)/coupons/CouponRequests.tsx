@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import type { CouponRequest } from "@/lib/data/coupon-requests";
 import { fetchGrantedCouponRecordsAction, grantCouponRequestAction, rejectCouponRequestAction } from "./actions";
+import type { CouponCodeRecord } from "@/lib/coupon-code-metadata";
+import { CouponCodeTable } from "./CouponCodeTable";
 
 const STATUS_STYLE: Record<string, string> = {
   pending: "bg-warning/15 text-warning",
@@ -11,9 +13,6 @@ const STATUS_STYLE: Record<string, string> = {
   rejected: "bg-danger/10 text-danger",
   failed: "bg-danger/10 text-danger",
 };
-
-type CodeRecord = { code?: string; status?: string; expireTime?: string };
-const CODE_STATUS: Record<string, string> = { "0": "Unused", "1": "Used", "2": "Expired" };
 
 function RequestDetails({ request }: { request: CouponRequest }) {
   return (
@@ -66,13 +65,13 @@ export function AdminCouponRequests({ requests }: { requests: CouponRequest[] })
 
 function GrantedCoupon({ request }: { request: CouponRequest }) {
   const [pending, startTransition] = useTransition();
-  const [codes, setCodes] = useState<CodeRecord[] | null>(null);
+  const [codes, setCodes] = useState<CouponCodeRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = () => startTransition(async () => {
     if (codes) { setCodes(null); return; }
     const result = await fetchGrantedCouponRecordsAction(request.id);
     setError(result.error ?? null);
-    if (!result.error) setCodes(result.records as CodeRecord[]);
+    if (!result.error) setCodes(result.records as CouponCodeRecord[]);
   });
   return (
     <details className="rounded-2xl border border-sage/30 bg-white p-5">
@@ -80,7 +79,7 @@ function GrantedCoupon({ request }: { request: CouponRequest }) {
       <RequestDetails request={request} />
       <button onClick={load} disabled={pending} className="mt-4 rounded-lg bg-cocoa px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{pending ? "Loading..." : codes ? "Hide coupon codes" : "Show coupon codes"}</button>
       {error && <p className="mt-3 text-sm font-semibold text-danger">{error}</p>}
-      {codes && <div className="mt-3 overflow-x-auto rounded-xl border border-line"><table className="w-full min-w-[480px] text-xs"><thead className="bg-cream/60 text-left uppercase text-taupe"><tr><th className="px-3 py-2">Code</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Expires</th></tr></thead><tbody className="divide-y divide-line">{codes.map((code, index) => <tr key={`${code.code ?? "code"}-${index}`}><td className="px-3 py-2 font-mono font-bold text-cocoa">{code.code ?? "—"}</td><td className="px-3 py-2 text-cocoa">{CODE_STATUS[String(code.status ?? "")] ?? code.status ?? "—"}</td><td className="px-3 py-2 text-taupe">{code.expireTime ?? "—"}</td></tr>)}{!codes.length && <tr><td colSpan={3} className="px-3 py-6 text-center text-taupe">No coupon codes were returned.</td></tr>}</tbody></table></div>}
+      {codes && <div className="mt-3"><CouponCodeTable records={codes} requestId={request.id} /></div>}
     </details>
   );
 }

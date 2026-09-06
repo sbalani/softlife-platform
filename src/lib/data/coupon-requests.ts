@@ -1,6 +1,7 @@
 import type { SessionProfile } from "@/lib/auth/session";
 import type { CreateCouponInput } from "@/lib/data/coupon-admin";
 import { createAdminCoupon, getAdminCouponCodes, validateCouponInput } from "@/lib/data/coupon-admin";
+import { updateCouponCodeMetadata } from "@/lib/data/coupon-code-metadata";
 import { createServiceClient } from "@/lib/supabase/server";
 import { ymd } from "@/lib/dates";
 
@@ -215,26 +216,38 @@ export async function rejectCouponRequest(session: SessionProfile, requestId: st
   return data ? { ok: true } : { ok: false, error: "This request is no longer pending." };
 }
 
-export async function getGrantedCouponRecords(session: SessionProfile, requestId: string) {
-  if (session.role !== "franchisee" || !session.tenant_id) return { records: [], error: "Franchisee access required." };
+async function grantedCouponId(session: SessionProfile, requestId: string): Promise<{ couponId?: string; error?: string }> {
+  if (session.role !== "franchisee" || !session.tenant_id) return { error: "Franchisee access required." };
   const s = await createServiceClient();
   const [{ data, error }, { data: links, error: linkError }] = await Promise.all([
     s.from("coupon_requests").select("huaxin_coupon_id").eq("id", requestId).eq("tenant_id", session.tenant_id).eq("status", "granted").maybeSingle(),
     s.from("coupon_request_machines").select("machine_id").eq("request_id", requestId),
   ]);
-  if (error) return { records: [], error: error.message };
-  if (linkError) return { records: [], error: linkError.message };
-  if (!data?.huaxin_coupon_id) return { records: [], error: "Granted coupon not found." };
+  if (error) return { error: error.message };
+  if (linkError) return { error: linkError.message };
+  if (!data?.huaxin_coupon_id) return { error: "Granted coupon not found." };
   const machineIds = ((links as { machine_id: string }[]) ?? []).map((row) => row.machine_id);
   const today = ymd(new Date(), "Europe/Madrid");
   const { data: assignments, error: assignmentError } = await s.from("machine_franchisee_assignments").select("machine_id")
     .eq("tenant_id", session.tenant_id).in("machine_id", machineIds).lte("start_date", today).or(`end_date.is.null,end_date.gte.${today}`);
-  if (assignmentError) return { records: [], error: assignmentError.message };
+  if (assignmentError) return { error: assignmentError.message };
   const assignedIds = new Set(((assignments as { machine_id: string }[]) ?? []).map((row) => row.machine_id));
-  if (!machineIds.length || machineIds.some((id) => !assignedIds.has(id))) return { records: [], error: "This coupon is no longer available because its machine assignment changed." };
+  if (!machineIds.length || machineIds.some((id) => !assignedIds.has(id))) return { error: "This coupon is no longer available because its machine assignment changed." };
+  return { couponId: String(data.huaxin_coupon_id) };
+}
+
+export async function getGrantedCouponRecords(session: SessionProfile, requestId: string) {
+  const access = await grantedCouponId(session, requestId);
+  if (!access.couponId) return { records: [], error: access.error ?? "Granted coupon not found." };
   try {
-    return { records: await getAdminCouponCodes(String(data.huaxin_coupon_id)) };
+    return { records: await getAdminCouponCodes(access.couponId) };
   } catch (error) {
     return { records: [], error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+export async function updateGrantedCouponCode(session: SessionProfile, requestId: string, code: string, distributed: boolean, extraInformation: string, expectedRevision: number | null) {
+  const access = await grantedCouponId(session, requestId);
+  if (!access.couponId) return { ok: false, error: access.error ?? "Granted coupon not found." };
+  return updateCouponCodeMetadata(access.couponId, code, distributed, extraInformation, expectedRevision, session);
 }

@@ -4,6 +4,8 @@ import { useState, useTransition } from "react";
 import { generateCodes, fetchRecords, deleteCouponAction } from "./actions";
 import type { HuaxinCoupon } from "@/lib/huaxin/client";
 import { parseCouponSecondary } from "@/lib/coupon-content";
+import type { CouponCodeRecord } from "@/lib/coupon-code-metadata";
+import { CouponCodeTable } from "./CouponCodeTable";
 
 const TYPE_BADGE: Record<string, string> = {
   "0": "bg-terracotta/15 text-terracotta",
@@ -11,14 +13,11 @@ const TYPE_BADGE: Record<string, string> = {
 };
 const TYPE_NAME: Record<string, string> = { "0": "Discount", "1": "One-cup" };
 
-type CodeRecord = { code?: string; status?: string; expireTime?: string; createTime?: string };
-const STATUS: Record<string, string> = { "0": "Unused", "1": "Used", "2": "Expired" };
-
 export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [codes, setCodes] = useState<CodeRecord[] | null>(null);
+  const [codes, setCodes] = useState<CouponCodeRecord[] | null>(null);
   const [genCount, setGenCount] = useState("5");
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -30,7 +29,7 @@ export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
       setMsg(res.ok ? `Generated ${n} code(s).` : res.error ?? "Failed");
       if (res.ok) {
         const loaded = await fetchRecords(String(coupon.couponId));
-        setCodes(loaded.records as CodeRecord[]);
+        setCodes(loaded.records as CouponCodeRecord[]);
         setExpanded(true);
         if (loaded.error) setMsg(loaded.error);
       }
@@ -40,10 +39,11 @@ export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
   const viewCodes = () => {
     if (expanded) { setExpanded(false); return; }
     setExpanded(true);
+    setCodes(null);
     startTransition(async () => {
       const res = await fetchRecords(String(coupon.couponId));
-      if (res.error) setMsg(res.error);
-      else setCodes(res.records as CodeRecord[]);
+      if (res.error) { setCodes([]); setMsg(res.error); }
+      else setCodes(res.records as CouponCodeRecord[]);
     });
   };
 
@@ -89,16 +89,7 @@ export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
 
       {expanded && (
         <div className="mt-3 border-t border-line pt-3">
-          {codes && codes.length > 0 ? (
-            <table className="w-full text-xs">
-              <thead className="text-left text-[10px] uppercase text-taupe"><tr><th className="py-1">Code</th><th className="py-1">Status</th><th className="py-1">Expires</th></tr></thead>
-              <tbody className="divide-y divide-line">
-                {codes.map((c, i) => (
-                  <tr key={i}><td className="py-1 font-mono text-cocoa">{c.code ?? "—"}</td><td className="py-1 text-cocoa">{STATUS[String(c.status ?? "")] ?? c.status}</td><td className="py-1 text-taupe">{c.expireTime ?? "—"}</td></tr>
-                ))}
-              </tbody>
-            </table>
-          ) : codes ? <p className="text-xs text-taupe">No serial codes yet. Generate some above.</p> : <p className="text-xs text-taupe">Loading…</p>}
+          {codes ? <CouponCodeTable records={codes} couponId={String(coupon.couponId)} /> : <p className="text-xs text-taupe">Loading...</p>}
         </div>
       )}
     </details>

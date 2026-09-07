@@ -37,7 +37,7 @@ before sending the next.
       "notes": "Optional notes",
       "cleaning": {
         "material_used": true,
-        "water_buckets": 3
+        "water_buckets": null
       },
       "refill_lines": [
         {
@@ -45,7 +45,9 @@ before sending the next.
           "unit": "bag",
           "odoo_lot_id": 123,
           "lot_code": "LOT-123",
-          "product_name": "Mix"
+          "product_name": "Mix",
+          "finished_bottle": true,
+          "left_unfinished_bottle": true
         }
       ]
     }
@@ -80,6 +82,13 @@ The response is record-level:
 
 Missing warehouse, transfer, lot, or stock provenance does not reject a
 physical refill. It returns unresolved or partially resolved provenance.
+`cleaning.water_buckets` is optional; when supplied it must be a whole number
+from 0 to 20. The bottle flags are independent. `left_unfinished_bottle=true`
+reduces the line's inventory-reconciliation quantity by one (never below zero),
+while `finished_bottle` records physical evidence without changing that formula.
+For example, quantity 1 left unfinished reconciles 0; quantity 3 left unfinished
+reconciles 2. Existing explicit allocation confirmation remains required before
+warehouse stock is deducted.
 
 `GET /softlife/v2/action-reports/sync` returns up to 100 currently authorized server drafts owned by
 the current user, including lines, attachment metadata, `updated_at`, and

@@ -88,7 +88,7 @@ function reportSchema(update: boolean) {
       action_modes: { type: "array", items: { type: "string", enum: VALID_MODES }, minItems: 1, maxItems: 3, uniqueItems: true },
       notes: { type: "string", maxLength: 5000 },
       cleaning: { type: "object", properties: { material_used: { type: ["boolean", "null"] }, water_buckets: { type: ["integer", "null"], minimum: 0, maximum: 20 } } },
-      refill_lines: { type: "array", maxItems: 20, items: { type: "object", properties: { quantity: { type: ["number", "null"] }, unit: { type: "string", maxLength: 30 }, odoo_lot_id: { type: ["integer", "null"] }, lot_code: { type: ["string", "null"], maxLength: 200 }, product_name: { type: ["string", "null"], maxLength: 200 } } } },
+      refill_lines: { type: "array", maxItems: 20, items: { type: "object", properties: { quantity: { type: ["number", "null"] }, unit: { type: "string", maxLength: 30 }, odoo_lot_id: { type: ["integer", "null"] }, lot_code: { type: ["string", "null"], maxLength: 200 }, product_name: { type: ["string", "null"], maxLength: 200 }, finished_bottle: { type: "boolean" }, left_unfinished_bottle: { type: "boolean" } } } },
       incident_ids: { type: "array", maxItems: 20, uniqueItems: true, items: { type: "string" } },
     },
     required,
@@ -295,11 +295,14 @@ export function reportPayload(args: Record<string, unknown>, revision: number, s
     const unit = String(line.unit ?? "unit").slice(0, 30);
     const lotId = line.odoo_lot_id === null || line.odoo_lot_id === undefined ? null : Number(line.odoo_lot_id);
     if (lotId !== null && (!Number.isInteger(lotId) || lotId < 0)) throw new ToolError("Invalid odoo_lot_id");
-    return { quantity, unit, odoo_lot_id: lotId, lot_code: String(line.lot_code ?? "").trim().slice(0, 200) || null, product_name: String(line.product_name ?? "").trim().slice(0, 200) || null };
+    if (line.finished_bottle !== undefined && typeof line.finished_bottle !== "boolean") throw new ToolError("finished_bottle must be a boolean");
+    if (line.left_unfinished_bottle !== undefined && typeof line.left_unfinished_bottle !== "boolean") throw new ToolError("left_unfinished_bottle must be a boolean");
+    if ((line.finished_bottle === true || line.left_unfinished_bottle === true) && quantity !== null && !Number.isInteger(quantity)) throw new ToolError("Bottle-tracked refill quantities must be whole numbers");
+    return { quantity, unit, odoo_lot_id: lotId, lot_code: String(line.lot_code ?? "").trim().slice(0, 200) || null, product_name: String(line.product_name ?? "").trim().slice(0, 200) || null, ...(line.finished_bottle === true ? { finished_bottle: true } : {}), ...(line.left_unfinished_bottle === true ? { left_unfinished_bottle: true } : {}) };
   }) : [];
   const incidentIds = Array.isArray(args.incident_ids) ? args.incident_ids.map(String) : [];
   if (incidentIds.length > 20 || new Set(incidentIds).size !== incidentIds.length || incidentIds.some((id) => !UUID.test(id))) throw new ToolError("Invalid incident_ids");
-  if (status === "confirmed" && modes.includes("cleaning") && (materialUsed === null || waterBuckets === null)) throw new ToolError("Cleaning evidence is required before confirmation");
+  if (status === "confirmed" && modes.includes("cleaning") && materialUsed === null) throw new ToolError("Cleaning material evidence is required before confirmation");
   if (status === "confirmed" && modes.includes("refill") && (!lines.length || lines.some((line) => line.quantity === null))) throw new ToolError("Valid refill lines are required before confirmation");
   if (status === "confirmed" && modes.includes("other") && !notes) throw new ToolError("Notes are required for other actions");
   const actionKind = modes.includes("cleaning") && modes.includes("refill") ? "both" : modes.includes("cleaning") ? "cleaning" : modes.includes("refill") ? "refill" : "other";
@@ -335,7 +338,7 @@ async function persistReport(s: SupabaseClient, principal: Principal, args: Reco
 async function getOwnedReport(s: SupabaseClient, principal: Principal, reportId: unknown) {
   if (typeof reportId !== "string" || !UUID.test(reportId)) throw new ToolError("Invalid report_id");
   const { data, error } = await s.from("service_action_reports")
-    .select("id,client_uuid,machine_id,operator_id,tenant_id,occurred_at,action_kind,action_modes,status,notes,cleaning_material_used,water_bucket_count,source,assigned_warehouse_id,provenance_status,cleaning_projection_status,refill_projection_status,projection_error,confirmed_at,revision,mobile_draft_payload,created_at,updated_at,service_action_refill_lines(id,line_number,quantity,unit,observed_odoo_lot_id,observed_lot_code,product_name,provenance_status,unresolved_reason)")
+    .select("id,client_uuid,machine_id,operator_id,tenant_id,occurred_at,action_kind,action_modes,status,notes,cleaning_material_used,water_bucket_count,source,assigned_warehouse_id,provenance_status,cleaning_projection_status,refill_projection_status,projection_error,confirmed_at,revision,mobile_draft_payload,created_at,updated_at,service_action_refill_lines(id,line_number,quantity,unit,observed_odoo_lot_id,observed_lot_code,product_name,finished_bottle,left_unfinished_bottle,inventory_quantity,provenance_status,unresolved_reason)")
     .eq("id", reportId).maybeSingle();
   if (error) throw error;
   if (!data || (principal.role !== "admin" && data.operator_id !== principal.profileId)) throw new ToolError("Action Report not found", -32004);
@@ -690,7 +693,7 @@ async function handleTool(name: string, args: Record<string, unknown>, principal
         action_modes: report.action_modes,
         notes: report.notes,
         cleaning: { material_used: report.cleaning_material_used, water_buckets: report.water_bucket_count },
-        refill_lines: lines.map((line) => ({ quantity: line.quantity, unit: line.unit, odoo_lot_id: line.observed_odoo_lot_id, lot_code: line.observed_lot_code, product_name: line.product_name })),
+        refill_lines: lines.map((line) => ({ quantity: line.quantity, unit: line.unit, odoo_lot_id: line.observed_odoo_lot_id, lot_code: line.observed_lot_code, product_name: line.product_name, ...(line.finished_bottle === true ? { finished_bottle: true } : {}), ...(line.left_unfinished_bottle === true ? { left_unfinished_bottle: true } : {}) })),
         incident_ids: incidentIds,
       }, revision, "confirmed", false, report.operator_id);
       if (!report.action_modes.includes("refill")) return { ...(result as Record<string, unknown>), stock_snapshot_status: "not_applicable" };
@@ -747,7 +750,7 @@ export async function dispatchMessage(message: unknown, principal: Principal, s:
       return errorPayload(id, -32602, "Invalid initialize parameters");
     }
     const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.has(initialize.protocolVersion) ? initialize.protocolVersion : MCP_PROTOCOL_VERSION;
-    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.2.0" } });
+    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.3.0" } });
   }
   if (request.method === "tools/list") return resultPayload(id, { tools: availableTools(principal) });
   if (request.method !== "tools/call") return errorPayload(id, -32601, `Method not found: ${request.method}`);

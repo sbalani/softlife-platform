@@ -9,6 +9,7 @@ import { authorizedActionReport } from "@/lib/data/action-report-access";
 import { actionReportExtractionSchema } from "@/lib/action-report-ai-schema";
 import { captureActionReportStockSnapshot } from "@/lib/action-report-stock";
 import { legacyKindFromModes, modesFromLegacyKind, parseActionReportModes } from "@/lib/action-report-modes";
+import { isValidBottleQuantity } from "@/lib/action-report-refills";
 
 export type ActionReportResult = {
   ok: boolean;
@@ -54,7 +55,7 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
   const waterBucketCount = bucketValue === "" ? null : Number(bucketValue);
   const notes = String(formData.get("notes") ?? "").trim().slice(0, 5000);
   if (status === "confirmed" && hasCleaning && !["yes", "no"].includes(materialValue)) return { ok: false, error: "Confirm whether cleaning material was used." };
-  if (status === "confirmed" && hasCleaning && (!Number.isInteger(waterBucketCount) || waterBucketCount === null || waterBucketCount < 0 || waterBucketCount > 20)) {
+  if (hasCleaning && waterBucketCount !== null && (!Number.isInteger(waterBucketCount) || waterBucketCount < 0 || waterBucketCount > 20)) {
     return { ok: false, error: "Water buckets must be a whole number from 0 to 20." };
   }
   if (status === "confirmed" && hasOther && !notes) return { ok: false, error: "Describe the other action in notes." };
@@ -64,6 +65,8 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
   const lotCodes = formData.getAll("lot_code").map(String);
   const productNames = formData.getAll("product_name").map(String);
   const units = formData.getAll("unit").map(String);
+  const finishedBottles = formData.getAll("finished_bottle").map(String);
+  const unfinishedBottles = formData.getAll("left_unfinished_bottle").map(String);
   if (quantities.length > 20) return { ok: false, error: "A report can contain at most 20 refill lines." };
   const refillLines = hasRefill ? quantities.map((rawQuantity, index) => {
     const quantity = Number(rawQuantity);
@@ -74,10 +77,13 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
       odoo_lot_id: /^\d+$/.test(rawLotId) ? Number(rawLotId) : null,
       lot_code: (lotCodes[index] || "").trim().slice(0, 200) || null,
       product_name: (productNames[index] || "").trim().slice(0, 200) || null,
+      ...(finishedBottles[index] === "yes" ? { finished_bottle: true } : {}),
+      ...(unfinishedBottles[index] === "yes" ? { left_unfinished_bottle: true } : {}),
     };
   }).filter((line) => status === "confirmed" || line.quantity > 0) : [];
   if (status === "confirmed" && hasRefill && refillLines.length === 0) return { ok: false, error: "Add at least one refill line." };
   if (refillLines.some((line) => !Number.isFinite(line.quantity) || line.quantity <= 0)) return { ok: false, error: "Enter a positive quantity for every refill line." };
+  if (refillLines.some((line) => !isValidBottleQuantity(line.quantity, line.finished_bottle === true, line.left_unfinished_bottle === true))) return { ok: false, error: "Bottle-tracked refill quantities must be whole numbers." };
 
   try {
     const s = await createServiceClient();
@@ -197,7 +203,7 @@ export async function applyActionReportAiProposal(_previous: ActionReportResult 
     if (!report) return { ok: false, error: "Draft not found." };
     const [{ data: job, error: jobError }, { data: currentLines, error: lineError }, { data: incidentLinks, error: incidentError }] = await Promise.all([
       s.from("service_action_ai_jobs").select("id,status,extraction").eq("id", jobId).eq("report_id", reportId).maybeSingle(),
-      s.from("service_action_refill_lines").select("quantity,unit,product_name,observed_lot_code,observed_odoo_lot_id,line_number").eq("report_id", reportId).order("line_number"),
+      s.from("service_action_refill_lines").select("quantity,unit,product_name,observed_lot_code,observed_odoo_lot_id,finished_bottle,left_unfinished_bottle,line_number").eq("report_id", reportId).order("line_number"),
       s.from("service_action_report_incidents").select("incident_id").eq("report_id", reportId),
     ]);
     if (jobError) throw jobError;
@@ -205,7 +211,7 @@ export async function applyActionReportAiProposal(_previous: ActionReportResult 
     if (incidentError) throw incidentError;
     if (!job || job.status !== "complete") return { ok: false, error: "AI extraction is not ready." };
     const extraction = actionReportExtractionSchema.parse(job.extraction);
-    let refillLines = ((currentLines as Record<string, unknown>[]) ?? []).map((line) => ({ quantity: Number(line.quantity), unit: line.unit, product_name: line.product_name, lot_code: line.observed_lot_code, odoo_lot_id: line.observed_odoo_lot_id }));
+    let refillLines = ((currentLines as Record<string, unknown>[]) ?? []).map((line) => ({ quantity: Number(line.quantity), unit: line.unit, product_name: line.product_name, lot_code: line.observed_lot_code, odoo_lot_id: line.observed_odoo_lot_id, ...(line.finished_bottle === true ? { finished_bottle: true } : {}), ...(line.left_unfinished_bottle === true ? { left_unfinished_bottle: true } : {}) }));
     if (extraction.refillLines.length && refillLines.length === 0) {
       refillLines = extraction.refillLines.flatMap((line) => {
         if (!line.quantity) return [];

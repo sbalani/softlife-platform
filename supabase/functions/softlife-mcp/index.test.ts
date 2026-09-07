@@ -61,9 +61,19 @@ Deno.test("drafts may be incomplete but confirmation requires physical evidence"
     cleaning: {},
   };
   assertEquals(reportPayload(base, 0, "draft").mobilePayload.status, "draft");
-  assertThrows(() => reportPayload(base, 1, "confirmed"), Error, "Cleaning evidence is required");
-  const confirmed = reportPayload({ ...base, cleaning: { material_used: true, water_buckets: 2 } }, 1, "confirmed");
+  assertThrows(() => reportPayload(base, 1, "confirmed"), Error, "Cleaning material evidence is required");
+  const confirmed = reportPayload({ ...base, cleaning: { material_used: true } }, 1, "confirmed");
   assertEquals(confirmed.mobilePayload.status, "confirmed");
+  assertEquals(confirmed.waterBuckets, null);
+});
+
+Deno.test("Action Report refill bottle evidence is preserved", () => {
+  const result = reportPayload({
+    client_uuid: crypto.randomUUID(), machine_id: crypto.randomUUID(), occurred_at: new Date().toISOString(),
+    action_modes: ["refill"], refill_lines: [{ quantity: 2, finished_bottle: true, left_unfinished_bottle: true }],
+  }, 1, "confirmed");
+  assertEquals(result.lines[0].finished_bottle, true);
+  assertEquals(result.lines[0].left_unfinished_bottle, true);
 });
 
 Deno.test("other Action Reports require notes only when confirmed", () => {

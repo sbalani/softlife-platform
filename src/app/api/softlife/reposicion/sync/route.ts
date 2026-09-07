@@ -52,13 +52,17 @@ export async function POST(req: Request) {
         rejected.push({ client_uuid: clientUuid, reason: "Current machine access denied" }); continue;
       }
       const rawLines = Array.isArray(r.lines) ? r.lines as Record<string, unknown>[] : [];
-      if (rawLines.length > 20 || rawLines.some((line) => !line || typeof line !== "object")) {
+      if (rawLines.length > 20 || rawLines.some((line) => !line || typeof line !== "object"
+        || (line.finished_bottle !== undefined && typeof line.finished_bottle !== "boolean")
+        || (line.left_unfinished_bottle !== undefined && typeof line.left_unfinished_bottle !== "boolean"))) {
         rejected.push({ client_uuid: clientUuid, reason: "Invalid refill lines" }); continue;
       }
       const lines = rawLines.map((line) => ({
         odoo_lot_id: Number(line.lot_id),
         quantity_used: Number(line.quantity_used),
         batch_photo: line.batch_photo ?? null,
+        ...(line.finished_bottle === true ? { finished_bottle: true } : {}),
+        ...(line.left_unfinished_bottle === true ? { left_unfinished_bottle: true } : {}),
       }));
       const legacyLines = rawLines;
       const legacyLotIds = legacyLines.map((line) => String(line.lot_id ?? ""));
@@ -81,7 +85,7 @@ export async function POST(req: Request) {
         continue;
       }
       try {
-        const result = await persistMobileActionReport(s, session, { client_uuid: clientUuid, machine_id: submittedMachineId, occurred_at: eventTime, status: "confirmed", revision: 0, action_kind: "refill", refill_lines: lines.map((line) => ({ odoo_lot_id: line.odoo_lot_id, quantity: line.quantity_used, unit: "unit" })) });
+        const result = await persistMobileActionReport(s, session, { client_uuid: clientUuid, machine_id: submittedMachineId, occurred_at: eventTime, status: "confirmed", revision: 0, action_kind: "refill", refill_lines: lines.map((line) => ({ odoo_lot_id: line.odoo_lot_id, quantity: line.quantity_used, unit: "unit", ...(line.finished_bottle === true ? { finished_bottle: true } : {}), ...(line.left_unfinished_bottle === true ? { left_unfinished_bottle: true } : {}) })) });
         await preserveLegacyBatchPhotos(s, result.id, rawLines);
         accepted.push(clientUuid);
       } catch (error) { rejected.push({ client_uuid: clientUuid, reason: error instanceof Error ? error.message : String(error) }); }

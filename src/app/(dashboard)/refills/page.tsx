@@ -99,7 +99,7 @@ export default async function RefillsPage({ searchParams }: { searchParams: Prom
                   {r.incidents.map((incident) => <Link key={incident.id} href={`/incidents#incident-${incident.id}`} className="rounded-full bg-terracotta/10 px-2.5 py-1 text-xs font-semibold text-terracotta">Incident · {incident.title}</Link>)}
                   {r.refillLines.map((l, i) => (
                     <span key={i} className="rounded-full bg-cream px-2.5 py-1 text-xs text-cocoa">
-                      {l.lotCode ?? l.productName ?? "Unknown lot"} · {l.quantity} {l.unit} · {l.provenanceStatus.replace("_", " ")}
+                       {l.lotCode ?? l.productName ?? "Unknown lot"} · {l.quantity} {l.unit}{(l.finishedBottle || l.leftUnfinishedBottle) ? ` physical · ${l.inventoryQuantity} inventory` : ""} · {l.provenanceStatus.replace("_", " ")}{l.finishedBottle ? " · bottle finished" : ""}{l.leftUnfinishedBottle ? " · bottle left unfinished" : ""}
                     </span>
                   ))}
                   {r.refillLines.length === 0 && <span className="text-xs text-taupe">{r.notes ?? "No refill lines."}</span>}

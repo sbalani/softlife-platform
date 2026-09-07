@@ -18,6 +18,9 @@ export type ProvenanceGap = {
   machine_name: string;
   occurred_at: string;
   quantity: number;
+  inventory_quantity: number;
+  finished_bottle: boolean;
+  left_unfinished_bottle: boolean;
   unit: string;
   product_name: string | null;
   lot_code: string | null;
@@ -89,7 +92,7 @@ export async function getProvenanceGaps(filters: { machineIds?: string[]; tenant
   const operatorIds = [...new Set(reportRows.map((report) => report.operator_id as string))];
   const [{ data: lines, error: lineError }, { data: profiles, error: profileError }, { data: balances, error: balanceError }, { data: lots, error: lotError }] = await Promise.all([
     s.from("service_action_refill_lines")
-      .select("id,report_id,quantity,unit,product_name,observed_lot_code,observed_odoo_lot_id,unresolved_reason,provenance_status,refill_stock_allocations(quantity,status)")
+      .select("id,report_id,quantity,inventory_quantity,unit,product_name,observed_lot_code,observed_odoo_lot_id,finished_bottle,left_unfinished_bottle,unresolved_reason,provenance_status,refill_stock_allocations(quantity,status)")
       .in("report_id", [...reportById.keys()]).neq("provenance_status", "resolved").order("created_at", { ascending: false }),
     s.from("profiles").select("id,full_name,email").in("id", operatorIds),
     s.from("warehouse_lot_effective_balances").select("odoo_warehouse_id,odoo_lot_id,effective_quantity").gt("effective_quantity", 0),
@@ -125,6 +128,9 @@ export async function getProvenanceGaps(filters: { machineIds?: string[]; tenant
       machine_name: machine?.display_name || machine?.name || "Unknown machine",
       occurred_at: report.occurred_at as string,
       quantity: Number(line.quantity),
+      inventory_quantity: Number(line.inventory_quantity),
+      finished_bottle: line.finished_bottle === true,
+      left_unfinished_bottle: line.left_unfinished_bottle === true,
       unit: line.unit as string,
       product_name: line.product_name as string | null,
       lot_code: line.observed_lot_code as string | null,
@@ -134,7 +140,7 @@ export async function getProvenanceGaps(filters: { machineIds?: string[]; tenant
       warehouse_name: warehouse?.name ?? null,
       observed_odoo_lot_id: observedId,
       allocated_quantity: allocated,
-      outstanding_quantity: Math.max(0, Number(line.quantity) - allocated),
+      outstanding_quantity: Math.max(0, Number(line.inventory_quantity) - allocated),
       operator_name: operatorById.get(report.operator_id as string) ?? null,
       recorded_at: report.created_at as string,
       candidates,

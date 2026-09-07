@@ -1,6 +1,7 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import type { SessionProfile } from "./auth/session.ts";
 import type { Order } from "./data/orders.ts";
+import type { BankDetails } from "./bank-details.ts";
 
 export const PAYOUT_TIME_ZONE = "Europe/Madrid";
 export const PAYOUT_IVA_RATE_PERCENT = 10;
@@ -128,6 +129,16 @@ export function validPayoutRange(from: string | null, to: string | null): from i
   return Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`) <= 365 * 86_400_000;
 }
 
+export function payoutBankDetailLines(bankDetails: BankDetails | null | undefined): string[] {
+  if (!bankDetails) return [];
+  return [
+    `Account holder: ${bankDetails.accountHolderName}`,
+    `IBAN: ${bankDetails.iban}`,
+    bankDetails.bicSwift ? `BIC/SWIFT: ${bankDetails.bicSwift}` : null,
+    bankDetails.bankName ? `Bank: ${bankDetails.bankName}` : null,
+  ].filter((line): line is string => line !== null);
+}
+
 function fit(text: string, font: PDFFont, size: number, width: number): string {
   const printable = [...text].map((character) => {
     try {
@@ -148,6 +159,7 @@ export async function createPayoutPdf(input: {
   from: string;
   to: string;
   rows: PayoutRow[];
+  bankDetails?: BankDetails | null;
 }): Promise<Uint8Array> {
   const document = await PDFDocument.create();
   document.setTitle(`Payout statement - ${input.franchiseeName}`);
@@ -169,6 +181,16 @@ export async function createPayoutPdf(input: {
       y -= 20;
       page.drawText(`Period: ${input.from} to ${input.to} (Europe/Madrid)`, { x: 36, y, size: 10, font: regular });
       y -= 30;
+      const bankLines = payoutBankDetailLines(input.bankDetails);
+      if (bankLines.length) {
+        page.drawText("Payment account", { x: 36, y, size: 10, font: bold, color: rgb(0.19, 0.12, 0.09) });
+        y -= 14;
+        for (const line of bankLines) {
+          page.drawText(fit(line, regular, 9, 770), { x: 36, y, size: 9, font: regular });
+          y -= 12;
+        }
+        y -= 12;
+      }
     } else {
       page.drawText(fit(`${input.franchiseeName} - payout statement`, bold, 13, 770), { x: 36, y, size: 13, font: bold });
       y -= 25;

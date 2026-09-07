@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PDFDocument } from "pdf-lib";
 import type { Order } from "./data/orders.ts";
-import { authorizePayoutTenant, calculatePayoutIva, calculatePayoutRows, createPayoutPdf, validPayoutRange, type PayoutAssignment } from "./payout-report.ts";
+import { authorizePayoutTenant, calculatePayoutIva, calculatePayoutRows, createPayoutPdf, payoutBankDetailLines, validPayoutRange, type PayoutAssignment } from "./payout-report.ts";
 
 const assignment = (overrides: Partial<PayoutAssignment> = {}): PayoutAssignment => ({
   id: "assignment-a", machine_id: "machine-a", tenant_id: "tenant-a", start_date: "2026-07-01", end_date: "2026-07-31",
@@ -55,6 +55,15 @@ test("range validation and empty PDF statements work", async () => {
   assert.equal(validPayoutRange("2026-99-99", "2026-07-31"), false);
   assert.equal(validPayoutRange("2025-01-01", "2026-07-31"), false);
   const bytes = await createPayoutPdf({ franchiseeName: "Madrid Foods 🍦", from: "2026-07-01", to: "2026-07-31", rows: [] });
+  assert.equal(String.fromCharCode(...bytes.slice(0, 5)), "%PDF-");
+  assert.equal((await PDFDocument.load(bytes)).getPageCount(), 1);
+});
+
+test("bank details are formatted only when supplied to a payout statement", async () => {
+  assert.deepEqual(payoutBankDetailLines(null), []);
+  const bankDetails = { accountHolderName: "Madrid Foods SL", iban: "ES9121000418450200051332", bicSwift: "CAIXESBBXXX", bankName: "CaixaBank" };
+  assert.deepEqual(payoutBankDetailLines(bankDetails), ["Account holder: Madrid Foods SL", "IBAN: ES9121000418450200051332", "BIC/SWIFT: CAIXESBBXXX", "Bank: CaixaBank"]);
+  const bytes = await createPayoutPdf({ franchiseeName: "Madrid Foods", from: "2026-07-01", to: "2026-07-31", rows: [], bankDetails });
   assert.equal(String.fromCharCode(...bytes.slice(0, 5)), "%PDF-");
   assert.equal((await PDFDocument.load(bytes)).getPageCount(), 1);
 });

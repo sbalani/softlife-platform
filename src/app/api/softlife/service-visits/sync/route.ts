@@ -21,15 +21,18 @@ export async function POST(req: Request) {
     const machineId = String(record.machine_id ?? "");
     const eventTime = String(record.device_event_time ?? "");
     const materialUsed = typeof record.cleaning_material_used === "boolean" ? record.cleaning_material_used : null;
-    const waterBuckets = Number(record.water_bucket_count);
+    const bucketRaw = record.water_bucket_count;
+    const waterBuckets = bucketRaw === null || bucketRaw === undefined || bucketRaw === "" ? null : Number(bucketRaw);
     const rawLines = Array.isArray(record.lines) ? record.lines as Record<string, unknown>[] : [];
-    if (rawLines.length > 20 || rawLines.some((line) => !line || typeof line !== "object")) {
+    if (rawLines.length > 20 || rawLines.some((line) => !line || typeof line !== "object"
+      || (line.finished_bottle !== undefined && typeof line.finished_bottle !== "boolean")
+      || (line.left_unfinished_bottle !== undefined && typeof line.left_unfinished_bottle !== "boolean"))) {
       rejected.push({ client_uuid: clientUuid, reason: "Invalid combined service lines" }); continue;
     }
     const lines = rawLines.map((line) => ({
-      odoo_lot_id: Number(line.lot_id), quantity_used: Number(line.quantity_used), batch_photo: line.batch_photo ?? null,
+      odoo_lot_id: Number(line.lot_id), quantity_used: Number(line.quantity_used), batch_photo: line.batch_photo ?? null, ...(line.finished_bottle === true ? { finished_bottle: true } : {}), ...(line.left_unfinished_bottle === true ? { left_unfinished_bottle: true } : {}),
     }));
-    if (!/^[0-9a-f-]{36}$/i.test(clientUuid) || !/^[0-9a-f-]{36}$/i.test(machineId) || !Number.isFinite(Date.parse(eventTime)) || Date.parse(eventTime) > Date.now() + 5 * 60_000 || materialUsed === null || !Number.isInteger(waterBuckets) || waterBuckets < 0 || waterBuckets > 20 || !lines.length || lines.length > 20 || lines.some((line) => !Number.isInteger(line.odoo_lot_id) || line.odoo_lot_id < 1 || !Number.isFinite(line.quantity_used) || line.quantity_used <= 0)) {
+    if (!/^[0-9a-f-]{36}$/i.test(clientUuid) || !/^[0-9a-f-]{36}$/i.test(machineId) || !Number.isFinite(Date.parse(eventTime)) || Date.parse(eventTime) > Date.now() + 5 * 60_000 || materialUsed === null || (waterBuckets !== null && (!Number.isInteger(waterBuckets) || waterBuckets < 0 || waterBuckets > 20)) || !lines.length || lines.length > 20 || lines.some((line) => !Number.isInteger(line.odoo_lot_id) || line.odoo_lot_id < 1 || !Number.isFinite(line.quantity_used) || line.quantity_used <= 0)) {
       rejected.push({ client_uuid: clientUuid, reason: "Invalid combined service visit" }); continue;
     }
     if (!await canAccessMobileMachine(s, session, machineId, eventTime)) {
@@ -48,7 +51,7 @@ export async function POST(req: Request) {
       continue;
     }
     try {
-      const result = await persistMobileActionReport(s, session, { client_uuid: clientUuid, machine_id: machineId, occurred_at: eventTime, status: "confirmed", revision: 0, action_kind: "both", cleaning: { cleaning_material_used: materialUsed, water_bucket_count: waterBuckets }, refill_lines: lines.map((line) => ({ odoo_lot_id: line.odoo_lot_id, quantity: line.quantity_used, unit: "unit" })) });
+      const result = await persistMobileActionReport(s, session, { client_uuid: clientUuid, machine_id: machineId, occurred_at: eventTime, status: "confirmed", revision: 0, action_kind: "both", cleaning: { cleaning_material_used: materialUsed, water_bucket_count: waterBuckets }, refill_lines: lines.map((line) => ({ odoo_lot_id: line.odoo_lot_id, quantity: line.quantity_used, unit: "unit", ...(line.finished_bottle === true ? { finished_bottle: true } : {}), ...(line.left_unfinished_bottle === true ? { left_unfinished_bottle: true } : {}) })) });
       await preserveLegacyBatchPhotos(s, result.id, rawLines);
       accepted.push(clientUuid);
     } catch (error) { rejected.push({ client_uuid: clientUuid, reason: error instanceof Error ? error.message : String(error) }); }

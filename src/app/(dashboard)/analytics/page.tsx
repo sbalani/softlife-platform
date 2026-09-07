@@ -30,6 +30,16 @@ function completedSales(orders: Order[]): Order[] {
   return orders.filter((order) => order.order_state === "COMPLETE" && !order.is_admin_override);
 }
 
+function PayoutExportForm({ tenantId, from, to, compact = false }: { tenantId: string; from: string; to: string; compact?: boolean }) {
+  return <form action="/analytics/payout/export" method="get" className="flex flex-wrap items-center gap-2">
+    <input type="hidden" name="tenantId" value={tenantId} />
+    <input type="hidden" name="dateFrom" value={from} />
+    <input type="hidden" name="dateTo" value={to} />
+    <label className="flex items-center gap-1.5 text-xs font-semibold text-taupe"><input type="checkbox" name="includeBankDetails" value="true" className="accent-terracotta" />Include bank details if available</label>
+    <button className={compact ? "rounded-lg border border-terracotta px-3 py-1.5 text-xs font-bold text-terracotta" : "rounded-lg bg-sage px-3 py-2 text-sm font-bold text-white"}>{compact ? "Export PDF" : "Payout PDF"}</button>
+  </form>;
+}
+
 export default async function AnalyticsPage({ searchParams }: { searchParams: Promise<AnalyticsParams> }) {
   const [params, tz, machineResult, aliasMap, session] = await Promise.all([
     searchParams,
@@ -174,7 +184,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
           <Link href={reportUrl()} className="rounded-lg border border-terracotta px-3 py-2 text-sm font-bold text-terracotta hover:bg-terracotta/5">Order details CSV</Link>
           <Link href={reportUrl("weekly")} className="rounded-lg border border-terracotta px-3 py-2 text-sm font-bold text-terracotta hover:bg-terracotta/5">Weekly machine sales</Link>
           <Link href={reportUrl("monthly")} className="rounded-lg border border-terracotta px-3 py-2 text-sm font-bold text-terracotta hover:bg-terracotta/5">Monthly machine sales</Link>
-          {session?.role === "franchisee" && session.tenant_id && <Link href={`/analytics/payout/export?tenantId=${encodeURIComponent(session.tenant_id)}&dateFrom=${range.from}&dateTo=${range.to}`} className="rounded-lg bg-sage px-3 py-2 text-sm font-bold text-white">Payout PDF</Link>}
+          {session?.role === "franchisee" && session.tenant_id && <PayoutExportForm tenantId={session.tenant_id} from={range.from} to={range.to} />}
         </div>
       </header>
 
@@ -243,7 +253,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
           <div className="space-y-4">
             {payoutGroups.map((group) => (
               <div key={group.tenantId} className="rounded-xl border border-line p-4">
-                <div className="mb-3 flex flex-wrap justify-between gap-3"><span className="font-bold text-cocoa">{group.tenantName}</span><div className="flex items-center gap-3"><span className="font-bold text-sage">€{group.payout.toFixed(2)}</span><Link href={`/analytics/payout/export?tenantId=${encodeURIComponent(group.tenantId)}&dateFrom=${range.from}&dateTo=${range.to}`} className="rounded-lg border border-terracotta px-3 py-1.5 text-xs font-bold text-terracotta">Export PDF</Link></div></div>
+                <div className="mb-3 flex flex-wrap justify-between gap-3"><span className="font-bold text-cocoa">{group.tenantName}</span><div className="flex flex-wrap items-center gap-3"><span className="font-bold text-sage">€{group.payout.toFixed(2)}</span><PayoutExportForm tenantId={group.tenantId} from={range.from} to={range.to} compact /></div></div>
                 <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-xs"><thead className="text-left uppercase text-taupe"><tr><th className="py-2">Machine</th><th>Period</th><th className="text-right">Share</th><th className="text-right">Orders</th><th className="text-right">Gross</th><th className="text-right">VAT</th><th className="text-right">Net</th><th className="text-right">Payout</th></tr></thead><tbody className="divide-y divide-line">{group.rows.map((row) => <tr key={row.assignmentId}><td className="py-2 font-semibold text-cocoa">{row.machineName}</td><td>{row.period}</td><td className="text-right">{row.sharePercent}%</td><td className="text-right">{row.orders}</td><td className="text-right">€{row.gross.toFixed(2)}</td><td className="text-right">€{row.vat.toFixed(2)}</td><td className="text-right">€{row.net.toFixed(2)}</td><td className="text-right font-bold text-sage">€{row.payout.toFixed(2)}</td></tr>)}</tbody></table></div>
               </div>
             ))}

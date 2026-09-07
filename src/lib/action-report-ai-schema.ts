@@ -16,7 +16,6 @@ export function actionReportQuestions(extraction: ActionReportExtraction): Actio
   if (!extraction.actionKind) questions.push({ key: "action_kind", question: "Was this cleaning, a refill, both, or another action?" });
   const hasCleaning = extraction.actionKind === "cleaning" || extraction.actionKind === "both" || extraction.cleaning.performed === true;
   if (hasCleaning && extraction.cleaning.materialUsed === null) questions.push({ key: "cleaning_material", question: "Was cleaning material used?" });
-  if (hasCleaning && extraction.cleaning.waterBucketCount === null) questions.push({ key: "water_buckets", question: "How many water buckets were used?" });
   const hasRefill = extraction.actionKind === "refill" || extraction.actionKind === "both";
   if (hasRefill && extraction.refillLines.length === 0) questions.push({ key: "refill_lines", question: "What product and quantity were loaded?" });
   extraction.refillLines.forEach((line, index) => {

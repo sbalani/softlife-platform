@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { MobileSession } from "@/lib/auth/mobile-authorization";
 import { canAccessMobileMachine } from "@/lib/auth/mobile-authorization";
 import { legacyKindFromModes, parseActionReportModes } from "@/lib/action-report-modes";
+import { isValidBottleQuantity } from "@/lib/action-report-refills";
 
 const UUID = /^[0-9a-f-]{36}$/i;
 
@@ -25,15 +26,19 @@ export async function persistMobileActionReport(s: SupabaseClient, session: Mobi
   const materialUsed = typeof cleaning.cleaning_material_used === "boolean" ? cleaning.cleaning_material_used : typeof cleaning.material_used === "boolean" ? cleaning.material_used : null;
   const bucketRaw = cleaning.water_bucket_count ?? cleaning.water_buckets;
   const waterBuckets = bucketRaw === null || bucketRaw === undefined || bucketRaw === "" ? null : Number(bucketRaw);
-  if (status === "confirmed" && hasCleaning && (materialUsed === null || !Number.isInteger(waterBuckets) || waterBuckets! < 0 || waterBuckets! > 20)) throw new Error("Cleaning evidence is required");
+  if (status === "confirmed" && hasCleaning && materialUsed === null) throw new Error("Cleaning material evidence is required");
+  if (waterBuckets !== null && (!Number.isInteger(waterBuckets) || waterBuckets < 0 || waterBuckets > 20)) throw new Error("Invalid water bucket count");
   const rawLines = Array.isArray(record.refill_lines) ? record.refill_lines as Record<string, unknown>[] : Array.isArray(record.lines) ? record.lines as Record<string, unknown>[] : [];
   if (rawLines.length > 20) throw new Error("Too many refill lines");
   const lines = hasRefill ? rawLines.map((line) => {
     const quantity = Number(line.quantity ?? line.quantity_used);
     const rawLotId = line.odoo_lot_id ?? line.lot_id;
-    return { quantity, unit: String(line.unit ?? "unit").slice(0, 30), odoo_lot_id: /^\d+$/.test(String(rawLotId ?? "")) ? Number(rawLotId) : null, lot_code: String(line.lot_code ?? line.lot_name ?? "").trim().slice(0, 200) || null, product_name: String(line.product_name ?? "").trim().slice(0, 200) || null };
+    if (line.finished_bottle !== undefined && typeof line.finished_bottle !== "boolean") throw new Error("Invalid finished bottle value");
+    if (line.left_unfinished_bottle !== undefined && typeof line.left_unfinished_bottle !== "boolean") throw new Error("Invalid unfinished bottle value");
+    return { quantity, unit: String(line.unit ?? "unit").slice(0, 30), odoo_lot_id: /^\d+$/.test(String(rawLotId ?? "")) ? Number(rawLotId) : null, lot_code: String(line.lot_code ?? line.lot_name ?? "").trim().slice(0, 200) || null, product_name: String(line.product_name ?? "").trim().slice(0, 200) || null, ...(line.finished_bottle === true ? { finished_bottle: true } : {}), ...(line.left_unfinished_bottle === true ? { left_unfinished_bottle: true } : {}) };
   }).filter((line) => status === "confirmed" || line.quantity > 0) : [];
   if (status === "confirmed" && hasRefill && (!lines.length || lines.some((line) => !Number.isFinite(line.quantity) || line.quantity <= 0))) throw new Error("Valid refill lines are required");
+  if (lines.some((line) => !isValidBottleQuantity(line.quantity, line.finished_bottle === true, line.left_unfinished_bottle === true))) throw new Error("Bottle-tracked refill quantities must be whole numbers");
   const notes = String(record.notes ?? "").trim().slice(0, 5000) || null;
   if (status === "confirmed" && actionModes.includes("other") && !notes) throw new Error("Notes are required for other actions");
   const expectedRevision = Number(record.revision ?? 0);
@@ -48,6 +53,8 @@ export async function persistMobileActionReport(s: SupabaseClient, session: Mobi
       odoo_lot_id: /^\d+$/.test(String(line.odoo_lot_id ?? line.lot_id ?? "")) ? Number(line.odoo_lot_id ?? line.lot_id) : null,
       lot_code: String(line.lot_code ?? line.lot_name ?? "").trim().slice(0, 200) || null,
       product_name: String(line.product_name ?? "").trim().slice(0, 200) || null,
+      ...(line.finished_bottle === true ? { finished_bottle: true } : {}),
+      ...(line.left_unfinished_bottle === true ? { left_unfinished_bottle: true } : {}),
     })) : [],
   };
   const { data, error } = await s.rpc("record_mobile_service_action_report", {

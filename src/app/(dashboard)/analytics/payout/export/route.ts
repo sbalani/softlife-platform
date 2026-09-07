@@ -1,6 +1,7 @@
 import { getSessionProfile } from "@/lib/auth/session";
 import { getTenantPayoutReport } from "@/lib/data/franchisee-profit";
 import { authorizePayoutTenant, createPayoutPdf, validPayoutRange } from "@/lib/payout-report";
+import { getTenantBankDetails } from "@/lib/data/franchisees";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -27,13 +28,18 @@ export async function GET(request: Request) {
   try {
     const report = await getTenantPayoutReport(authorization.tenantId, from, to!);
     if (!report) return privateResponse("Franchisee tenant not found.", { status: 404 });
-    const pdf = await createPayoutPdf({ franchiseeName: report.tenantName, from, to: to!, rows: report.rows });
+    const includeBankDetails = url.searchParams.get("includeBankDetails") === "true";
+    const storedBankDetails = includeBankDetails ? await getTenantBankDetails(authorization.tenantId) : null;
+    if (includeBankDetails && !storedBankDetails) return privateResponse("Bank details were requested but are not available for this franchisee.", { status: 409 });
+    const bankDetails = storedBankDetails ? { accountHolderName: storedBankDetails.account_holder_name, iban: storedBankDetails.iban, bicSwift: storedBankDetails.bic_swift, bankName: storedBankDetails.bank_name } : null;
+    const pdf = await createPayoutPdf({ franchiseeName: report.tenantName, from, to: to!, rows: report.rows, bankDetails });
     const safeTenant = report.tenantName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "franchisee";
     return privateResponse(pdf as unknown as BodyInit, {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="payout-${safeTenant}-${from}-${to}.pdf"`,
         "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
       },
     });
   } catch (error) {

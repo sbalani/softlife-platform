@@ -23,7 +23,7 @@ export type ActionReportLot = {
 };
 export type ActionReportIncident = { id: string; machineId: string; title: string; severity: "info" | "warning" | "critical"; typeLabel: string };
 
-type LineDraft = { key: string; lotId: string; lotCode: string; productName: string; quantity: number | null; unit: string };
+type LineDraft = { key: string; lotId: string; lotCode: string; productName: string; quantity: number | null; unit: string; finishedBottle: boolean; leftUnfinishedBottle: boolean };
 type StagedPhoto = { id: string; file: File; lineKey: string | null; uploaded?: { uploadId: string; path: string; token: string; mimeType: string; stored: boolean } };
 const input = "rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa focus:border-terracotta focus:outline-none";
 const label = "mb-1 block text-[11px] font-bold uppercase tracking-wide text-taupe";
@@ -31,7 +31,7 @@ const PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/hei
 const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
 
 function newLine(lotId = ""): LineDraft {
-  return { key: crypto.randomUUID(), lotId, lotCode: "", productName: "", quantity: null, unit: "unit" };
+  return { key: crypto.randomUUID(), lotId, lotCode: "", productName: "", quantity: null, unit: "unit", finishedBottle: false, leftUnfinishedBottle: false };
 }
 
 function PhotoPreview({ file }: { file: File }) {
@@ -75,7 +75,7 @@ export function ActionReportForm({
   const [occurredAt, setOccurredAt] = useState(initialDraft?.occurredAt ?? initialEventTime);
   const [notes, setNotes] = useState(initialDraft?.notes ?? "");
   const [voicePending, setVoicePending] = useState(false);
-  const [lines, setLines] = useState<LineDraft[]>(() => initialDraft?.lines.length ? initialDraft.lines.map((line) => ({ key: crypto.randomUUID(), lotId: line.odooLotId ? String(line.odooLotId) : "", lotCode: line.lotCode, productName: line.productName, quantity: line.quantity, unit: line.unit })) : [newLine()]);
+  const [lines, setLines] = useState<LineDraft[]>(() => initialDraft?.lines.length ? initialDraft.lines.map((line) => ({ key: crypto.randomUUID(), lotId: line.odooLotId ? String(line.odooLotId) : "", lotCode: line.lotCode, productName: line.productName, quantity: line.quantity, unit: line.unit, finishedBottle: line.finishedBottle, leftUnfinishedBottle: line.leftUnfinishedBottle })) : [newLine()]);
   const [photos, setPhotos] = useState<StagedPhoto[]>([]);
   const [selectedIncidentIds, setSelectedIncidentIds] = useState(() => initialDraft?.incidentIds ?? initialIncidentIds);
   const [photoUploading, setPhotoUploading] = useState(false);
@@ -271,7 +271,7 @@ export function ActionReportForm({
           <h3 className="mb-3 font-display font-bold text-cocoa">Cleaning details</h3>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block"><span className={label}>Cleaning material used</span><select name="cleaning_material_used" className={`w-full ${input}`} defaultValue={initialDraft?.cleaningMaterialUsed === null || initialDraft?.cleaningMaterialUsed === undefined ? "" : initialDraft.cleaningMaterialUsed ? "yes" : "no"} required><option value="" disabled>Select</option><option value="yes">Yes</option><option value="no">No</option></select></label>
-            <label className="block"><span className={label}>Water buckets</span><input name="water_bucket_count" type="number" min="0" max="20" step="1" defaultValue={initialDraft?.waterBucketCount ?? ""} className={`w-full ${input}`} required /></label>
+            <label className="block"><span className={label}>Water buckets · optional</span><input name="water_bucket_count" type="number" min="0" max="20" step="1" defaultValue={initialDraft?.waterBucketCount ?? ""} className={`w-full ${input}`} /></label>
           </div>
         </section>
       )}
@@ -292,8 +292,18 @@ export function ActionReportForm({
                   <label className="block sm:col-span-2"><span className={label}>Inventory lot, if known</span><select name="odoo_lot_id" value={line.lotId} onChange={(event) => { const selected = availableLots.find((lot) => String(lot.odooId) === event.target.value); setLines((current) => current.map((item) => item.key === line.key ? { ...item, lotId: event.target.value, lotCode: selected?.name ?? item.lotCode, productName: selected?.productName ?? item.productName } : item)); }} className={`w-full ${input}`}><option value="">Unknown / not listed</option>{availableLots.map((lot) => <option key={lot.odooId} value={lot.odooId}>{lot.name} - {lot.productName} (available {lot.available})</option>)}</select></label>
                   <label className="block"><span className={label}>Observed lot code</span><input name="lot_code" value={line.lotCode} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, lotCode: event.target.value } : item))} placeholder="Type the code on the package" className={`w-full ${input}`} /></label>
                   <label className="block"><span className={label}>Product, if lot unknown</span><input name="product_name" value={line.productName} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, productName: event.target.value } : item))} placeholder="Product name" className={`w-full ${input}`} /></label>
-                  <label className="block"><span className={label}>Quantity</span><input name="quantity" type="number" min="0.01" step="0.01" value={line.quantity ?? ""} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, quantity: event.target.value ? Number(event.target.value) : null } : item))} className={`w-full ${input}`} required /></label>
+                  <label className="block"><span className={label}>Quantity</span><input name="quantity" type="number" min={line.finishedBottle || line.leftUnfinishedBottle ? "1" : "0.01"} step={line.finishedBottle || line.leftUnfinishedBottle ? "1" : "0.01"} value={line.quantity ?? ""} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, quantity: event.target.value ? Number(event.target.value) : null } : item))} className={`w-full ${input}`} required /></label>
                   <label className="block"><span className={label}>Unit</span><select name="unit" className={`w-full ${input}`} value={line.unit} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, unit: event.target.value } : item))}><option value="unit">Units</option><option value="kg">kg</option><option value="l">litres</option><option value="bag">bags</option><option value="box">boxes</option></select></label>
+                  <div className="sm:col-span-2 rounded-lg border border-line bg-white p-3">
+                    <p className={label}>Topping bottle tracking</p>
+                    <input type="hidden" name="finished_bottle" value={line.finishedBottle ? "yes" : "no"} />
+                    <input type="hidden" name="left_unfinished_bottle" value={line.leftUnfinishedBottle ? "yes" : "no"} />
+                    <div className="flex flex-wrap gap-4">
+                      <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-cocoa"><input type="checkbox" checked={line.finishedBottle} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, finishedBottle: event.target.checked } : item))} className="accent-terracotta" />Finished a bottle</label>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-cocoa"><input type="checkbox" checked={line.leftUnfinishedBottle} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, leftUnfinishedBottle: event.target.checked } : item))} className="accent-terracotta" />Left a bottle unfinished</label>
+                    </div>
+                    <p className="mt-2 text-xs text-taupe">An unfinished final bottle reduces the quantity sent to inventory reconciliation by one. Both boxes may apply.</p>
+                  </div>
                 </div>
               </div>
             );

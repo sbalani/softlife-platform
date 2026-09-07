@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getMachines } from "@/lib/data/machines";
-import { getActionReportDraft, getActionReportHistory, getActionReportLots } from "@/lib/data/action-reports";
+import { getActionReportCalendar, getActionReportDraft, getActionReportHistory, getActionReportLots } from "@/lib/data/action-reports";
 import { ActionReportForm } from "@/components/ActionReportForm";
 import { formatDateTime } from "@/lib/dates";
 import { actionReportModesLabel } from "@/lib/action-report-modes";
@@ -10,11 +10,14 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { accessibleMachineIds } from "@/lib/data/service-access";
 import { ActionReportStockRetry } from "@/components/ActionReportStockRetry";
 import { getIncidents } from "@/lib/data/incidents";
+import { actionReportCalendarState } from "@/lib/action-report-calendar";
+import { ActionReportCalendar } from "@/components/ActionReportCalendar";
 
 export const dynamic = "force-dynamic";
 
-export default async function RefillsPage({ searchParams }: { searchParams: Promise<{ draft?: string; machine?: string; incident?: string }> }) {
-  const { draft: draftId, machine: requestedMachineId, incident: requestedIncidentId } = await searchParams;
+export default async function RefillsPage({ searchParams }: { searchParams: Promise<{ draft?: string; machine?: string; incident?: string; month?: string; date?: string }> }) {
+  const { draft: draftId, machine: requestedMachineId, incident: requestedIncidentId, month, date } = await searchParams;
+  const calendarState = actionReportCalendarState(month, date);
   const session = await getSessionProfile();
   const s = await createServiceClient();
   const [{ machines: allMachines }, allowedIds] = await Promise.all([
@@ -29,16 +32,20 @@ export default async function RefillsPage({ searchParams }: { searchParams: Prom
   const warehouseByMachine = new Map(((machineRows as { id: string; odoo_warehouse_id: number | null }[]) ?? []).map((row) => [row.id, row.odoo_warehouse_id]));
   const warehouseIds = [...new Set([...warehouseByMachine.values()].filter((id): id is number => id !== null))];
   const tenantId = session?.role === "franchisee" ? session.tenant_id ?? undefined : undefined;
-  const [lots, history, tz, requestedDraft, incidents] = await Promise.all([
+  const reportScope = {
+    machineIds: allowedIds ?? undefined,
+    tenantId,
+    actorId: session?.role === "admin" ? undefined : session?.id,
+    operatorId: session?.role === "operator" ? session.id : undefined,
+  };
+  const [lots, history, calendarReports, tz, requestedDraft, incidents] = await Promise.all([
     getActionReportLots(warehouseIds),
     getActionReportHistory({
-      machineIds: allowedIds ?? undefined,
-      tenantId,
-      actorId: session?.role === "admin" ? undefined : session?.id,
-      operatorId: session?.role === "operator" ? session.id : undefined,
+      ...reportScope,
       canViewIncidents: session?.role === "admin" || session?.role === "franchisee",
       incidentTenantId: session?.role === "franchisee" ? session.tenant_id ?? undefined : undefined,
     }),
+    getActionReportCalendar(reportScope, calendarState.rangeFrom, calendarState.rangeTo),
     getDisplayTimezone(),
     draftId ? getActionReportDraft(draftId, tenantId, session?.role === "admin" ? undefined : session?.id) : Promise.resolve(null),
     session ? getIncidents(session, { machineIds: machines.map((machine) => machine.id), status: "open" }) : Promise.resolve([]),
@@ -54,12 +61,15 @@ export default async function RefillsPage({ searchParams }: { searchParams: Prom
         <p className="mt-1 text-sm text-taupe">Record cleaning, refills, or other physical service work even when inventory provenance is incomplete.</p>
       </header>
 
+      <ActionReportCalendar month={calendarState.month} previousMonth={calendarState.previousMonth} nextMonth={calendarState.nextMonth} today={calendarState.today} selectedDay={calendarState.selectedDay} reports={calendarReports} />
+
       <section className="mb-8 rounded-2xl border border-line bg-white p-5">
-        <h2 className="mb-4 font-display text-lg font-bold text-cocoa">New report</h2>
+        <h2 className="mb-4 font-display text-lg font-bold text-cocoa">{draft ? "Resume draft" : calendarState.selectedDay ? `New report · ${calendarState.selectedDay}` : "New report"}</h2>
         <ActionReportForm
+          key={draft?.id ?? `new:${calendarState.selectedDay ?? ""}:${requestedMachineId ?? ""}:${requestedIncidentId ?? ""}`}
           machines={machines.map((machine) => ({ id: machine.id, name: machine.name, warehouseId: warehouseByMachine.get(machine.id) ?? null }))}
           lots={lots}
-          initialEventTime={new Date().toISOString()}
+          initialEventTime={calendarState.initialEventTime}
           initialDraft={draft}
           incidents={incidents.map((incident) => ({ id: incident.id, machineId: incident.machineId!, title: incident.title, severity: incident.severity, typeLabel: incident.typeLabel }))}
           initialMachineId={machines.some((machine) => machine.id === requestedMachineId) ? requestedMachineId : undefined}

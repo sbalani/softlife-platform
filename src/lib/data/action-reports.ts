@@ -42,6 +42,46 @@ export type ActionReportDraft = {
   incidentIds: string[];
 };
 
+export type ActionReportCalendarItem = {
+  id: string;
+  actionKind: string;
+  occurredAt: string;
+  status: string;
+  machineName: string;
+};
+
+type ActionReportScope = { machineIds?: string[]; tenantId?: string; actorId?: string; operatorId?: string };
+
+export async function getActionReportCalendar(filters: ActionReportScope, rangeFrom: string, rangeTo: string): Promise<ActionReportCalendarItem[]> {
+  if (!isSupabaseConfigured() || (!filters.tenantId && filters.machineIds?.length === 0)) return [];
+  const s = await createServiceClient();
+  const rows: Record<string, unknown>[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    let query = s.from("service_action_reports")
+      .select("id,machine_id,operator_id,action_kind,occurred_at,status,machines(name,display_name)")
+      .gte("occurred_at", rangeFrom).lt("occurred_at", rangeTo).order("occurred_at").order("id").range(offset, offset + 999);
+    if (filters.operatorId) query = query.eq("operator_id", filters.operatorId);
+    if (filters.tenantId) query = query.eq("tenant_id", filters.tenantId);
+    if (filters.machineIds) query = query.in("machine_id", filters.machineIds);
+    const { data, error } = await query;
+    if (error) throw error;
+    rows.push(...((data as Record<string, unknown>[]) ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  return rows
+    .filter((row) => row.status !== "draft" || !filters.actorId || row.operator_id === filters.actorId)
+    .map((row) => {
+      const machine = row.machines as { name: string; display_name: string | null } | null;
+      return {
+        id: row.id as string,
+        actionKind: row.action_kind as string,
+        occurredAt: row.occurred_at as string,
+        status: row.status as string,
+        machineName: machine?.display_name || machine?.name || "Unknown machine",
+      };
+    });
+}
+
 export async function getActionReportLots(warehouseIds: number[]): Promise<ActionReportLotOption[]> {
   if (!isSupabaseConfigured() || warehouseIds.length === 0) return [];
   const s = await createServiceClient();

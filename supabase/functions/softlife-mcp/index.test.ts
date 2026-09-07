@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertThrows } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { apiKeyFromRequest, availableTools, dispatchMessage, isLowStock, isOverheated, madridMidnightUtc, reportPayload, type Principal } from "./index.ts";
+import { actionReportImageInput, apiKeyFromRequest, availableTools, dispatchMessage, isLowStock, isOverheated, madridMidnightUtc, reportPayload, type Principal } from "./index.ts";
 
 function principal(role: "admin" | "operator" | "franchisee", scopes: ("read" | "forms" | "commands")[]): Principal {
   return {
@@ -17,11 +17,23 @@ Deno.test("tool listing enforces key scopes and role command fencing", () => {
   assert(operatorTools.includes("list_machines"));
   assert(operatorTools.includes("get_inventory"));
   assert(operatorTools.includes("create_action_report_draft"));
+  assert(operatorTools.includes("create_action_report_image_upload"));
+  assert(operatorTools.includes("complete_action_report_image_upload"));
+  assert(operatorTools.includes("cancel_action_report_image_upload"));
   assert(!operatorTools.includes("disable_machine_sales"));
   assert(!operatorTools.includes("dispense_free_cup"));
 
   const franchiseeTools = availableTools(principal("franchisee", ["commands"])).map((tool) => tool.name);
   assertEquals(franchiseeTools.sort(), ["disable_machine_sales", "dispense_free_cup"]);
+});
+
+Deno.test("Action Report image reservations reject unsupported or oversized payloads", () => {
+  assertEquals(actionReportImageInput({ mime_type: "image/jpeg", size_bytes: 1024, line_number: 2 }), {
+    mimeType: "image/jpeg", sizeBytes: 1024, lineNumber: 2, extension: "jpg",
+  });
+  assertThrows(() => actionReportImageInput({ mime_type: "image/gif", size_bytes: 1024 }), Error, "Unsupported");
+  assertThrows(() => actionReportImageInput({ mime_type: "image/png", size_bytes: 4 * 1024 * 1024 + 1 }), Error, "Unsupported");
+  assertThrows(() => actionReportImageInput({ mime_type: "image/png", size_bytes: 1024, line_number: 21 }), Error, "Invalid refill line");
 });
 
 Deno.test("MCP keys support bearer headers and the Codex URL fallback", () => {

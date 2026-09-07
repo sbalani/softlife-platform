@@ -15,6 +15,11 @@ const PAYMENT_TYPES: Record<string, string> = {
   "投币": "Coin", "扫码支付": "QR Payment", "免费": "Free",
 };
 const MCP_PROTOCOL_VERSION = "2025-03-26";
+const ACTION_REPORT_PHOTO_BUCKET = "service-action-evidence";
+const MAX_ACTION_REPORT_PHOTO_BYTES = 4 * 1024 * 1024;
+const ACTION_REPORT_PHOTO_TYPES: Record<string, string> = {
+  "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/heic": "heic",
+};
 const SUPPORTED_PROTOCOL_VERSIONS = new Set([MCP_PROTOCOL_VERSION]);
 const DEFAULT_ALLOWED_ORIGINS = ["https://platform.softlife.es", "https://softlife-platform.vercel.app", "https://chatgpt.com", "https://claude.ai"];
 
@@ -62,6 +67,9 @@ const TOOLS: Tool[] = [
   { name: "update_action_report_draft", description: "Update an owned Action Report draft using its current revision.", scope: "forms", inputSchema: reportSchema(true) },
   { name: "get_action_report", description: "Get an owned Action Report with refill lines, incidents, attachment metadata, AI state, questions, and stock observations.", scope: "forms", inputSchema: { type: "object", properties: { report_id: { type: "string" } }, required: ["report_id"] } },
   { name: "get_action_report_draft", description: "Compatibility alias for get_action_report.", scope: "forms", inputSchema: { type: "object", properties: { report_id: { type: "string" } }, required: ["report_id"] } },
+  { name: "create_action_report_image_upload", description: "Reserve a report image and return a two-hour Supabase signed upload endpoint. Upload the raw image bytes with PUT; never encode them as base64.", scope: "forms", inputSchema: { type: "object", properties: { report_id: { type: "string" }, mime_type: { type: "string", enum: Object.keys(ACTION_REPORT_PHOTO_TYPES) }, size_bytes: { type: "integer", minimum: 1, maximum: MAX_ACTION_REPORT_PHOTO_BYTES }, line_number: { type: ["integer", "null"], minimum: 1, maximum: 20 } }, required: ["report_id", "mime_type", "size_bytes"] } },
+  { name: "complete_action_report_image_upload", description: "Validate a reserved image after its raw bytes have been uploaded and attach it to the Action Report.", scope: "forms", inputSchema: { type: "object", properties: { upload_id: { type: "string" } }, required: ["upload_id"] } },
+  { name: "cancel_action_report_image_upload", description: "Cancel an incomplete Action Report image reservation and remove any uploaded private object.", scope: "forms", inputSchema: { type: "object", properties: { upload_id: { type: "string" } }, required: ["upload_id"] } },
   { name: "confirm_action_report", description: "Confirm the exact stored Action Report draft. Requires explicit confirm=true and the current revision.", scope: "forms", inputSchema: { type: "object", properties: { report_id: { type: "string" }, expected_revision: { type: "integer", minimum: 1 }, confirm: { type: "boolean", description: "Explicit authorization to confirm the physical report." } }, required: ["report_id", "expected_revision", "confirm"] } },
   { name: "disable_machine_sales", description: "Disable sales on an authorized machine. Requires explicit confirmation and a unique idempotency key.", scope: "commands", roles: ["admin", "franchisee"], inputSchema: commandSchema() },
   { name: "dispense_free_cup", description: "Physically dispense one free cup on an authorized machine. Requires explicit confirmation and a unique idempotency key. Never retry an ambiguous result.", scope: "commands", roles: ["admin", "franchisee"], inputSchema: commandSchema() },
@@ -327,7 +335,7 @@ async function persistReport(s: SupabaseClient, principal: Principal, args: Reco
 async function getOwnedReport(s: SupabaseClient, principal: Principal, reportId: unknown) {
   if (typeof reportId !== "string" || !UUID.test(reportId)) throw new ToolError("Invalid report_id");
   const { data, error } = await s.from("service_action_reports")
-    .select("id,client_uuid,machine_id,operator_id,occurred_at,action_kind,action_modes,status,notes,cleaning_material_used,water_bucket_count,source,assigned_warehouse_id,provenance_status,cleaning_projection_status,refill_projection_status,projection_error,confirmed_at,revision,mobile_draft_payload,created_at,updated_at,service_action_refill_lines(id,line_number,quantity,unit,observed_odoo_lot_id,observed_lot_code,product_name,provenance_status,unresolved_reason)")
+    .select("id,client_uuid,machine_id,operator_id,tenant_id,occurred_at,action_kind,action_modes,status,notes,cleaning_material_used,water_bucket_count,source,assigned_warehouse_id,provenance_status,cleaning_projection_status,refill_projection_status,projection_error,confirmed_at,revision,mobile_draft_payload,created_at,updated_at,service_action_refill_lines(id,line_number,quantity,unit,observed_odoo_lot_id,observed_lot_code,product_name,provenance_status,unresolved_reason)")
     .eq("id", reportId).maybeSingle();
   if (error) throw error;
   if (!data || (principal.role !== "admin" && data.operator_id !== principal.profileId)) throw new ToolError("Action Report not found", -32004);
@@ -338,6 +346,100 @@ async function getOwnedReport(s: SupabaseClient, principal: Principal, reportId:
     if (currentIds !== null && !currentIds.includes(data.machine_id)) throw new ToolError("Action Report not found", -32004);
   }
   return data;
+}
+
+export function actionReportImageInput(args: Record<string, unknown>) {
+  const mimeType = typeof args.mime_type === "string" ? args.mime_type.split(";")[0].toLowerCase() : "";
+  const sizeBytes = Number(args.size_bytes);
+  const lineNumber = args.line_number === undefined || args.line_number === null ? null : Number(args.line_number);
+  if (!ACTION_REPORT_PHOTO_TYPES[mimeType] || !Number.isInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > MAX_ACTION_REPORT_PHOTO_BYTES) throw new ToolError("Unsupported Action Report image");
+  if (lineNumber !== null && (!Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > 20)) throw new ToolError("Invalid refill line");
+  return { mimeType, sizeBytes, lineNumber, extension: ACTION_REPORT_PHOTO_TYPES[mimeType] };
+}
+
+async function reserveActionReportImage(s: SupabaseClient, principal: Principal, args: Record<string, unknown>) {
+  const report = await getOwnedReport(s, principal, args.report_id);
+  if (report.status !== "draft" && report.status !== "confirmed") throw new ToolError("Action Report cannot accept images", -32009);
+  await cleanupExpiredImageUploads(s);
+  const image = actionReportImageInput(args);
+  const folder = `${report.tenant_id ?? "platform"}/${report.id}/mcp-photo`;
+  const path = `${folder}/${crypto.randomUUID()}.${image.extension}`;
+  const { data: uploadId, error: reservationError } = await s.rpc("reserve_service_action_photo_upload", {
+    p_report_id: report.id, p_actor_id: principal.profileId, p_storage_path: path,
+    p_mime_type: image.mimeType, p_expected_size_bytes: image.sizeBytes, p_line_number: image.lineNumber,
+  });
+  if (reservationError) throw new ToolError(reservationError.message, reservationError.message.includes("limit") ? -32009 : -32602);
+  const { data, error } = await s.storage.from(ACTION_REPORT_PHOTO_BUCKET).createSignedUploadUrl(path, { upsert: false });
+  if (error || !data) {
+    await s.rpc("cancel_service_action_photo_upload", { p_upload_id: uploadId, p_actor_id: principal.profileId });
+    throw error ?? new Error("Signed upload endpoint was not created");
+  }
+  return {
+    upload_id: uploadId, report_id: report.id, mime_type: image.mimeType, size_bytes: image.sizeBytes,
+    upload_url: data.signedUrl, method: "PUT", headers: { "content-type": image.mimeType, "x-upsert": "false" }, expires_in_seconds: 7200,
+    next_step: "PUT the raw image bytes to upload_url, then call complete_action_report_image_upload with upload_id. If abandoning the upload, call cancel_action_report_image_upload.",
+  };
+}
+
+async function cleanupExpiredImageUploads(s: SupabaseClient) {
+  const { data: expired, error } = await s.from("service_action_photo_uploads")
+    .select("id,storage_path").is("completed_attachment_id", null).lte("expires_at", new Date().toISOString()).limit(100);
+  if (error) throw error;
+  for (const upload of expired ?? []) {
+    const { error: removeError } = await s.storage.from(ACTION_REPORT_PHOTO_BUCKET).remove([upload.storage_path]);
+    if (removeError) continue;
+    const { error: deleteError } = await s.from("service_action_photo_uploads").delete().eq("id", upload.id).is("completed_attachment_id", null);
+    if (deleteError) console.error("[softlife-mcp] Could not delete expired image reservation", deleteError);
+  }
+}
+
+async function completeActionReportImage(s: SupabaseClient, principal: Principal, args: Record<string, unknown>) {
+  if (typeof args.upload_id !== "string" || !UUID.test(args.upload_id)) throw new ToolError("Invalid upload_id");
+  const { data: upload, error: uploadError } = await s.from("service_action_photo_uploads")
+    .select("id,report_id,actor_id,storage_path,mime_type,expected_size_bytes,expires_at,completed_attachment_id")
+    .eq("id", args.upload_id).maybeSingle();
+  if (uploadError) throw uploadError;
+  if (!upload || (principal.role !== "admin" && upload.actor_id !== principal.profileId)) throw new ToolError("Image upload reservation not found", -32004);
+  await getOwnedReport(s, principal, upload.report_id);
+  if (upload.completed_attachment_id) return { attachment_id: upload.completed_attachment_id, report_id: upload.report_id, duplicate: true };
+  const { data: info, error: infoError } = await s.storage.from(ACTION_REPORT_PHOTO_BUCKET).info(upload.storage_path);
+  if (infoError || !info) throw new ToolError("Uploaded image was not found. Upload the raw bytes before completing.");
+  const sizeBytes = Number(info.size);
+  const storedType = String(info.contentType ?? info.metadata?.mimetype ?? "").split(";")[0].toLowerCase();
+  if (sizeBytes !== Number(upload.expected_size_bytes) || storedType !== upload.mime_type || Date.parse(upload.expires_at) <= Date.now()) {
+    await discardReservedImage(s, principal, upload.id);
+    throw new ToolError("Stored image does not match its reservation");
+  }
+  const { data: attachmentId, error } = await s.rpc("finalize_service_action_photo_upload", {
+    p_upload_id: upload.id, p_actor_id: principal.profileId, p_storage_path: upload.storage_path,
+    p_mime_type: upload.mime_type, p_size_bytes: sizeBytes,
+  });
+  if (error) {
+    if (/reservation (does not match|not found|report revision changed)|refill line not found|Action Report not attachable/i.test(error.message)) {
+      await discardReservedImage(s, principal, upload.id);
+    }
+    throw new ToolError(error.message);
+  }
+  return { attachment_id: attachmentId, report_id: upload.report_id, duplicate: false };
+}
+
+async function discardReservedImage(s: SupabaseClient, principal: Principal, uploadId: string) {
+  const { data: path, error } = await s.rpc("cancel_service_action_photo_upload_retryable", { p_upload_id: uploadId, p_actor_id: principal.profileId });
+  if (error) throw new ToolError(error.message, -32009);
+  const { error: removeError } = await s.storage.from(ACTION_REPORT_PHOTO_BUCKET).remove([path]);
+  if (removeError) throw removeError;
+  const { error: deleteError } = await s.from("service_action_photo_uploads").delete().eq("id", uploadId).is("completed_attachment_id", null);
+  if (deleteError) throw deleteError;
+}
+
+async function cancelActionReportImage(s: SupabaseClient, principal: Principal, args: Record<string, unknown>) {
+  if (typeof args.upload_id !== "string" || !UUID.test(args.upload_id)) throw new ToolError("Invalid upload_id");
+  const { data: upload, error: uploadError } = await s.from("service_action_photo_uploads").select("report_id,actor_id").eq("id", args.upload_id).maybeSingle();
+  if (uploadError) throw uploadError;
+  if (!upload || (principal.role !== "admin" && upload.actor_id !== principal.profileId)) throw new ToolError("Image upload reservation not found", -32004);
+  await getOwnedReport(s, principal, upload.report_id);
+  await discardReservedImage(s, principal, args.upload_id);
+  return { cancelled: true, report_id: upload.report_id };
 }
 
 async function getReportDetails(s: SupabaseClient, principal: Principal, reportId: unknown) {
@@ -569,6 +671,9 @@ async function handleTool(name: string, args: Record<string, unknown>, principal
     }
     case "get_action_report":
     case "get_action_report_draft": return getReportDetails(s, principal, args.report_id);
+    case "create_action_report_image_upload": return reserveActionReportImage(s, principal, args);
+    case "complete_action_report_image_upload": return completeActionReportImage(s, principal, args);
+    case "cancel_action_report_image_upload": return cancelActionReportImage(s, principal, args);
     case "confirm_action_report": {
       if (args.confirm !== true) throw new ToolError("Explicit confirm=true is required");
       const revision = Number(args.expected_revision);
@@ -642,7 +747,7 @@ export async function dispatchMessage(message: unknown, principal: Principal, s:
       return errorPayload(id, -32602, "Invalid initialize parameters");
     }
     const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.has(initialize.protocolVersion) ? initialize.protocolVersion : MCP_PROTOCOL_VERSION;
-    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.1.0" } });
+    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.2.0" } });
   }
   if (request.method === "tools/list") return resultPayload(id, { tools: availableTools(principal) });
   if (request.method !== "tools/call") return errorPayload(id, -32601, `Method not found: ${request.method}`);

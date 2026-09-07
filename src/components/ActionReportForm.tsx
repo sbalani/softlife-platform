@@ -11,6 +11,7 @@ import type { ActionReportDraft } from "@/lib/data/action-reports";
 import { ActionReportVoice } from "@/components/ActionReportVoice";
 import { ACTION_REPORT_MODES, initialActionReportModes, type ActionReportMode } from "@/lib/action-report-modes";
 import { createClient } from "@/lib/supabase/client";
+import { DEFAULT_TZ, isoToLocalDateTime, localDateTimeToUtc } from "@/lib/dates";
 
 export type ActionReportMachine = { id: string; name: string; warehouseId: number | null };
 export type ActionReportLot = {
@@ -28,11 +29,6 @@ const input = "rounded-lg border border-line bg-white px-3 py-2 text-sm text-coc
 const label = "mb-1 block text-[11px] font-bold uppercase tracking-wide text-taupe";
 const PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic"]);
 const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
-
-function localDateTime(iso: string) {
-  const date = new Date(iso);
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-}
 
 function newLine(lotId = ""): LineDraft {
   return { key: crypto.randomUUID(), lotId, lotCode: "", productName: "", quantity: null, unit: "unit" };
@@ -225,11 +221,20 @@ export function ActionReportForm({
           )}
         </label>
         <label className="block">
-          <span className={label}>Action time</span>
+          <span className={label}>Action time · Europe/Madrid</span>
           <input
             type="datetime-local"
-            value={localDateTime(occurredAt)}
-            onChange={(event) => { if (event.target.value) setOccurredAt(new Date(event.target.value).toISOString()); }}
+            value={isoToLocalDateTime(occurredAt, DEFAULT_TZ)}
+            onChange={(event) => {
+              if (!event.target.value) return;
+              try {
+                setOccurredAt(localDateTimeToUtc(event.target.value, DEFAULT_TZ));
+                event.target.setCustomValidity("");
+              } catch {
+                event.target.setCustomValidity("This time does not exist in Europe/Madrid because of the daylight-saving change.");
+                event.target.reportValidity();
+              }
+            }}
             className={`w-full ${input}`}
             required
           />

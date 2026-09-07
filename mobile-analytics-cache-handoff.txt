@@ -421,4 +421,41 @@ Platform checklist:
 EAS Android and iOS release builds remain paused until this checklist is
 confirmed or the product owner explicitly accepts the deployment risk.
 
+15. ANALYTICS INCIDENT OVERLAY (ADDED 2026-09-07)
+-------------------------------------------------
+
+Production web commit:
+
+  50461ce Overlay incidents on sales analytics
+
+The web Analytics page can now display Off, all incidents, all cup incidents,
+or one configured incident type as a dashed secondary series over net sales.
+Incident counts follow the selected date range, historical machine access, and
+the selected all-machine or single-machine scope. The overlay does not alter
+sales totals.
+
+This is not yet a mobile contract. The current admin orders route does not
+return the scoped incident time series. Mobile must not query Supabase incident
+tables directly or infer incidents from alerts. Before implementing the native
+overlay, the platform should expose an authenticated endpoint returning daily
+counts and available incident filters under the same authorization and
+historical machine-scope rules as analytics.
+
+Once that endpoint exists, the native presentation should use a visually
+distinct dashed incident line, a total incident badge, and the same date and
+machine controls as the sales query. Off must avoid fetching incident data.
+
+Sanitized Playwright UI references:
+
+  docs/mobile-reference/analytics-incident-filter.png
+  docs/mobile-reference/analytics-incident-trend.png
+
+Recommended next contract work:
+
+  [ ] Define a scoped mobile incident-series response and stable filter IDs.
+  [ ] Add admin/franchisee/operator authorization tests with historical access.
+  [ ] Test Madrid day boundaries and zero-incident dates.
+  [ ] Ensure selecting Off performs no incident query.
+  [ ] Add native chart accessibility labels and a non-chart count summary.
+
 END OF HANDOFF

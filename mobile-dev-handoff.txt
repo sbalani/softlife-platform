@@ -1,6 +1,38 @@
 SOFTLIFE PLATFORM NOTES FOR MOBILE DEVELOPER
 ============================================
 
+LATEST PLATFORM UPDATE (2026-09-07)
+-----------------------------------
+
+The latest production contracts and sanitized Playwright references have now
+been passed into the mobile handoff files:
+
+  - Coupon code distribution: mobile-coupon-deployment-handoff.txt, section 14.
+  - Action Report voice notes: mobile-action-report-handoff.md, final section.
+  - Analytics incident overlay: mobile-analytics-cache-handoff.txt, section 15.
+  - Screenshot index: docs/mobile-reference/README.md.
+
+Relevant deployed platform commits:
+
+  739ced9  Track coupon code distribution
+  50461ce  Overlay incidents on sales analytics
+  b935b4a  Modernize MCP action reports
+  4526aac  Support MCP keys in Codex URLs
+
+The Codex MCP URL-key change is not a mobile API contract and requires no mobile
+work. Mobile must continue using its normal Supabase bearer session for SoftLife
+API routes. The coupon distribution PATCH is ready for mobile implementation.
+The analytics incident overlay remains web-only until the platform exposes a
+scoped mobile incident-series endpoint.
+
+Mobile baseline checked on 2026-09-07: origin/main is cc4d79f. Do not use the
+older 4e18866 review checkout as the implementation baseline. Action Report V2,
+private attachments, voice transcription, deterministic questions, review or
+discard, and separate confirmation are already present upstream. Remaining
+mobile work is the coupon distribution UI and an explicit retry path for failed
+voice attachment uploads. Do not reopen the cache/auth/offline blockers already
+resolved after 4e18866.
+
 MOBILE ALERT DISMISSAL API (ADDED 2026-09-01)
 ---------------------------------------------
 

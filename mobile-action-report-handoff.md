@@ -156,3 +156,37 @@ remain supported. Legacy UUID-lot records retain their original inventory and
 base64 compatibility path. New releases should stop embedding `batch_photo` base64 and
 use V2 signed attachments. Partial cleaning remains on the legacy clean-log
 path; full cleaning and refills use canonical Action Reports.
+
+## Voice Notes UI Reference (Added 2026-09-07)
+
+Use one general voice-notes control below the report Notes field. Do not add a
+separate microphone beside every cleaning, refill, incident, or stock field.
+
+The native sequence should be:
+
+1. Capture report identity, machine, action time, and selected action modes.
+2. Record one optional general narration.
+3. Persist/sync a draft to obtain its server `report_id` and current revision.
+4. Upload and complete the audio attachment through the private V2 attachment
+   flow above.
+5. Poll AI state, show the transcript, extracted values, and every deterministic
+   question for explicit user review.
+6. Sync accepted edits using the current report revision.
+7. Submit the reviewed AI decision, then require a separate report confirmation.
+
+Audio and AI must never confirm physical work automatically. If a recording has
+not been uploaded yet, clearly state whether it is queued offline or would be
+discarded by leaving the screen. Preserve one recording action and make stop,
+retry, discard, upload, review, and confirm states visually distinct.
+
+Current mobile status checked at `origin/main` commit `cc4d79f`: the V2 report,
+private audio upload, transcription, questions, review/discard, and confirmation
+flow already exists. Do not reimplement it from the older review checkout. The
+remaining concrete gap is failed-audio recovery: a locally failed attachment is
+excluded from the pending uploader and the report screen offers discard but no
+explicit reset/retry action. Show the failure detail and let the user retry or
+discard it without creating a duplicate recording.
+
+Sanitized Playwright UI reference:
+
+`docs/mobile-reference/action-report-voice-notes.png`

@@ -369,4 +369,82 @@ After this checklist passes, restart Android and iOS EAS builds.
   Production coupon unauthenticated request
   Result: HTTP 401, confirming route deployment
 
+
+14. COUPON CODE DISTRIBUTION (ADDED 2026-09-07)
+------------------------------------------------
+
+Production platform commit:
+
+  739ced9 Track coupon code distribution
+
+The existing admin code-list response now adds local distribution metadata to
+each Huaxin code without changing Huaxin redemption state:
+
+  {
+    "code": "provider-code",
+    "status": "0",
+    "expireTime": "...",
+    "createTime": "...",
+    "distributed": false,
+    "extraInformation": null,
+    "metadataRevision": null
+  }
+
+`status` remains the provider's unused/used/expired state. `distributed` only
+records whether staff gave the code to someone. Never derive either field from
+the other.
+
+Update endpoint:
+
+  PATCH /api/softlife/admin/coupons/{couponId}
+  Authorization: Bearer <Supabase access token>
+  Content-Type: application/json
+
+Body:
+
+  {
+    "code": "provider-code",
+    "distributed": true,
+    "extraInformation": "Optional recipient or handoff note",
+    "expectedRevision": null
+  }
+
+Send `expectedRevision: null` when the returned `metadataRevision` is null.
+After a successful update, send the returned revision on the next edit:
+
+  { "ok": true, "revision": 1 }
+
+The optional information field accepts an empty string and is limited to 1,000
+characters. The backend verifies that the exact code still belongs to the
+Huaxin campaign before saving. Concurrent stale edits are rejected with a
+message instructing the client to reload; do not overwrite or retry them
+automatically.
+
+Recommended native behavior:
+
+  - Show provider status, a separate Given out checkbox, and optional text.
+  - Save the checkbox immediately and roll it back if the request fails.
+  - Save text explicitly so typing does not issue a request per character.
+  - Disable both controls while that row is saving.
+  - Replace the row's metadataRevision with the returned revision.
+  - On a stale-edit response, preserve the typed note locally and offer reload.
+  - Clear/invalidate the protected coupon cache after a successful update.
+
+This mobile API remains admin-only. Franchisees can currently update codes only
+through the authorized web workflow; do not expose the admin endpoint to other
+mobile roles.
+
+Sanitized Playwright UI reference:
+
+  docs/mobile-reference/coupon-code-distribution.png
+
+Additional acceptance checks:
+
+  [ ] Distribution metadata survives refetch and app restart.
+  [ ] Marking distributed does not change provider redemption status.
+  [ ] Empty optional information saves as no note.
+  [ ] A stale revision does not overwrite a newer edit.
+  [ ] Failed checkbox saves visibly roll back.
+  [ ] Non-admin calls still return 403.
+
 END OF HANDOFF

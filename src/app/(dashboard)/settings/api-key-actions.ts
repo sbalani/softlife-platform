@@ -11,7 +11,7 @@ async function sha256(text: string): Promise<string> {
   return createHash("sha256").update(text).digest("hex");
 }
 
-const MCP_SCOPES = new Set(["read", "forms", "commands"]);
+const MCP_SCOPES = new Set(["read", "forms", "commands", "sales_context", "sales_notes"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function generateApiKey(name: string, requestedScopes: string[]): Promise<ApiKeyResult> {
@@ -22,7 +22,7 @@ export async function generateApiKey(name: string, requestedScopes: string[]): P
   const trimmed = name.trim() || "Default";
   const scopes = [...new Set(requestedScopes)].filter((scope) => MCP_SCOPES.has(scope));
   if (!scopes.length || scopes.length !== new Set(requestedScopes).size) return { ok: false, error: "Select valid MCP permissions." };
-  if (actor.role === "operator" && scopes.includes("commands")) return { ok: false, error: "Operators cannot create command-enabled keys." };
+  if (actor.role === "operator" && scopes.some((scope) => ["commands", "sales_context", "sales_notes"].includes(scope))) return { ok: false, error: "Operators cannot create command or sales-context keys." };
   try {
     const s = await createServiceClient();
     const raw = "sl_mcp_" + crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");

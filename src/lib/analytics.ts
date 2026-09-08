@@ -11,6 +11,7 @@ export type AnalyticsParams = {
   product?: string;
   payType?: string;
   incident?: string;
+  weather?: string;
 };
 
 export function shiftDay(value: string, days: number): string {

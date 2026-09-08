@@ -23,7 +23,7 @@ const ACTION_REPORT_PHOTO_TYPES: Record<string, string> = {
 const SUPPORTED_PROTOCOL_VERSIONS = new Set([MCP_PROTOCOL_VERSION]);
 const DEFAULT_ALLOWED_ORIGINS = ["https://platform.softlife.es", "https://softlife-platform.vercel.app", "https://chatgpt.com", "https://claude.ai"];
 
-type Scope = "read" | "forms" | "commands";
+type Scope = "read" | "forms" | "commands" | "sales_context" | "sales_notes";
 export type Principal = {
   keyId: string;
   profileId: string;
@@ -63,6 +63,10 @@ const TOOLS: Tool[] = [
   { name: "get_inventory", description: "Get current positive effective Odoo lot balances for the warehouse assigned to an authorized machine at the action time.", scope: "read", inputSchema: { type: "object", properties: { machine_id: { type: "string" }, occurred_at: { type: "string", description: "Used for historical warehouse assignment and access; balances are current. Defaults to now." } }, required: ["machine_id"] } },
   { name: "get_machine_live_status", description: "Fetch current Huaxin status for an authorized machine and identify low-stock and compressor-overheat conditions.", scope: "read", inputSchema: { type: "object", properties: { machine_id: { type: "string" } }, required: ["machine_id"] } },
   { name: "get_machine_defrost_status", description: "Get the defrost schedule and recent audited cycles for an authorized machine.", scope: "read", inputSchema: { type: "object", properties: { machine_id: { type: "string" } }, required: ["machine_id"] } },
+  { name: "list_sales_context_machines", description: "List only the names and IDs of machines available for sales-context analysis. Use an ID with get_sales_context.", scope: "sales_context", roles: ["admin", "franchisee"], inputSchema: { type: "object", additionalProperties: false, properties: {} } },
+  { name: "get_sales_context", description: "Compare daily net sales with historical weather and dated context notes for one authorized machine over at most 92 days. Use the structured evidence to investigate why sales changed; use your own research capabilities for external events.", scope: "sales_context", roles: ["admin", "franchisee"], inputSchema: { type: "object", additionalProperties: false, properties: { machine_id: { type: "string" }, date_from: { type: "string", description: "YYYY-MM-DD" }, date_to: { type: "string", description: "YYYY-MM-DD" } }, required: ["machine_id", "date_from", "date_to"] } },
+  { name: "create_sales_note", description: "Record dated evidence that may explain sales, with an optional machine and HTTPS source. Use a unique UUID idempotency_key. Never present speculation as fact; include a source URL for externally researched claims.", scope: "sales_notes", roles: ["admin", "franchisee"], inputSchema: salesNoteSchema() },
+  { name: "delete_sales_note", description: "Soft-delete an owned sales context note using its current revision. Requires explicit confirm=true.", scope: "sales_notes", roles: ["admin", "franchisee"], inputSchema: { type: "object", additionalProperties: false, properties: { note_id: { type: "string" }, expected_revision: { type: "integer", minimum: 1 }, confirm: { type: "boolean" } }, required: ["note_id", "expected_revision", "confirm"] } },
   { name: "create_action_report_draft", description: "Create an idempotent Action Report draft. This never confirms physical work.", scope: "forms", inputSchema: reportSchema(false) },
   { name: "update_action_report_draft", description: "Update an owned Action Report draft using its current revision.", scope: "forms", inputSchema: reportSchema(true) },
   { name: "get_action_report", description: "Get an owned Action Report with refill lines, incidents, attachment metadata, AI state, questions, and stock observations.", scope: "forms", inputSchema: { type: "object", properties: { report_id: { type: "string" } }, required: ["report_id"] } },
@@ -98,6 +102,15 @@ function reportSchema(update: boolean) {
 
 function commandSchema() {
   return { type: "object", properties: { machine_id: { type: "string" }, idempotency_key: { type: "string" }, confirm: { type: "boolean", description: "Explicit authorization for this physical action." } }, required: ["machine_id", "idempotency_key", "confirm"] };
+}
+
+function salesNoteSchema() {
+  return { type: "object", additionalProperties: false, properties: {
+    idempotency_key: { type: "string", description: "A UUID unique to this note." }, sales_date: { type: "string", description: "YYYY-MM-DD" },
+    machine_id: { type: ["string", "null"], description: "Omit for portfolio-wide context." },
+    category: { type: "string", enum: ["event", "promotion", "operations", "competition", "other"] },
+    note: { type: "string", minLength: 1, maxLength: 2000 }, source_url: { type: ["string", "null"], maxLength: 1000, description: "Optional HTTPS evidence URL." },
+  }, required: ["idempotency_key", "sales_date", "category", "note"] };
 }
 
 function adminClient() {
@@ -191,9 +204,45 @@ function dateRange(args: Record<string, unknown>) {
   const defaultFrom = new Date(Date.parse(`${today}T00:00:00Z`) - 29 * 86_400_000).toISOString().slice(0, 10);
   const from = typeof args.date_from === "string" ? args.date_from : defaultFrom;
   const to = typeof args.date_to === "string" ? args.date_to : today;
-  const valid = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
-  if (!valid(from) || !valid(to) || from > to || Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`) > 366 * 86_400_000) throw new ToolError("Invalid date range");
+  if (!validDay(from) || !validDay(to) || from > to || Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`) > 366 * 86_400_000) throw new ToolError("Invalid date range");
   return { from, to };
+}
+
+function validDay(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function salesContextRange(args: Record<string, unknown>) {
+  if (typeof args.date_from !== "string" || typeof args.date_to !== "string") throw new ToolError("date_from and date_to are required");
+  const range = dateRange(args);
+  const today = madridDay(new Date().toISOString());
+  if (range.to > today || Date.parse(`${range.to}T00:00:00Z`) - Date.parse(`${range.from}T00:00:00Z`) > 91 * 86_400_000) throw new ToolError("Sales context supports at most 92 past or current days");
+  return range;
+}
+
+export function salesNoteInput(args: Record<string, unknown>) {
+  rejectUnknownArguments(args, ["idempotency_key", "sales_date", "machine_id", "category", "note", "source_url"]);
+  const idempotencyKey = typeof args.idempotency_key === "string" ? args.idempotency_key : "";
+  const salesDate = typeof args.sales_date === "string" ? args.sales_date : "";
+  const category = typeof args.category === "string" ? args.category : "";
+  const note = typeof args.note === "string" ? args.note.trim() : "";
+  if (args.machine_id !== undefined && args.machine_id !== null && typeof args.machine_id !== "string") throw new ToolError("Invalid machine_id");
+  if (args.source_url !== undefined && args.source_url !== null && typeof args.source_url !== "string") throw new ToolError("source_url must be a valid HTTPS URL");
+  const machineId = args.machine_id === undefined || args.machine_id === null ? null : args.machine_id;
+  let sourceUrl = args.source_url === undefined || args.source_url === null ? null : args.source_url.trim();
+  if (!UUID.test(idempotencyKey) || !validDay(salesDate) || !["event", "promotion", "operations", "competition", "other"].includes(category) || !note || note.length > 2000) throw new ToolError("Invalid sales note");
+  if (machineId !== null && !UUID.test(machineId)) throw new ToolError("Invalid machine_id");
+  if (sourceUrl !== null) {
+    try { const parsed = new URL(sourceUrl); if (sourceUrl.length > 1000 || parsed.protocol !== "https:") throw new Error(); sourceUrl = parsed.toString(); }
+    catch { throw new ToolError("source_url must be a valid HTTPS URL"); }
+  }
+  return { idempotencyKey, salesDate, category, note, machineId, sourceUrl };
+}
+
+function rejectUnknownArguments(args: Record<string, unknown>, allowed: string[]) {
+  if (Object.keys(args).some((key) => !allowed.includes(key))) throw new ToolError("Unknown tool argument");
 }
 
 export function madridMidnightUtc(day: string) {
@@ -208,6 +257,10 @@ export function madridMidnightUtc(day: string) {
 
 function nextDay(day: string) {
   return new Date(Date.parse(`${day}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+}
+
+function shiftMcpDay(day: string, amount: number) {
+  return new Date(Date.parse(`${day}T00:00:00Z`) + amount * 86_400_000).toISOString().slice(0, 10);
 }
 
 async function scopedOrderQuery(s: SupabaseClient, principal: Principal, args: Record<string, unknown>, fields: string, maxRows = 100_000) {
@@ -260,6 +313,57 @@ async function captureReportStock(reportId: string, actorId: string) {
   const body = await response.json().catch(() => ({})) as { id?: string; status?: string; duplicate?: boolean; error?: string };
   if (!response.ok) throw new ToolError(body.error ?? "Stock snapshot capture failed", -32603);
   return body;
+}
+
+type McpWeather = { day: string; temperature_mean: number; temperature_min: number; temperature_max: number; precipitation_mm: number; weather_code: number | null };
+
+export function parseOpenMeteoDaily(payload: unknown): McpWeather[] {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+  const daily = (payload as { daily?: Record<string, unknown> }).daily;
+  const times = daily?.time;
+  const means = daily?.temperature_2m_mean;
+  const maximums = daily?.temperature_2m_max;
+  const minimums = daily?.temperature_2m_min;
+  const precipitation = daily?.precipitation_sum;
+  const codes = daily?.weather_code;
+  if (!Array.isArray(times) || !Array.isArray(means) || !Array.isArray(maximums) || !Array.isArray(minimums) || !Array.isArray(precipitation) || !Array.isArray(codes)) return [];
+  return times.flatMap((day, index) => {
+    const mean = means[index]; const maximum = maximums[index]; const minimum = minimums[index]; const rain = precipitation[index]; const code = codes[index];
+    return typeof day === "string" && validDay(day) && typeof mean === "number" && Number.isFinite(mean) && typeof maximum === "number" && Number.isFinite(maximum) && typeof minimum === "number" && Number.isFinite(minimum) && typeof rain === "number" && Number.isFinite(rain)
+      ? [{ day, temperature_mean: mean, temperature_min: maximum < minimum ? maximum : minimum, temperature_max: maximum < minimum ? minimum : maximum, precipitation_mm: rain, weather_code: typeof code === "number" && Number.isInteger(code) ? code : null }]
+      : [];
+  });
+}
+
+export function completeWeatherSeries(rows: McpWeather[], start: string, end: string) {
+  const expectedDays: string[] = [];
+  for (let day = start; day <= end; day = nextDay(day)) expectedDays.push(day);
+  return rows.length === expectedDays.length && rows.every((row, index) => row.day === expectedDays[index]);
+}
+
+async function fetchMcpWeather(latitude: number, longitude: number, from: string, to: string) {
+  if (!Number.isFinite(latitude) || Math.abs(latitude) > 90 || !Number.isFinite(longitude) || Math.abs(longitude) > 180) return { weather: [], error: "Machine coordinates are unavailable" };
+  const today = madridDay(new Date().toISOString());
+  const requests: Promise<McpWeather[]>[] = [];
+  for (const [endpoint, start, end] of [
+    ["https://archive-api.open-meteo.com/v1/archive", from, [to, shiftMcpDay(today, -5)].sort()[0]],
+    ["https://api.open-meteo.com/v1/forecast", [from, shiftMcpDay(today, -4)].sort().at(-1)!, to],
+  ] as const) {
+    if (start > end) continue;
+    const url = new URL(endpoint); url.searchParams.set("latitude", latitude.toFixed(4)); url.searchParams.set("longitude", longitude.toFixed(4)); url.searchParams.set("start_date", start); url.searchParams.set("end_date", end); url.searchParams.set("daily", "weather_code,temperature_2m_mean,temperature_2m_max,temperature_2m_min,precipitation_sum"); url.searchParams.set("timezone", "Europe/Madrid");
+    requests.push(fetch(url, { headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(15_000) }).then(async (response) => {
+      if (!response.ok || !response.headers.get("content-type")?.includes("application/json") || Number(response.headers.get("content-length") ?? 0) > 1_000_000) throw new Error("Weather provider failed");
+      const rows = parseOpenMeteoDaily(await response.json());
+      if (!completeWeatherSeries(rows, start, end)) throw new Error("Weather provider returned an incomplete daily series");
+      return rows;
+    }));
+  }
+  try {
+    const weather = (await Promise.all(requests)).flat();
+    return { weather, ...(weather.length ? {} : { error: "Weather is unavailable for this period" }) };
+  } catch {
+    return { weather: [], error: "Weather is unavailable for this period" };
+  }
 }
 
 function normalized(value: unknown) { return String(value ?? "").trim().toLowerCase(); }
@@ -658,6 +762,81 @@ async function handleTool(name: string, args: Record<string, unknown>, principal
       if (scheduleError || runsError) throw scheduleError ?? runsError;
       return { machine_id: machine.id, schedule, runs: runs ?? [] };
     }
+    case "list_sales_context_machines": {
+      rejectUnknownArguments(args, []);
+      const ids = await machineIdsAt(s, principal);
+      if (ids?.length === 0) return [];
+      let query = s.from("machines").select("id,name,display_name").eq("deployed", true).order("name");
+      if (ids) query = query.in("id", ids);
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data ?? []).map((machine) => ({ id: machine.id, name: machine.display_name ?? machine.name }));
+    }
+    case "get_sales_context": {
+      rejectUnknownArguments(args, ["machine_id", "date_from", "date_to"]);
+      const range = salesContextRange(args);
+      const machine = await authorizedMachine(s, principal, args.machine_id, true);
+      const [{ data: orders }, coordinates, notes, assignments] = await Promise.all([
+        scopedOrderQuery(s, principal, { ...args, machine_id: machine.id }, "id,order_time,order_state,price,nums,pay_type_raw,refund_status,machine_id"),
+        s.from("machines").select("latitude,longitude").eq("id", machine.id).single(),
+        s.rpc("read_sales_context_notes", { p_actor_id: principal.profileId, p_from: range.from, p_to: range.to, p_machine_id: machine.id }),
+        s.from("machine_franchisee_assignments").select("tenant_id,start_date,end_date").eq("machine_id", machine.id).order("start_date", { ascending: false }),
+      ]);
+      if (coordinates.error || notes.error || assignments.error) throw coordinates.error ?? notes.error ?? assignments.error;
+      const assignmentRows = (assignments.data ?? []) as { tenant_id: string; start_date: string; end_date: string | null }[];
+      const authorizedDays = new Set<string>();
+      for (let day = range.from; day <= range.to; day = nextDay(day)) {
+        const effectiveTenant = assignmentRows.find((assignment) => assignment.start_date <= day && (!assignment.end_date || assignment.end_date >= day))?.tenant_id ?? (assignmentRows.length ? null : machine.tenant_id);
+        if (principal.role === "admin" || (!!principal.tenantId && effectiveTenant === principal.tenantId)) authorizedDays.add(day);
+      }
+      const salesByDay = new Map<string, { net_sales: number; orders: number; units: number }>();
+      for (const row of orders) {
+        if (row.order_state !== "COMPLETE" || row.refund_status === "Refunded" || (typeof row.pay_type_raw === "string" && ADMIN_OVERRIDE_PAY_TYPES.has(row.pay_type_raw))) continue;
+        const day = madridDay(String(row.order_time));
+        const daily = salesByDay.get(day) ?? { net_sales: 0, orders: 0, units: 0 };
+        daily.net_sales += Number(row.price ?? 0); daily.orders++; daily.units += Number(row.nums ?? 1); salesByDay.set(day, daily);
+      }
+      const dailySales = [];
+      for (let day = range.from; day <= range.to; day = nextDay(day)) {
+        if (!authorizedDays.has(day)) continue;
+        const daily = salesByDay.get(day) ?? { net_sales: 0, orders: 0, units: 0 };
+        dailySales.push({ day, ...daily, net_sales: Number(daily.net_sales.toFixed(2)) });
+      }
+      const weatherResult = await fetchMcpWeather(coordinates.data.latitude === null ? NaN : Number(coordinates.data.latitude), coordinates.data.longitude === null ? NaN : Number(coordinates.data.longitude), range.from, range.to);
+      const weather = { ...weatherResult, weather: weatherResult.weather.filter((row) => authorizedDays.has(row.day)) };
+      return {
+        machine: { id: machine.id, name: machine.display_name ?? machine.name }, range, daily_sales: dailySales,
+        weather: { provider: "Open-Meteo", location_basis: "Current machine coordinates", ...weather }, notes: notes.data ?? [],
+        guidance: "Compare day-level changes and use note sources as evidence. Correlation does not establish causation; use external research tools available to your client for local events and record sourced findings with create_sales_note.",
+      };
+    }
+    case "create_sales_note": {
+      const input = salesNoteInput(args);
+      const { data, error } = await s.rpc("create_sales_context_note", {
+        p_actor_id: principal.profileId, p_client_uuid: input.idempotencyKey, p_sales_date: input.salesDate,
+        p_category: input.category, p_body: input.note, p_source_url: input.sourceUrl, p_machine_id: input.machineId,
+      });
+      if (error) {
+        if (/idempotency key conflicts/i.test(error.message)) throw new ToolError("Sales note idempotency conflict", -32009);
+        throw new ToolError(error.message);
+      }
+      return data;
+    }
+    case "delete_sales_note": {
+      rejectUnknownArguments(args, ["note_id", "expected_revision", "confirm"]);
+      if (args.confirm !== true) throw new ToolError("Explicit confirm=true is required");
+      if (typeof args.note_id !== "string" || !UUID.test(args.note_id)) throw new ToolError("Invalid note_id");
+      if (typeof args.expected_revision !== "number") throw new ToolError("expected_revision must be a positive integer");
+      const revision = args.expected_revision;
+      if (!Number.isInteger(revision) || revision < 1) throw new ToolError("expected_revision must be a positive integer");
+      const { data, error } = await s.rpc("delete_sales_context_note", { p_actor_id: principal.profileId, p_note_id: args.note_id, p_expected_revision: revision, p_confirm: true });
+      if (error) {
+        if (/revision conflict/i.test(error.message)) throw new ToolError("Sales note revision conflict", -32009);
+        if (/not found/i.test(error.message)) throw new ToolError("Sales note not found", -32004);
+        throw new ToolError(error.message);
+      }
+      return data;
+    }
     case "create_action_report_draft": {
       const idempotencyKey = args.idempotency_key ?? args.client_uuid;
       if (typeof idempotencyKey !== "string" || !UUID.test(idempotencyKey)) throw new ToolError("A UUID idempotency_key is required");
@@ -750,7 +929,7 @@ export async function dispatchMessage(message: unknown, principal: Principal, s:
       return errorPayload(id, -32602, "Invalid initialize parameters");
     }
     const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.has(initialize.protocolVersion) ? initialize.protocolVersion : MCP_PROTOCOL_VERSION;
-    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.3.0" } });
+    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.4.0" } });
   }
   if (request.method === "tools/list") return resultPayload(id, { tools: availableTools(principal) });
   if (request.method !== "tools/call") return errorPayload(id, -32601, `Method not found: ${request.method}`);

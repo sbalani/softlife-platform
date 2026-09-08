@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertThrows } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { actionReportImageInput, apiKeyFromRequest, availableTools, dispatchMessage, isLowStock, isOverheated, madridMidnightUtc, reportPayload, type Principal } from "./index.ts";
+import { actionReportImageInput, apiKeyFromRequest, availableTools, completeWeatherSeries, dispatchMessage, isLowStock, isOverheated, madridMidnightUtc, parseOpenMeteoDaily, reportPayload, salesNoteInput, type Principal } from "./index.ts";
 
-function principal(role: "admin" | "operator" | "franchisee", scopes: ("read" | "forms" | "commands")[]): Principal {
+function principal(role: "admin" | "operator" | "franchisee", scopes: ("read" | "forms" | "commands" | "sales_context" | "sales_notes")[]): Principal {
   return {
     keyId: crypto.randomUUID(),
     profileId: crypto.randomUUID(),
@@ -25,6 +25,32 @@ Deno.test("tool listing enforces key scopes and role command fencing", () => {
 
   const franchiseeTools = availableTools(principal("franchisee", ["commands"])).map((tool) => tool.name);
   assertEquals(franchiseeTools.sort(), ["disable_machine_sales", "dispense_free_cup"]);
+});
+
+Deno.test("sales context scopes expose only bounded context and note tools", () => {
+  assertEquals(availableTools(principal("franchisee", ["sales_context"])).map((tool) => tool.name), ["list_sales_context_machines", "get_sales_context"]);
+  assertEquals(availableTools(principal("franchisee", ["sales_notes"])).map((tool) => tool.name), ["create_sales_note", "delete_sales_note"]);
+  assertEquals(availableTools(principal("operator", ["sales_context", "sales_notes"])), []);
+});
+
+Deno.test("sales notes require valid dated evidence and HTTPS sources", () => {
+  const args = { idempotency_key: crypto.randomUUID(), sales_date: "2026-09-01", category: "event", note: "Local festival", source_url: "https://example.com/event" };
+  const input = salesNoteInput(args);
+  assertEquals(input.note, "Local festival");
+  assertThrows(() => salesNoteInput({ ...args, idempotency_key: crypto.randomUUID(), source_url: "http://example.com" }), Error, "HTTPS");
+  assertThrows(() => salesNoteInput({ ...args, machine_id: [crypto.randomUUID()] }), Error, "machine_id");
+  assertThrows(() => salesNoteInput({ ...args, source_url: ["https://example.com"] }), Error, "HTTPS");
+  assertThrows(() => salesNoteInput({ ...args, unexpected: true }), Error, "Unknown tool argument");
+});
+
+Deno.test("Open-Meteo responses are reduced to known daily weather fields", () => {
+  assertEquals(parseOpenMeteoDaily({ daily: { time: ["2026-09-01"], temperature_2m_mean: [21.4], temperature_2m_max: [28], temperature_2m_min: [16], precipitation_sum: [2.5], weather_code: [61] } }), [
+    { day: "2026-09-01", temperature_mean: 21.4, temperature_min: 16, temperature_max: 28, precipitation_mm: 2.5, weather_code: 61 },
+  ]);
+  assertEquals(parseOpenMeteoDaily({ daily: { time: ["2026-09-01"], temperature_2m_mean: [null], temperature_2m_max: [28], temperature_2m_min: [16], precipitation_sum: [null], weather_code: [null] } }), []);
+  assertEquals(parseOpenMeteoDaily({ arbitrary: "provider data" }), []);
+  const rows = parseOpenMeteoDaily({ daily: { time: ["2026-09-01", "2026-09-01", "2026-09-03"], temperature_2m_mean: [20, 20, 20], temperature_2m_max: [25, 25, 25], temperature_2m_min: [15, 15, 15], precipitation_sum: [0, 0, 0], weather_code: [0, 0, 0] } });
+  assertEquals(completeWeatherSeries(rows, "2026-09-01", "2026-09-03"), false);
 });
 
 Deno.test("Action Report image reservations reject unsupported or oversized payloads", () => {

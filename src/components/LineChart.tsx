@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 
-type DataPoint = { label: string; value: number };
+type DataPoint = { day?: string; label: string; value: number };
+type WeatherPoint = DataPoint & { minimum: number; maximum: number; precipitation: number; condition: string };
+type ChartAnnotation = { id: string; day: string; text: string; category: string; machineName?: string | null };
 
 export function LineChart({
   data,
@@ -15,6 +17,10 @@ export function LineChart({
   secondaryColor = "#b65d5d",
   secondaryUnit = "",
   secondaryLabel = "Incidents",
+  weatherData,
+  weatherLabel = "Mean temperature",
+  weatherUnit = "°C",
+  annotations = [],
 }: {
   data: DataPoint[];
   color?: string;
@@ -26,10 +32,16 @@ export function LineChart({
   secondaryColor?: string;
   secondaryUnit?: string;
   secondaryLabel?: string;
+  weatherData?: WeatherPoint[];
+  weatherLabel?: string;
+  weatherUnit?: string;
+  annotations?: ChartAnnotation[];
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const [zoom, setZoom] = useState<{ start: number; end: number } | null>(null);
   const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
+  const [showWeather, setShowWeather] = useState(true);
+  const [showNotes, setShowNotes] = useState(true);
 
   if (!data.length) {
     return <div className="flex items-center justify-center text-sm text-taupe" style={{ height }}>No data</div>;
@@ -38,7 +50,8 @@ export function LineChart({
   const W = 600;
   const H = height;
   const padL = 50;
-  const padR = secondaryData ? 50 : 20;
+  const hasWeather = showWeather && !!weatherData?.length;
+  const padR = secondaryData || hasWeather ? 50 : 20;
   const padT = 20;
   const padB = 40;
   const chartW = W - padL - padR;
@@ -58,6 +71,7 @@ export function LineChart({
   const pts = visibleData.map((d, i) => ({
     x: padL + i * step,
     y: padT + chartH - ((d.value - min) / range) * chartH,
+    day: d.day,
     label: d.label,
     value: d.value,
   }));
@@ -73,6 +87,20 @@ export function LineChart({
   const linePath = pts.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   const areaPath = `${linePath} L${pts[pts.length - 1].x.toFixed(1)},${padT + chartH} L${pts[0].x.toFixed(1)},${padT + chartH} Z`;
   const secondaryPath = secondaryPts.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+  const weatherByDay = new Map((weatherData ?? []).map((point) => [point.day, point]));
+  const visibleWeather = hasWeather ? visibleData.flatMap((point, dataIndex) => {
+    const weather = point.day ? weatherByDay.get(point.day) : undefined;
+    return weather ? [{ ...weather, dataIndex, x: padL + dataIndex * step }] : [];
+  }) : [];
+  const weatherValues = visibleWeather.map((point) => point.value);
+  const weatherLow = weatherValues.length ? Math.min(...weatherValues) : 0;
+  const weatherHigh = weatherValues.length ? Math.max(...weatherValues) : 1;
+  const weatherPadding = Math.max((weatherHigh - weatherLow) * 0.1, 0.5);
+  const weatherMinimum = weatherUnit.trim() === "mm" ? 0 : Math.floor(weatherLow - weatherPadding);
+  const weatherMaximum = Math.ceil(weatherHigh + weatherPadding);
+  const weatherRange = Math.max(weatherMaximum - weatherMinimum, 1);
+  const weatherPts = visibleWeather.map((point) => ({ ...point, y: padT + chartH - ((point.value - weatherMinimum) / weatherRange) * chartH }));
+  const weatherPath = weatherPts.map((point, index) => `${index && point.dataIndex === weatherPts[index - 1].dataIndex + 1 ? "L" : "M"}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
 
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => ({
     y: padT + chartH - f * chartH,
@@ -82,6 +110,9 @@ export function LineChart({
     value,
     y: padT + chartH - (value / secondaryMax) * chartH,
   }));
+  const weatherTicks = [0, 0.25, 0.5, 0.75, 1].map((fraction) => ({ value: weatherMinimum + weatherRange * fraction, y: padT + chartH - fraction * chartH }));
+  const annotationsByDay = new Map<string, ChartAnnotation[]>();
+  if (showNotes) for (const annotation of annotations) annotationsByDay.set(annotation.day, [...(annotationsByDay.get(annotation.day) ?? []), annotation]);
 
   const xStride = Math.ceil(visibleData.length / 8);
   const fmtVal = (v: number) => unit === "€" ? `€${v.toFixed(2)}` : `${v}${unit}`;
@@ -104,6 +135,10 @@ export function LineChart({
 
   return (
     <div className="relative w-full">
+      {(weatherData?.length || annotations.length) && <div className="mb-2 flex flex-wrap items-center gap-4 text-xs font-semibold text-taupe">
+        {!!weatherData?.length && <label className="flex items-center gap-1.5"><input type="checkbox" checked={showWeather} onChange={(event) => setShowWeather(event.target.checked)} className="accent-sky-600" /><span className="h-0 w-4 border-t-2 border-sky-600" />Weather</label>}
+        {!!annotations.length && <label className="flex items-center gap-1.5"><input type="checkbox" checked={showNotes} onChange={(event) => setShowNotes(event.target.checked)} className="accent-violet-600" /><span className="h-2 w-2 rounded-full bg-violet-600" />Notes</label>}
+      </div>}
       {zoomable && (
         <div className="mb-2 flex items-center justify-between gap-3 text-xs text-taupe">
           <span>{zoom ? `${visibleData[0].label}–${visibleData[visibleData.length - 1].label}` : "Drag across the graph to zoom"}</span>
@@ -129,11 +164,12 @@ export function LineChart({
             </text>
           </g>
         ))}
-        {secondaryData && secondaryTicks.map((tick) => (
+        {!hasWeather && secondaryData && secondaryTicks.map((tick) => (
           <text key={`secondary-${tick.value}`} x={W - padR + 6} y={tick.y + 3} textAnchor="start" fontSize={10} fill={secondaryColor}>
             {tick.value}{secondaryUnit}
           </text>
         ))}
+        {hasWeather && weatherTicks.map((tick) => <text key={`weather-${tick.value}`} x={W - padR + 6} y={tick.y + 3} textAnchor="start" fontSize={10} fill="#4786a8">{tick.value.toFixed(0)}{weatherUnit}</text>)}
 
         {/* Area */}
         <path d={areaPath} fill={color} opacity={0.12} />
@@ -141,6 +177,7 @@ export function LineChart({
         {/* Line */}
         <path d={linePath} fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
         {secondaryData && <path d={secondaryPath} fill="none" stroke={secondaryColor} strokeWidth={2.5} strokeDasharray="6 4" strokeLinejoin="round" strokeLinecap="round" />}
+        {hasWeather && weatherPath && <path d={weatherPath} fill="none" stroke="#4786a8" strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" opacity={0.9} />}
 
         {selection && (
           <rect
@@ -177,6 +214,11 @@ export function LineChart({
         {secondaryPts.map((point, index) => (
           <circle key={`secondary-point-${index}`} cx={point.x} cy={point.y} r={hover === index ? 5 : 3} fill="#fff" stroke={secondaryColor} strokeWidth={2} className="cursor-pointer transition-all" onMouseEnter={() => setHover(index)} onPointerDown={() => { if (!zoomable) setHover(index); }} />
         ))}
+        {weatherPts.map((point) => <circle key={`weather-${point.day}`} cx={point.x} cy={point.y} r={3} fill="#fff" stroke="#4786a8" strokeWidth={2} className="cursor-pointer" onMouseEnter={() => setHover(Math.round((point.x - padL) / Math.max(step, 1)))} />)}
+        {visibleData.map((point, index) => {
+          const dayNotes = point.day ? annotationsByDay.get(point.day) ?? [] : [];
+          return dayNotes.length ? <g key={`note-${point.day}`} className="cursor-pointer" onMouseEnter={() => setHover(index)}><circle cx={padL + index * step} cy={padT + 5} r={7} fill="#7c5aa6" /><text x={padL + index * step} y={padT + 8} textAnchor="middle" fontSize={8} fontWeight="bold" fill="#fff">{dayNotes.length}</text></g> : null;
+        })}
 
         {/* X labels */}
         {pts.map((p, i) =>
@@ -201,6 +243,8 @@ export function LineChart({
           <div className="text-[10px] uppercase tracking-wide text-taupe">{pts[hover].label}</div>
           <div className="text-sm font-bold text-cocoa">{fmtVal(pts[hover].value)}</div>
           {secondaryData && <div className="text-sm font-bold" style={{ color: secondaryColor }}>{secondaryLabel}: {secondaryPts[hover].value}{secondaryUnit}</div>}
+          {hasWeather && pts[hover].day && weatherByDay.get(pts[hover].day) && (() => { const weather = weatherByDay.get(pts[hover].day!)!; return <div className="mt-1 border-t border-line pt-1 text-xs text-sky-700"><strong>{weatherLabel}: {weather.value}{weatherUnit}</strong><br />{weather.condition} · {weather.minimum}–{weather.maximum}°C · {weather.precipitation} mm</div>; })()}
+          {showNotes && pts[hover].day && (annotationsByDay.get(pts[hover].day) ?? []).map((note) => <div key={note.id} className="mt-1 max-w-64 border-t border-line pt-1 text-xs text-violet-700"><strong>{note.category}{note.machineName ? ` · ${note.machineName}` : ""}</strong><br />{note.text}</div>)}
         </div>
       )}
     </div>

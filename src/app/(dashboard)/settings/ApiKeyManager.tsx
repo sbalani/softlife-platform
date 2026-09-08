@@ -78,7 +78,8 @@ export function ApiKeyManager({ keys, canCommand }: { keys: ApiKeyRow[]; canComm
         </button>
       </div>
       <div className="flex flex-wrap gap-3 text-xs text-cocoa">
-        {[["read", "Read data"], ["forms", "Action Reports"], ...(canCommand ? [["commands", "Safe commands"]] : [])].map(([scope, label]) => <label key={scope} className="flex items-center gap-1.5"><input type="checkbox" checked={scopes.includes(scope)} onChange={(event) => setScopes((current) => event.target.checked ? [...current, scope] : current.filter((value) => value !== scope))} className="accent-terracotta" />{label}</label>)}
+        {[["read", "Read data"], ["forms", "Action Reports"], ...(canCommand ? [["sales_context", "Sales context"], ["sales_notes", "Sales notes"], ["commands", "Safe commands"]] : [])].map(([scope, label]) => <label key={scope} className="flex items-center gap-1.5"><input type="checkbox" checked={scopes.includes(scope)} disabled={!scopes.includes(scope) && scopes.length >= 3} onChange={(event) => setScopes((current) => event.target.checked ? [...current, scope] : current.filter((value) => value !== scope))} className="accent-terracotta disabled:opacity-40" />{label}</label>)}
+        <span className="text-taupe">Choose up to 3</span>
       </div>
 
       {keys.length > 0 && (

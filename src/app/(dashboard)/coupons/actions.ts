@@ -12,15 +12,16 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth/session";
 import { recordCouponExchange } from "@/lib/data/change-log";
 import { refreshCouponSnapshots } from "@/lib/data/coupons";
-import { buildCouponContent, parseCouponUseCount } from "@/lib/coupon-content";
+import { buildCouponContent, buildOneCupCouponContent, ONE_CUP_COMPATIBILITY, parseCouponUseCount } from "@/lib/coupon-content";
 import { deleteAdminCoupon, getAdminCouponCodes, updateAdminCouponCode, type CreateCouponInput } from "@/lib/data/coupon-admin";
 import { createCouponRequest, getGrantedCouponRecords, grantCouponRequest, rejectCouponRequest, updateGrantedCouponCode } from "@/lib/data/coupon-requests";
 
 export type CouponResult = { ok: boolean; error?: string; warning?: string; revision?: number };
 
 function requestInput(fd: FormData): CreateCouponInput {
+  const couponType = String(fd.get("couponType") ?? "0");
   return {
-    couponType: String(fd.get("couponType") ?? "0"),
+    couponType,
     couponName: String(fd.get("couponName") ?? ""),
     startTime: String(fd.get("startTime") ?? ""),
     endTime: String(fd.get("endTime") ?? ""),
@@ -30,9 +31,9 @@ function requestInput(fd: FormData): CreateCouponInput {
     machineIds: String(fd.get("machineIds") ?? "").split(",").map((id) => id.trim()).filter(Boolean),
     localName: String(fd.get("localName") ?? ""),
     money: Number(fd.get("money") ?? 0),
-    amount: Number(fd.get("amount") ?? 0),
-    productPosition: String(fd.get("productPosition") ?? ""),
-    productName: String(fd.get("productName") ?? ""),
+    amount: couponType === "1" ? ONE_CUP_COMPATIBILITY.amount : undefined,
+    productPosition: couponType === "1" ? ONE_CUP_COMPATIBILITY.productPosition : undefined,
+    productName: couponType === "1" ? ONE_CUP_COMPATIBILITY.productName : undefined,
   };
 }
 
@@ -128,15 +129,7 @@ export async function createCouponAction(_prev: CouponResult | null, fd: FormDat
     if (!Number.isFinite(money) || money <= 0) return { ok: false, error: "Discount amount must be greater than zero." };
     params.content = buildCouponContent({ money: String(money) }, secondary);
   } else if (couponType === "1") {
-    const amount = Number(fd.get("amount") ?? 0);
-    const productPosition = String(fd.get("productPosition") ?? "").trim();
-    const productName = String(fd.get("productName") ?? "").trim();
-    if (!Number.isInteger(amount) || amount < 1 || !productPosition || !productName) return { ok: false, error: "Amount, position, and product name are required." };
-    params.content = buildCouponContent({
-      amount: String(amount),
-      productPosition,
-      productName,
-    }, secondary);
+    params.content = buildOneCupCouponContent(secondary);
   }
 
   try {

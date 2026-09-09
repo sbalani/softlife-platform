@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildCouponContent, parseCouponSecondary, parseCouponUseCount } from "./coupon-content.ts";
+import { buildCouponContent, buildOneCupCouponContent, ONE_CUP_COMPATIBILITY, parseCouponSecondary, parseCouponUseCount } from "./coupon-content.ts";
 
 test("coupon content includes Huaxin secondary use count", () => {
   const content = buildCouponContent({ money: "1" }, 3);
@@ -15,4 +15,14 @@ test("coupon content includes Huaxin secondary use count", () => {
   assert.equal(parseCouponUseCount("1.5"), null);
   assert.equal(parseCouponUseCount("abc"), null);
   assert.equal(parseCouponUseCount("9007199254740993"), null);
+});
+
+test("one-cup coupons use fixed Huaxin compatibility metadata", () => {
+  assert.deepEqual(ONE_CUP_COMPATIBILITY, { amount: 1, productPosition: "1", productName: "Free cup" });
+  assert.deepEqual(JSON.parse(buildOneCupCouponContent(3)), {
+    amount: "1",
+    productPosition: "1",
+    productName: "Free cup",
+    secondary: "3",
+  });
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyticsPresetRange, analyticsRange, canonicalProductCombination, dailyIncidentCounts, filterAnalyticsOrders, machineSalesReport, salesTimeBreakdown, toppingConsumption } from "./analytics.ts";
+import { analyticsPresetRange, analyticsRange, canonicalProductCombination, dailyIncidentCounts, dailySalesTotals, filterAnalyticsOrders, machineSalesReport, salesTimeBreakdown, toppingConsumption } from "./analytics.ts";
 import type { Order } from "./data/orders.ts";
 
 test("analytics range creates an equal previous period", () => {
@@ -34,6 +34,18 @@ test("daily incident counts filter machine, exact type, and the cup group", () =
   assert.equal(dailyIncidentCounts(incidents, "2026-08-03", 1, "UTC", { incidentType: "cup" })[0].value, 2);
   assert.equal(dailyIncidentCounts(incidents, "2026-08-03", 1, "UTC", { machineId: "one", incidentType: "cup" })[0].value, 1);
   assert.equal(dailyIncidentCounts(incidents, "2026-08-03", 1, "UTC", { incidentType: "temperature" })[0].value, 1);
+});
+
+test("daily sales totals use local days and zero-fill revenue and units", () => {
+  const orders = [
+    { order_time: "2026-08-02T22:30:00Z", price: 4.5, nums: 2 },
+    { order_time: "2026-08-03T10:00:00Z", price: 3, nums: 1 },
+    { order_time: "2026-08-05T10:00:00Z", price: 99, nums: 9 },
+  ];
+  assert.deepEqual(dailySalesTotals(orders, "2026-08-03", 2, "Europe/Madrid"), [
+    { day: "2026-08-03", revenue: 7.5, units: 3 },
+    { day: "2026-08-04", revenue: 0, units: 0 },
+  ]);
 });
 
 test("machine sales reports group local weeks and exclude refunds from net sales", () => {

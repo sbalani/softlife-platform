@@ -89,6 +89,25 @@ export function dailyIncidentCounts(
   return datesBetween(from, days).map((day) => ({ day, value: counts.get(day) ?? 0 }));
 }
 
+export function dailySalesTotals(
+  orders: Pick<Order, "order_time" | "price" | "nums">[],
+  from: string,
+  days: number,
+  timeZone: string,
+) {
+  const to = shiftDay(from, Math.max(days - 1, 0));
+  const totals = new Map<string, { revenue: number; units: number }>();
+  for (const order of orders) {
+    const day = ymd(new Date(order.order_time), timeZone);
+    if (day < from || day > to) continue;
+    const total = totals.get(day) ?? { revenue: 0, units: 0 };
+    total.revenue += order.price;
+    total.units += order.nums;
+    totals.set(day, total);
+  }
+  return datesBetween(from, days).map((day) => ({ day, revenue: totals.get(day)?.revenue ?? 0, units: totals.get(day)?.units ?? 0 }));
+}
+
 export function salesTimeBreakdown(orders: Pick<Order, "order_time" | "price">[], from: string, days: number, timeZone: string) {
   const to = shiftDay(from, Math.max(days - 1, 0));
   const weekdayOccurrences = new Array<number>(7).fill(0);

@@ -3,12 +3,11 @@ import { getOrders, type Order } from "@/lib/data/orders";
 import { getMachines } from "@/lib/data/machines";
 import { LineChart } from "@/components/LineChart";
 import { HBarChart, KpiCard, VBarChart } from "@/components/charts";
-import { ymd } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { getAliasMap } from "@/lib/data/products";
 import { getSessionProfile } from "@/lib/auth/session";
 import { calculateFranchiseePayouts } from "@/lib/data/franchisee-profit";
-import { ANALYTICS_WEEKDAYS, analyticsPresetRange, analyticsRange, canonicalProductCombination, dailyIncidentCounts, datesBetween, filterAnalyticsOrders, ordersInPeriod, salesTimeBreakdown, toppingConsumption, type AnalyticsParams, type AnalyticsPeriodPreset } from "@/lib/analytics";
+import { ANALYTICS_WEEKDAYS, analyticsPresetRange, analyticsRange, canonicalProductCombination, dailyIncidentCounts, dailySalesTotals, filterAnalyticsOrders, ordersInPeriod, salesTimeBreakdown, toppingConsumption, type AnalyticsParams, type AnalyticsPeriodPreset } from "@/lib/analytics";
 import { OrderDataNote } from "@/components/order-data-note";
 import { filterOrdersByMachinePeriods, getAccessibleMachinePeriods } from "@/lib/data/accessible-machines";
 import { getAnalyticsIncidents, getIncidentPolicies } from "@/lib/data/incidents";
@@ -114,17 +113,9 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     return { tenantId, tenantName: rows[0]?.tenantName ?? "Franchisee", rows, payout: rows.reduce((sum, row) => sum + row.payout, 0) };
   });
 
-  const days = datesBetween(range.from, range.days);
-  const revenueByDay = new Map<string, number>();
-  for (const order of sales) {
-    const day = ymd(new Date(order.order_time), tz);
-    revenueByDay.set(day, (revenueByDay.get(day) ?? 0) + order.price);
-  }
-  const revenueTrend = days.map((day) => ({
-    day,
-    label: new Date(`${day}T12:00:00Z`).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: "UTC" }),
-    value: Number((revenueByDay.get(day) ?? 0).toFixed(2)),
-  }));
+  const salesTotals = dailySalesTotals(sales, range.from, range.days, tz);
+  const revenueTrend = salesTotals.map(({ day, revenue: value }) => ({ day, label: new Date(`${day}T12:00:00Z`).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: "UTC" }), value: Number(value.toFixed(2)) }));
+  const unitsTrend = salesTotals.map(({ day, units: value }) => ({ day, label: new Date(`${day}T12:00:00Z`).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: "UTC" }), value }));
   const incidentTrend = selectedIncidentFilter === "off" ? undefined : dailyIncidentCounts(incidentRows, range.from, range.days, tz, {
     machineId: selectedMachineId,
     incidentType: selectedIncidentFilter,
@@ -245,7 +236,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         <KpiCard label="Franchisee payout" value={`€${payoutRows.reduce((sum, row) => sum + row.payout, 0).toFixed(2)}`} hint="VAT removed before share" accent="#6fa98c" />
       </div>
 
-      <section className="mt-6 rounded-2xl border border-line bg-white p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-display text-lg font-bold text-cocoa">Net sales trend</h2><p className="mb-2 text-xs text-taupe">Daily, refund-adjusted revenue{incidentTrend ? ` with ${incidentFilterLabel.toLowerCase()} by opening day` : ""}{weatherTrend?.length ? ` · Open-Meteo using current coordinates across ${weatherResult.locationCount} location${weatherResult.locationCount === 1 ? "" : "s"}` : ""}</p>{selectedWeather !== "off" && weatherResult.error && <p className="mb-2 text-xs font-semibold text-danger">{weatherResult.error}</p>}</div>{incidentTrend && <div className="flex items-center gap-2 rounded-full bg-danger/10 px-3 py-1 text-xs font-bold text-danger"><span className="h-0 w-5 border-t-2 border-dashed border-danger" />{incidentCount} incident{incidentCount === 1 ? "" : "s"}</div>}</div><div className="overflow-x-auto"><div style={{ minWidth: Math.max(600, revenueTrend.length * 32) }}><LineChart data={revenueTrend} color="#d47e54" height={240} unit="€" secondaryData={incidentTrend} secondaryColor="#b65d5d" secondaryLabel={incidentFilterLabel} weatherData={weatherTrend} weatherLabel={selectedWeather === "rain" ? "Rainfall" : "Mean temperature"} weatherUnit={selectedWeather === "rain" ? " mm" : "°C"} annotations={contextNotes.map((note) => ({ id: note.id, day: note.salesDate, text: note.body, category: note.category, machineName: note.machineName }))} /></div></div></section>
+      <section className="mt-6 rounded-2xl border border-line bg-white p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-display text-lg font-bold text-cocoa">Net sales trend</h2><p className="mb-2 text-xs text-taupe">Daily, refund-adjusted revenue and units sold{incidentTrend ? ` with ${incidentFilterLabel.toLowerCase()} by opening day` : ""}{weatherTrend?.length ? ` · Open-Meteo using current coordinates across ${weatherResult.locationCount} location${weatherResult.locationCount === 1 ? "" : "s"}` : ""}</p>{selectedWeather !== "off" && weatherResult.error && <p className="mb-2 text-xs font-semibold text-danger">{weatherResult.error}</p>}</div>{incidentTrend && <div className="flex items-center gap-2 rounded-full bg-danger/10 px-3 py-1 text-xs font-bold text-danger"><span className="h-0 w-5 border-t-2 border-dashed border-danger" />{incidentCount} incident{incidentCount === 1 ? "" : "s"}</div>}</div><div className="overflow-x-auto"><div style={{ minWidth: Math.max(600, revenueTrend.length * 32) }}><LineChart data={revenueTrend} color="#d47e54" height={240} unit="€" secondaryData={incidentTrend} secondaryColor="#b65d5d" secondaryLabel={incidentFilterLabel} quantityData={unitsTrend} quantityLabel="Units sold" weatherData={weatherTrend} weatherLabel={selectedWeather === "rain" ? "Rainfall" : "Mean temperature"} weatherUnit={selectedWeather === "rain" ? " mm" : "°C"} annotations={contextNotes.map((note) => ({ id: note.id, day: note.salesDate, text: note.body, category: note.category, machineName: note.machineName }))} /></div></div></section>
 
       {session && (session.role === "admin" || session.role === "franchisee") && <SalesNotesPanel notes={contextNotes} machines={machineOptions} defaultDate={range.to} selectedMachineId={selectedMachineId} />}
 

@@ -60,7 +60,7 @@ export default async function IncidentsPage() {
               {incident.machineImei && <p className="text-xs text-taupe">IMEI {incident.machineImei}</p>}
               {incident.description && <p className="mt-2 text-sm text-cocoa">{incident.description}</p>}
               <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-taupe"><span>Opened {formatDateTime(incident.openedAt, tz)}</span><span className={isOverdue ? "font-bold text-danger" : ""}>{incident.dueAt ? `Due ${formatDateTime(incident.dueAt, tz)}` : "No due date"}</span><span>Team: {incident.assignedTenantName ?? incident.owningTenantName ?? "SoftLife"}</span><span>Person: {incident.assignedUserName ?? "Unassigned"}</span></div>
-              <ActiveIncidentControls incidentId={incident.id} status={incident.status as "open" | "in_progress"} machineId={incident.machineId} sourceKind={incident.sourceKind} sourceResolved={Boolean(incident.sourceAlertResolvedAt)} assignedTenantId={incident.assignedTenantId} assignedUserId={incident.assignedUserId} dueAt={incident.dueAt} options={options} canAssign={session.role !== "operator"} isAdmin={session.role === "admin"} />
+              <ActiveIncidentControls incidentId={incident.id} incidentType={incident.incidentType} status={incident.status as "open" | "in_progress"} machineId={incident.machineId} sourceKind={incident.sourceKind} sourceResolved={Boolean(incident.sourceAlertResolvedAt)} assignedTenantId={incident.assignedTenantId} assignedUserId={incident.assignedUserId} dueAt={incident.dueAt} options={options} canAssign={session.role !== "operator"} isAdmin={session.role === "admin"} />
               <Timeline incident={incident} tz={tz} />
             </article>;
           })}

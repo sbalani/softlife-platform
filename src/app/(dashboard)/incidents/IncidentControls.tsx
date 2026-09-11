@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useActionState, useState } from "react";
 import {
+  clearIncidentDefrostIntervention,
   createIncident,
   reopenIncident,
   resolveIncident,
@@ -60,16 +61,18 @@ export function IncidentCreateForm({ options, policies, isAdmin }: { options: In
   );
 }
 
-export function ActiveIncidentControls({ incidentId, status, machineId, sourceKind, sourceResolved, assignedTenantId, assignedUserId, dueAt, options, canAssign, isAdmin }: {
-  incidentId: string; status: "open" | "in_progress"; machineId: string | null; sourceKind: "alert" | "schedule" | "manual"; sourceResolved: boolean;
+export function ActiveIncidentControls({ incidentId, incidentType, status, machineId, sourceKind, sourceResolved, assignedTenantId, assignedUserId, dueAt, options, canAssign, isAdmin }: {
+  incidentId: string; incidentType: string; status: "open" | "in_progress"; machineId: string | null; sourceKind: "alert" | "schedule" | "manual"; sourceResolved: boolean;
   assignedTenantId: string | null; assignedUserId: string | null; dueAt: string | null; options: IncidentWorkspaceOptions; canAssign: boolean; isAdmin: boolean;
 }) {
   const [assignmentResult, assignmentAction, assignmentPending] = useActionState<IncidentActionResult | null, FormData>(updateIncidentAssignment, null);
   const [startResult, startAction, startPending] = useActionState<IncidentActionResult | null, FormData>(startIncident, null);
   const [resolveResult, resolveAction, resolvePending] = useActionState<IncidentActionResult | null, FormData>(resolveIncident, null);
+  const [clearResult, clearAction, clearPending] = useActionState<IncidentActionResult | null, FormData>(clearIncidentDefrostIntervention, null);
   const [teamId, setTeamId] = useState(assignedTenantId ?? "");
   const users = options.users.filter((user) => !teamId || !user.tenantId || user.tenantId === teamId);
   const canResolve = canTransitionIncident(status, "resolved") && (sourceKind !== "alert" || sourceResolved);
+  const defrostLockActive = incidentType === "defrost_automation_failed" && sourceKind === "alert" && !sourceResolved;
   return (
     <div className="mt-4 space-y-3 border-t border-line pt-4">
       {canAssign && <form action={assignmentAction} className="grid items-end gap-2 sm:grid-cols-4">
@@ -85,9 +88,18 @@ export function ActiveIncidentControls({ incidentId, status, machineId, sourceKi
         {machineId && <Link href={`/refills?machine=${encodeURIComponent(machineId)}&incident=${encodeURIComponent(incidentId)}`} className="rounded-lg border border-terracotta/30 bg-terracotta/5 px-3 py-2 text-xs font-bold text-terracotta">Add Action Report</Link>}
         <Result result={startResult} />
       </div>
+      {defrostLockActive && <form action={clearAction} onSubmit={(event) => {
+        if (!confirm("Confirm the machine was physically inspected, defrost is off, refrigeration is on, and it is safe to remove the intervention lock.")) event.preventDefault();
+      }} className="rounded-lg border border-danger/30 bg-danger/5 p-3">
+        <input type="hidden" name="incident_id" value={incidentId} />
+        <p className="text-xs font-bold text-danger">Defrost intervention lock active</p>
+        <p className="mt-1 text-xs text-cocoa">This lock is why the incident cannot be resolved. After inspecting the machine, remove the lock here; that clears the source alert and enables incident resolution.</p>
+        {isAdmin ? <button disabled={clearPending} className="mt-3 rounded-lg border border-danger px-3 py-2 text-xs font-bold text-danger disabled:opacity-50">{clearPending ? "Removing lock..." : "Inspection complete · remove lock"}</button> : <p className="mt-2 text-xs font-semibold text-danger">An administrator must remove this safety lock.</p>}
+        <div className="mt-2"><Result result={clearResult} /></div>
+      </form>}
       <form action={resolveAction} className="flex flex-col gap-2 sm:flex-row sm:items-end">
         <input type="hidden" name="incident_id" value={incidentId} />
-        <label className="flex-1"><span className="mb-1 block text-[10px] font-bold uppercase text-taupe">How was this resolved?</span><textarea required name="resolution_summary" maxLength={2000} rows={2} disabled={!canResolve} placeholder={canResolve ? "Record the outcome and work completed" : "Telemetry still reports the source alert as active"} className="w-full rounded-lg border border-line bg-white px-3 py-2 text-xs text-cocoa disabled:bg-cream" /></label>
+        <label className="flex-1"><span className="mb-1 block text-[10px] font-bold uppercase text-taupe">How was this resolved?</span><textarea required name="resolution_summary" maxLength={2000} rows={2} disabled={!canResolve} placeholder={canResolve ? "Record the outcome and work completed" : defrostLockActive ? "Remove the defrost intervention lock above first" : "Telemetry still reports the source alert as active"} className="w-full rounded-lg border border-line bg-white px-3 py-2 text-xs text-cocoa disabled:bg-cream" /></label>
         <button disabled={resolvePending || !canResolve} className="rounded-lg bg-sage px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{resolvePending ? "Resolving..." : "Resolve"}</button>
         <Result result={resolveResult} />
       </form>

@@ -106,6 +106,31 @@ export async function resolveIncident(_previous: IncidentActionResult | null, fo
   return incidentRpc("resolve_incident", { p_incident_id: incidentId, p_resolution_summary: summary }, "Incident resolved.");
 }
 
+export async function clearIncidentDefrostIntervention(_previous: IncidentActionResult | null, formData: FormData): Promise<IncidentActionResult> {
+  const actor = await getSessionProfile();
+  if (!actor || actor.role !== "admin") return { ok: false, error: "Admin access required." };
+  const incidentId = text(formData, "incident_id", 36);
+  if (!UUID.test(incidentId)) return { ok: false, error: "Invalid incident." };
+
+  const s = await createServiceClient();
+  const { data: incident, error: incidentError } = await s.from("incidents")
+    .select("machine_id,incident_type,source_kind,source_alert_resolved_at")
+    .eq("id", incidentId)
+    .maybeSingle();
+  if (incidentError) return { ok: false, error: incidentError.message };
+  if (!incident || incident.incident_type !== "defrost_automation_failed" || incident.source_kind !== "alert" || !incident.machine_id) {
+    return { ok: false, error: "This incident is not linked to a defrost intervention lock." };
+  }
+  if (incident.source_alert_resolved_at) return { ok: true, message: "Defrost intervention lock is already clear." };
+
+  const { error } = await s.rpc("clear_defrost_intervention", { p_machine_id: incident.machine_id, p_admin_id: actor.id });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/incidents");
+  revalidatePath("/alerts");
+  revalidatePath("/machines");
+  return { ok: true, message: "Intervention lock cleared. You can now resolve the incident." };
+}
+
 export async function reopenIncident(_previous: IncidentActionResult | null, formData: FormData): Promise<IncidentActionResult> {
   const incidentId = text(formData, "incident_id", 36);
   const reason = text(formData, "reason", 2000);

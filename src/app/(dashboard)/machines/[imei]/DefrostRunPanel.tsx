@@ -3,6 +3,8 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { DefrostRunSummary } from "@/lib/data/machine-config";
+import { isHuaxinClosed, isHuaxinOpen, isHuaxinSalesBlocked, isHuaxinSalesReady } from "@/lib/defrost-status";
+import { sendMachineCommand } from "./actions";
 import { runDefrostNow } from "./defrost-actions";
 
 const ACTIVE_STATES = new Set(["scheduled", "thawing", "thaw_closed", "refrigeration_check", "forming", "sales_check", "recovery"]);
@@ -21,11 +23,17 @@ const STATE_LABELS: Record<string, string> = {
   manual_intervention: "Manual intervention",
 };
 
-export function DefrostRunPanel({ machineId, machineName, imei, deployed, durationMinutes, requiresIntervention, runs }: {
+export function DefrostRunPanel({ machineId, machineName, imei, deployed, online, statusCurrent, refrigerationValue, defrostValue, formationPct, operatingValue, durationMinutes, requiresIntervention, runs }: {
   machineId: string;
   machineName: string;
   imei: string;
   deployed: boolean;
+  online: boolean;
+  statusCurrent: boolean;
+  refrigerationValue: string | null;
+  defrostValue: string | null;
+  formationPct: number | null;
+  operatingValue: string | null;
   durationMinutes: number;
   requiresIntervention: boolean;
   runs: DefrostRunSummary[];
@@ -33,7 +41,7 @@ export function DefrostRunPanel({ machineId, machineName, imei, deployed, durati
   const router = useRouter();
   const active = runs.find((run) => ACTIVE_STATES.has(run.state));
   const [pending, startTransition] = useTransition();
-  const [result, setResult] = useState<{ ok: boolean; error?: string } | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; error?: string; message?: string } | null>(null);
 
   useEffect(() => {
     if (!active) return;
@@ -47,13 +55,30 @@ export function DefrostRunPanel({ machineId, machineName, imei, deployed, durati
     setResult(null);
     startTransition(async () => {
       const response = await runDefrostNow(machineId, imei, requestId);
-      setResult(response);
+      setResult(response.ok ? { ok: true, message: "Defrost cycle queued." } : response);
+      if (response.ok) router.refresh();
+    });
+  }
+
+  const safeToResume = online && statusCurrent && !active && !requiresIntervention
+    && isHuaxinOpen(refrigerationValue) && isHuaxinClosed(defrostValue) && formationPct === 100
+    && isHuaxinSalesBlocked(operatingValue);
+  const salesReady = statusCurrent && isHuaxinSalesReady(operatingValue);
+
+  function resumeSales() {
+    if (!confirm(`Resume customer sales on ${machineName} (${imei})? Refrigeration is on, defrost is off, and formation is 100%.`)) return;
+    setResult(null);
+    startTransition(async () => {
+      const response = await sendMachineCommand(imei, "operate_onsale");
+      setResult(response.ok ? { ok: true, message: "Resume-sales command accepted. Sync the machine to confirm it is selling." } : response);
       if (response.ok) router.refresh();
     });
   }
 
   const blockedReason = !deployed
     ? "Deploy this machine first."
+    : !online
+      ? "Machine offline. Restore its connection before starting a defrost cycle."
     : active?.state === "recovery"
       ? "Waiting for the cup anomaly to clear; physical defrost is not running."
       : active
@@ -73,7 +98,19 @@ export function DefrostRunPanel({ machineId, machineName, imei, deployed, durati
         </button>
       </div>
       {blockedReason && <p className="mt-2 text-xs font-semibold text-warning">{blockedReason}</p>}
-      {result && <p className={`mt-2 text-xs font-semibold ${result.ok ? "text-sage" : "text-danger"}`}>{result.ok ? "Defrost cycle queued." : result.error}</p>}
+      {(active || requiresIntervention || runs[0]?.state === "manual_intervention" || isHuaxinSalesBlocked(operatingValue)) && <div className="mt-4 rounded-lg border border-warning/40 bg-warning/10 p-3">
+        <p className="text-xs font-bold text-cocoa">Recovery status</p>
+        {active ? <p className="mt-1 text-xs text-cocoa">The automated workflow is still {STATE_LABELS[active.state]?.toLowerCase() ?? active.state}. Wait for it to finish before using manual controls.</p>
+          : requiresIntervention ? <p className="mt-1 text-xs text-cocoa">The workflow has stopped and the safety lock remains. Inspect the machine, then clear the intervention lock before resuming sales.</p>
+            : !online ? <p className="mt-1 text-xs text-cocoa">The workflow is finished and the lock is clear, but the machine is offline. Restore its power/network connection, use Sync machine, then resume sales here.</p>
+              : !statusCurrent ? <p className="mt-1 text-xs text-cocoa">The workflow is finished and the lock is clear. Sync the machine to obtain current hardware status before resuming sales.</p>
+                : salesReady ? <p className="mt-1 text-xs font-semibold text-sage">The workflow is finished, the lock is clear, and Huaxin confirms the machine is ready for sales.</p>
+                  : <p className="mt-1 text-xs text-cocoa">The workflow is finished and the lock is clear. Sales are still paused; resume them after verifying the machine is physically ready.</p>}
+        {!active && !requiresIntervention && !salesReady && <button type="button" onClick={resumeSales} disabled={pending || !safeToResume} className="mt-3 rounded-lg bg-sage px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">{pending ? "Resuming..." : "Resume sales"}</button>}
+        {!active && !requiresIntervention && !salesReady && !safeToResume && online && statusCurrent && <p className="mt-2 text-[11px] font-semibold text-danger">Resume is blocked until refrigeration is ON, defrost is OFF, and formation is 100%.</p>}
+        {safeToResume && <p className="mt-2 text-[11px] text-taupe">The command performs another live safety check before enabling sales.</p>}
+      </div>}
+      {result && <p className={`mt-2 text-xs font-semibold ${result.ok ? "text-sage" : "text-danger"}`}>{result.ok ? result.message : result.error}</p>}
       {active && (
         <div className={`mt-4 rounded-lg border px-3 py-3 ${active.state === "recovery" ? "border-danger/40 bg-danger/10" : "border-terracotta/30 bg-white"}`}>
           <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-bold text-cocoa">{STATE_LABELS[active.state] ?? active.state}</span><span className="text-[10px] uppercase tracking-wide text-taupe">{active.triggerKind} cycle</span></div>

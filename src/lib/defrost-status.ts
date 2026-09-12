@@ -40,3 +40,9 @@ export function defrostFormationPct(rows: DefrostStatusRow[]): number | null {
   const value = Number(raw.replace(/%$/, ""));
   return Number.isFinite(value) && value >= 0 && value <= 100 ? value : null;
 }
+
+export function isMachineStatusCurrent(online: boolean, observedAt: string | null, now = Date.now()): boolean {
+  if (!online || !observedAt) return false;
+  const observed = Date.parse(observedAt);
+  return Number.isFinite(observed) && observed <= now && now - observed <= 15 * 60_000;
+}

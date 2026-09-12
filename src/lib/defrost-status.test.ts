@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { defrostFormationPct, defrostStatusValue, isHuaxinClosed, isHuaxinCompressorOverheated, isHuaxinLowStock, isHuaxinOpen, isHuaxinSalesBlocked, isHuaxinSalesReady } from "./defrost-status.ts";
+import { defrostFormationPct, defrostStatusValue, isHuaxinClosed, isHuaxinCompressorOverheated, isHuaxinLowStock, isHuaxinOpen, isHuaxinSalesBlocked, isHuaxinSalesReady, isMachineStatusCurrent } from "./defrost-status.ts";
 
 const liveTestMachineStatuses = [
   { code: "status_0_ac", value: "Abrir" },
@@ -37,4 +37,12 @@ test("detects low stock and compressor overheat defrost blockers", () => {
   assert.equal(isHuaxinCompressorOverheated([{ code: "status_0_overhot", value: "Open" }]), true);
   assert.equal(isHuaxinCompressorOverheated([{ code: "status_0_code", value: "113-Compressor Overheat Protection" }]), true);
   assert.equal(isHuaxinCompressorOverheated([{ code: "status_0_overhot", value: "Close" }]), false);
+});
+
+test("hardware status is current only when the machine is online and recently observed", () => {
+  const now = Date.parse("2026-09-12T18:30:00Z");
+  assert.equal(isMachineStatusCurrent(true, "2026-09-12T18:20:00Z", now), true);
+  assert.equal(isMachineStatusCurrent(false, "2026-09-12T18:20:00Z", now), false);
+  assert.equal(isMachineStatusCurrent(true, "2026-09-12T18:00:00Z", now), false);
+  assert.equal(isMachineStatusCurrent(true, null, now), false);
 });

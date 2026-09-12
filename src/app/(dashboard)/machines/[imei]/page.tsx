@@ -39,7 +39,7 @@ import { getSessionProfile } from "@/lib/auth/session";
 import { getIncidents } from "@/lib/data/incidents";
 import { refillAge } from "@/lib/refill-aging";
 import { createRefillIncident } from "@/app/actions/incidents";
-import { defrostStatusValue, isHuaxinClosed, isHuaxinOpen } from "@/lib/defrost-status";
+import { defrostFormationPct, defrostStatusValue, isHuaxinClosed, isHuaxinOpen, isMachineStatusCurrent } from "@/lib/defrost-status";
 import { getAlerts } from "@/lib/data/alerts";
 import { DismissAlertButton } from "@/components/DismissAlertButton";
 
@@ -155,6 +155,9 @@ export default async function MachineDetailPage({
   const refrigerationOff = isHuaxinClosed(refrigerationValue);
   const physicalDefrostOn = isHuaxinOpen(physicalDefrostValue);
   const physicalDefrostOff = isHuaxinClosed(physicalDefrostValue);
+  const formationPct = defrostFormationPct(status);
+  const operatingValue = defrostStatusValue(status, "status_0_os");
+  const statusCurrent = isMachineStatusCurrent(online, telemetry?.status_observed_at ?? null);
   const activeDefrostRun = config?.defrostRuns.find((run) => ["scheduled", "thawing", "thaw_closed", "refrigeration_check", "forming", "sales_check", "recovery"].includes(run.state));
   const cupRecoveryActive = activeDefrostRun?.state === "recovery" && activeDefrostRun.failureDetail?.startsWith("cup_anomaly_wait:");
 
@@ -186,15 +189,15 @@ export default async function MachineDetailPage({
       </p>
 
       <section className="mb-6 grid gap-3 sm:grid-cols-2" aria-label="Refrigeration and physical defrost status">
-        <div className={`rounded-xl border p-4 ${refrigerationOn ? "border-sage/40 bg-sage/10" : refrigerationOff ? "border-danger/40 bg-danger/10" : "border-warning/40 bg-warning/10"}`}>
+        <div className={`rounded-xl border p-4 ${!statusCurrent ? "border-warning/40 bg-warning/10" : refrigerationOn ? "border-sage/40 bg-sage/10" : refrigerationOff ? "border-danger/40 bg-danger/10" : "border-warning/40 bg-warning/10"}`}>
           <p className={`text-[10px] font-bold uppercase tracking-wide ${refrigerationOn ? "text-sage" : refrigerationOff ? "text-danger" : "text-warning"}`}>Refrigeration</p>
-          <p className={`mt-1 font-display text-xl font-bold ${refrigerationOn ? "text-sage" : refrigerationOff ? "text-danger" : "text-warning"}`}>{refrigerationOn ? "ON" : refrigerationOff ? "OFF" : "UNKNOWN"}</p>
-          <p className="mt-1 text-xs text-taupe">Physical switch · Huaxin: {refrigerationValue ?? "not reported"}</p>
+          <p className={`mt-1 font-display text-xl font-bold ${statusCurrent && refrigerationOn ? "text-sage" : statusCurrent && refrigerationOff ? "text-danger" : "text-warning"}`}>{statusCurrent ? refrigerationOn ? "ON" : refrigerationOff ? "OFF" : "UNKNOWN" : "NOT CURRENT"}</p>
+          <p className="mt-1 text-xs text-taupe">{statusCurrent ? `Physical switch · Huaxin: ${refrigerationValue ?? "not reported"}` : online ? "Waiting for a fresh Huaxin status." : "Machine is offline; no current hardware status is available."}</p>
         </div>
-        <div className={`rounded-xl border p-4 ${physicalDefrostOff ? "border-sage/40 bg-sage/10" : physicalDefrostOn ? "border-danger/40 bg-danger/10" : "border-warning/40 bg-warning/10"}`}>
+        <div className={`rounded-xl border p-4 ${!statusCurrent ? "border-warning/40 bg-warning/10" : physicalDefrostOff ? "border-sage/40 bg-sage/10" : physicalDefrostOn ? "border-danger/40 bg-danger/10" : "border-warning/40 bg-warning/10"}`}>
           <p className={`text-[10px] font-bold uppercase tracking-wide ${physicalDefrostOff ? "text-sage" : physicalDefrostOn ? "text-danger" : "text-warning"}`}>Physical defrost</p>
-          <p className={`mt-1 font-display text-xl font-bold ${physicalDefrostOff ? "text-sage" : physicalDefrostOn ? "text-danger" : "text-warning"}`}>{physicalDefrostOff ? "OFF" : physicalDefrostOn ? "ON" : "UNKNOWN"}</p>
-          <p className="mt-1 text-xs text-taupe">Physical switch · Huaxin: {physicalDefrostValue ?? "not reported"}</p>
+          <p className={`mt-1 font-display text-xl font-bold ${statusCurrent && physicalDefrostOff ? "text-sage" : statusCurrent && physicalDefrostOn ? "text-danger" : "text-warning"}`}>{statusCurrent ? physicalDefrostOff ? "OFF" : physicalDefrostOn ? "ON" : "UNKNOWN" : "NOT CURRENT"}</p>
+          <p className="mt-1 text-xs text-taupe">{statusCurrent ? `Physical switch · Huaxin: ${physicalDefrostValue ?? "not reported"}` : online ? "Waiting for a fresh Huaxin status." : "Machine is offline; no current hardware status is available."}</p>
         </div>
       </section>
 
@@ -240,7 +243,7 @@ export default async function MachineDetailPage({
           <>
             <MachineConfigForm config={config} imei={imei} today={defaultTo} lastCleanDate={config.lastFullClean ? ymd(new Date(config.lastFullClean), tz) : ""} />
             {config.machineId && <WarehouseAssignmentPeriods config={config} imei={imei} today={defaultTo} />}
-            {config.machineId && config.defrostSchedule && <DefrostRunPanel machineId={config.machineId} machineName={config.displayName || config.name} imei={imei} deployed={config.deployed} durationMinutes={config.defrostSchedule.defrostMinutes} requiresIntervention={config.defrostSchedule.requiresIntervention} runs={config.defrostRuns} />}
+            {config.machineId && config.defrostSchedule && <DefrostRunPanel machineId={config.machineId} machineName={config.displayName || config.name} imei={imei} deployed={config.deployed} online={online} statusCurrent={statusCurrent} refrigerationValue={refrigerationValue} defrostValue={physicalDefrostValue} formationPct={formationPct} operatingValue={operatingValue} durationMinutes={config.defrostSchedule.defrostMinutes} requiresIntervention={config.defrostSchedule.requiresIntervention} runs={config.defrostRuns} />}
             {config.machineId && (
               <div className="mt-5 border-t border-line pt-4">
                 <h3 className="mb-3 text-[11px] uppercase tracking-wide text-taupe">Franchisee assignment &amp; profit share</h3>

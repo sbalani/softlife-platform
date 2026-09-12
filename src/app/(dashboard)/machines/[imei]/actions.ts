@@ -2,12 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { getConfigFromEnv, editDeviceMedia, huaxinMutationError, listDeviceProducts, pushDeviceSetting, pushProductDiy, refreshProduct, refreshResource, removeDeviceMedia, sendCommand, updateDeviceInfo } from "@/lib/huaxin/client";
+import { getConfigFromEnv, editDeviceMedia, getDeviceStatus, huaxinMutationError, listDeviceProducts, pushDeviceSetting, pushProductDiy, refreshProduct, refreshResource, removeDeviceMedia, sendCommand, updateDeviceInfo } from "@/lib/huaxin/client";
 import type { DiyPushItem } from "@/lib/huaxin/client";
 import { generateAllergenComposite } from "@/lib/allergens/composite";
 import { getSessionProfile } from "@/lib/auth/session";
 import type { SessionProfile } from "@/lib/auth/session";
-import { recordMachinePush, recordProductChange, recordRemoteCommand } from "@/lib/data/change-log";
+import { alertStatusSignals, recordMachinePush, recordMachineStatuses, recordProductChange, recordRemoteCommand } from "@/lib/data/change-log";
 import { syncMachineMedia } from "@/lib/data/machine-media";
 import { recordMachineClean } from "@/lib/data/clean-logs";
 import { cleanDay } from "@/lib/data/service-history-utils";
@@ -17,6 +17,7 @@ import { geocodeAddress } from "@/lib/geocode";
 import { translateLocation } from "@/lib/i18n/huaxin";
 import { parseMachineRefreshClaim } from "@/lib/data/huaxin-machine-refresh";
 import { inclusiveLocalDatePeriod, localDateTimeToUtc } from "@/lib/odoo-sync-contract";
+import { defrostFormationPct, defrostStatusValue, isHuaxinClosed, isHuaxinCompressorOverheated, isHuaxinLowStock, isHuaxinOpen, isHuaxinSalesReady } from "@/lib/defrost-status";
 
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
@@ -541,6 +542,21 @@ export async function sendMachineCommand(
     commandLease = true;
   }
   try {
+    if (command === "operate_onsale") {
+      const statuses = await getDeviceStatus(cfg, imei);
+      await recordMachineStatuses(service, machine, statuses);
+      const online = defrostStatusValue(statuses, "status_0_online_status")?.toLowerCase() === "online";
+      await service.from("machines").update({ is_online: online, huaxin_last_sync: new Date().toISOString() }).eq("id", machine.id);
+      const activeSignals = new Map(alertStatusSignals(statuses).map((signal) => [signal.field, signal.value]));
+      const cupBlocked = ["cup_empty", "cup_foreign_object", "cup_blocked", "cup_take_fault"].some((field) => activeSignals.get(field) === true);
+      if (!online) return { ok: false, error: "Machine is offline. Restore its connection before resuming sales." };
+      if (!isHuaxinOpen(defrostStatusValue(statuses, "status_0_ac")) || !isHuaxinClosed(defrostStatusValue(statuses, "status_0_thaw")) || defrostFormationPct(statuses) !== 100) {
+        return { ok: false, error: "Resume blocked: refrigeration must be on, defrost off, and formation at 100%." };
+      }
+      if (cupBlocked || isHuaxinCompressorOverheated(statuses) || isHuaxinLowStock(statuses)) {
+        return { ok: false, error: "Resume blocked by a live cup, stock, or compressor safety signal." };
+      }
+    }
     const result = await sendCommand(cfg, imei, command);
     const code = String(result.code);
     const msg = result.msg ?? "";
@@ -549,7 +565,17 @@ export async function sendMachineCommand(
     } catch (logError) {
       console.error("[remote-command] Could not write web command log:", logError);
     }
-    if (code === "200") return { ok: true, huaxinCode: code, huaxinMsg: msg || "success" };
+    if (code === "200") {
+      if (command === "operate_onsale") {
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
+        const statuses = await getDeviceStatus(cfg, imei);
+        await recordMachineStatuses(service, machine, statuses);
+        if (!isHuaxinSalesReady(defrostStatusValue(statuses, "status_0_os")) || !isHuaxinOpen(defrostStatusValue(statuses, "status_0_stock"))) {
+          return { ok: false, error: "Huaxin accepted the command but has not confirmed that sales resumed. Sync and retry when the machine is online.", huaxinCode: code, huaxinMsg: msg };
+        }
+      }
+      return { ok: true, huaxinCode: code, huaxinMsg: msg || "success" };
+    }
     return { ok: false, error: msg || "Command rejected", huaxinCode: code, huaxinMsg: msg };
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);

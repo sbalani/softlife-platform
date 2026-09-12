@@ -37,15 +37,16 @@ export function RemoteControls({ imei }: { imei: string }) {
       {results.length > 0 && (
         <div className="mt-3 space-y-1 rounded-lg bg-cream/50 p-3">
           <div className="mb-1 text-[10px] uppercase tracking-wide text-taupe">Command log</div>
-          {results.map((r, i) => (
-            <div key={i} className="flex items-center gap-2 text-xs">
-              <span className={r.ok ? "text-sage" : "text-danger"}>{r.ok ? "✓" : "✗"}</span>
+          {results.map((r, i) => {
+            const acceptedButUnconfirmed = !r.ok && r.huaxinCode === "200";
+            return <div key={i} className="flex items-start gap-2 text-xs">
+              <span className={r.ok ? "text-sage" : acceptedButUnconfirmed ? "text-warning" : "text-danger"}>{r.ok ? "✓" : acceptedButUnconfirmed ? "!" : "✗"}</span>
               <span className="font-semibold text-cocoa">{r.cmd}</span>
               <span className="text-taupe">
-                Huaxin: {r.huaxinCode ?? "—"} / {r.huaxinMsg ?? r.error ?? "—"}
+                {acceptedButUnconfirmed ? `Accepted by Huaxin, not confirmed: ${r.error}` : r.ok ? `Huaxin: ${r.huaxinCode ?? "—"} / ${r.huaxinMsg ?? "success"}` : r.error ?? `Huaxin: ${r.huaxinCode ?? "—"} / ${r.huaxinMsg ?? "failed"}`}
               </span>
-            </div>
-          ))}
+            </div>;
+          })}
         </div>
       )}
     </div>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyticsPresetRange, analyticsRange, canonicalProductCombination, dailyIncidentCounts, dailySalesTotals, filterAnalyticsOrders, machineSalesReport, salesTimeBreakdown, toppingConsumption } from "./analytics.ts";
+import { analyticsPresetRange, analyticsRange, canonicalProductCombination, dailyIncidentCounts, dailySalesTotals, filterAnalyticsOrders, machineSalesReport, resolveAnalyticsMachineId, salesTimeBreakdown, toppingConsumption } from "./analytics.ts";
 import type { Order } from "./data/orders.ts";
 
 test("analytics range creates an equal previous period", () => {
@@ -12,6 +12,14 @@ test("analytics range creates an equal previous period", () => {
     previousFrom: "2026-06-24",
     previousTo: "2026-06-30",
   });
+});
+
+test("analytics machine filters ignore empty and inaccessible IDs", () => {
+  const machines = [{ id: "00000000-0000-4000-8000-000000000001", imei: "123" }];
+  assert.equal(resolveAnalyticsMachineId({ machineId: "" }, machines), undefined);
+  assert.equal(resolveAnalyticsMachineId({ machineId: "not-a-uuid" }, machines), undefined);
+  assert.equal(resolveAnalyticsMachineId({ machineId: machines[0].id }, machines), machines[0].id);
+  assert.equal(resolveAnalyticsMachineId({ machine: "123" }, machines), machines[0].id);
 });
 
 test("daily incident counts use local days and zero-fill the sales range", () => {

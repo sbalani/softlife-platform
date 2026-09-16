@@ -14,6 +14,13 @@ export type AnalyticsParams = {
   weather?: string;
 };
 
+export function resolveAnalyticsMachineId(params: Pick<AnalyticsParams, "machineId" | "machine">, machines: { id: string; imei?: string | null }[]): string | undefined {
+  const requestedId = params.machineId?.trim();
+  if (requestedId) return machines.some((machine) => machine.id === requestedId) ? requestedId : undefined;
+  const legacyImei = params.machine?.trim();
+  return legacyImei ? machines.find((machine) => machine.imei === legacyImei)?.id : undefined;
+}
+
 export function shiftDay(value: string, days: number): string {
   return new Date(Date.parse(`${value}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 }

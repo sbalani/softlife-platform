@@ -1,6 +1,8 @@
 import type { SessionProfile } from "@/lib/auth/session";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export type SalesContextNote = {
   id: string;
   salesDate: string;
@@ -18,7 +20,7 @@ export type SalesContextNote = {
 export async function getSalesContextNotes(session: SessionProfile | null, from: string, to: string, machineId?: string): Promise<SalesContextNote[]> {
   if (!session || !isSupabaseConfigured() || !["admin", "franchisee"].includes(session.role)) return [];
   const { data, error } = await (await createServiceClient()).rpc("read_sales_context_notes", {
-    p_actor_id: session.id, p_from: from, p_to: to, p_machine_id: machineId ?? null,
+    p_actor_id: session.id, p_from: from, p_to: to, p_machine_id: machineId && UUID.test(machineId) ? machineId : null,
   });
   if (error) throw new Error(error.message);
   return ((data as Record<string, unknown>[]) ?? []).map((row) => ({

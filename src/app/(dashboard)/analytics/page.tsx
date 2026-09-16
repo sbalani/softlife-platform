@@ -7,7 +7,7 @@ import { getDisplayTimezone } from "@/lib/timezone";
 import { getAliasMap } from "@/lib/data/products";
 import { getSessionProfile } from "@/lib/auth/session";
 import { calculateFranchiseePayouts } from "@/lib/data/franchisee-profit";
-import { ANALYTICS_WEEKDAYS, analyticsPresetRange, analyticsRange, canonicalProductCombination, dailyIncidentCounts, dailySalesTotals, filterAnalyticsOrders, ordersInPeriod, salesTimeBreakdown, toppingConsumption, type AnalyticsParams, type AnalyticsPeriodPreset } from "@/lib/analytics";
+import { ANALYTICS_WEEKDAYS, analyticsPresetRange, analyticsRange, canonicalProductCombination, dailyIncidentCounts, dailySalesTotals, filterAnalyticsOrders, ordersInPeriod, resolveAnalyticsMachineId, salesTimeBreakdown, toppingConsumption, type AnalyticsParams, type AnalyticsPeriodPreset } from "@/lib/analytics";
 import { OrderDataNote } from "@/components/order-data-note";
 import { filterOrdersByMachinePeriods, getAccessibleMachinePeriods } from "@/lib/data/accessible-machines";
 import { getAnalyticsIncidents, getIncidentPolicies } from "@/lib/data/incidents";
@@ -67,7 +67,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     ...machines.map((machine) => [machine.id, { id: machine.id, name: machine.display_name || machine.name, imei: machine.device_imei }] as const),
     ...loadedOrders.flatMap((order) => order.machine_id ? [[order.machine_id, { id: order.machine_id, name: order.machine_name || "Historical machine", imei: order.device_imei } as const] as const] : []),
   ]).values()].sort((a, b) => a.name.localeCompare(b.name));
-  const selectedMachineId = params.machineId ?? machineOptions.find((machine) => machine.imei === params.machine)?.id;
+  const selectedMachineId = resolveAnalyticsMachineId(params, machineOptions);
   const selectedWeather = params.weather === "off" || params.weather === "rain" ? params.weather : "temperature";
   const currentMachineIds = machineAccess === null ? null : new Set(machineAccess.filter((period) => period.start_date <= range.to && (!period.end_date || period.end_date >= range.from)).map((period) => period.machine_id));
   const weatherMachines = machines.filter((machine) => (!selectedMachineId || machine.id === selectedMachineId) && (currentMachineIds === null || currentMachineIds.has(machine.id))).map((machine) => ({

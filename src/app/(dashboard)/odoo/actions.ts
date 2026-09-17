@@ -6,11 +6,16 @@ import { getSessionProfile } from "@/lib/auth/session";
 import { recordProductChange } from "@/lib/data/change-log";
 import { cancelUnconfirmedManufacturingPeriod, confirmManufacturingPeriod, prepareManufacturingPeriod } from "@/lib/data/odoo-production";
 import { inclusiveLocalDatePeriod, localDateTimeToUtc } from "@/lib/odoo-sync-contract";
+import { parseProductionRecipeAssignments } from "@/lib/production-recipe-assignments";
 
-export type OdooActionResult = { ok: boolean; error?: string };
+export type OdooActionResult = { ok: boolean; error?: string; message?: string };
 
 function actionError(error: unknown): OdooActionResult {
-  return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  if (error instanceof Error) return { ok: false, error: error.message };
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") {
+    return { ok: false, error: error.message };
+  }
+  return { ok: false, error: String(error) };
 }
 
 async function productionAdminClient() {
@@ -124,19 +129,15 @@ export async function resolveProductionLine(fd: FormData): Promise<void> {
 export async function resolveProductionOrdersToRecipe(_state: OdooActionResult | null, fd: FormData): Promise<OdooActionResult> {
   try {
     const s = await productionAdminClient();
-    const exportId = String(fd.get("export_id") ?? "");
-    const orderIds = [...new Set(fd.getAll("order_id").map(String))];
-    const recipeId = String(fd.get("recipe_id") ?? "");
-    if (!/^[0-9a-f-]{36}$/i.test(exportId) || !orderIds.length || orderIds.length > 200 || orderIds.some((id) => !/^[0-9a-f-]{36}$/i.test(id))
-      || !/^[0-9a-f-]{36}$/i.test(recipeId)) throw new Error("Invalid order recipe resolution.");
+    const { exportId, assignments, totalOrders } = parseProductionRecipeAssignments(fd);
     const actor = await getSessionProfile();
     if (!actor || actor.role !== "admin") throw new Error("Admin access required.");
-    const { error } = await s.rpc("resolve_production_orders_to_recipe", {
-      p_export_id: exportId, p_order_ids: orderIds, p_recipe_id: recipeId, p_actor_id: actor.id,
+    const { data, error } = await s.rpc("resolve_production_recipe_assignments", {
+      p_export_id: exportId, p_assignments: assignments, p_actor_id: actor.id,
     });
     if (error) throw error;
     revalidatePath("/odoo");
-    return { ok: true };
+    return { ok: true, message: `Applied ${Number(data ?? totalOrders)} orders across ${assignments.length} recipe assignment${assignments.length === 1 ? "" : "s"}.` };
   } catch (error) { return actionError(error); }
 }
 

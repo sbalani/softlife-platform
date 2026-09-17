@@ -49,29 +49,42 @@ function BlockedItems({ items, recipes, remediable, exportId }: { items: Record<
     group.items.push(item);
     recipeGroups.set(signature, group);
   }
+  const recipeNames = new Map(recipes.map((recipe) => [recipe.id, recipe.name]));
+  const groups = [...recipeGroups.entries()].map(([signature, group], index) => {
+    const manuallyResolved = group.evidence.filter((line) => line.mapping_method === "manual" && line.resolution_status === "resolved" && line.recipe_id);
+    const appliedRecipeId = manuallyResolved.length === 1 && group.evidence.every((line) => ["resolved", "ignored"].includes(String(line.resolution_status)))
+      ? String(manuallyResolved[0].recipe_id) : null;
+    return { ...group, signature, index, appliedRecipeId };
+  });
+  const pendingGroups = groups.filter((group) => !group.appliedRecipeId);
   return <div>
     <h4 className="font-bold text-warning">Blocked items</h4>
     <div className="mt-2 space-y-2">{items.map((item, index) => {
       const ownerId = String(item.blocking_export_id ?? "");
       const evidence = records(item.resolution_evidence);
-      return <div key={`${value(item.order_id)}-${index}`} className="rounded border border-warning/30 bg-warning/10 p-2 text-[11px] text-cocoa">
+      const appliedRecipe = evidence.find((line) => line.mapping_method === "manual" && line.resolution_status === "resolved" && line.recipe_id);
+      return <div key={`${value(item.order_id)}-${index}`} className={`rounded border p-2 text-[11px] text-cocoa ${appliedRecipe ? "border-sage/30 bg-sage/5" : "border-warning/30 bg-warning/10"}`}>
         <p className="font-semibold">{value(item.machine, "Unknown machine")} · order {value(item.order_code, value(item.order_id))}</p>
-        <p>{blockerMessage(item)}</p>
+        <p>{appliedRecipe ? `Durable assignment saved: ${value(appliedRecipe.recipe_name, String(appliedRecipe.recipe_id))}. This frozen preview remains unchanged.` : blockerMessage(item)}</p>
         {item.problem_code === "invalid_stock_conversion" && <p className="mt-1 text-taupe">Mirror value: {item.package_content_quantity == null ? "not present" : `1 unit = ${value(item.package_content_quantity)} ${value(item.package_content_uom)}`}. <Link href="#production-conversion" className="font-semibold underline">Review ingredient conversion</Link></p>}
         {evidence.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{evidence.map((line, lineIndex) => <span key={`${value(line.line_index)}-${lineIndex}`} className="rounded bg-white/70 px-1.5 py-0.5">{value(line.raw_name, "Unnamed line")} · position {value(line.raw_position)} → {value(line.recipe_name, value(line.ingredient_name, value(line.mapping_method)))}</span>)}</div>}
         {ownerId && <p className="mt-1">Owner run: <Link href={`#run-${ownerId}`} className="break-all font-mono font-semibold underline">{value(item.blocking_idempotency_key, ownerId)}</Link>{item.blocking_status ? ` (${value(item.blocking_status)})` : ""}</p>}
       </div>;
     })}</div>
-    {remediable && recipeGroups.size > 0 && <div className="mt-3 space-y-2">{[...recipeGroups.entries()].map(([signature, group]) => (
-      <OdooSaveForm action={resolveProductionOrdersToRecipe} key={signature} className="rounded-lg border border-terracotta/30 bg-white p-3">
-        <input type="hidden" name="export_id" value={exportId} />
-        {group.items.map((item) => <input key={String(item.order_id)} type="hidden" name="order_id" value={String(item.order_id)} />)}
-        <p className="font-semibold text-cocoa">Resolve {group.items.length} matching {value(group.items[0].machine, "machine")} order{group.items.length === 1 ? "" : "s"}</p>
+    {remediable && groups.length > 0 && <OdooSaveForm action={resolveProductionOrdersToRecipe} className="mt-3 space-y-2">
+      <input type="hidden" name="export_id" value={exportId} />
+      {groups.map((group) => <div key={group.signature} className={`rounded-lg border p-3 ${group.appliedRecipeId ? "border-sage/30 bg-sage/5" : "border-terracotta/30 bg-white"}`}>
+        <p className="font-semibold text-cocoa">{group.appliedRecipeId ? "Applied to" : "Resolve"} {group.items.length} matching {value(group.items[0].machine, "machine")} order{group.items.length === 1 ? "" : "s"}</p>
         <p className="mt-1 text-[10px] text-taupe">{group.evidence.map((line) => `${value(line.raw_name, "Unnamed line")} (position ${value(line.raw_position)})`).join(" + ") || "No line evidence available"}</p>
-        <div className="mt-2 flex gap-2"><select name="recipe_id" required defaultValue="" className="min-w-0 flex-1 rounded border border-line px-2 py-1.5"><option value="" disabled>Choose the complete recipe</option>{recipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}</select><button className="rounded bg-terracotta px-3 py-1.5 font-bold text-white">Apply to orders</button></div>
-        <p className="mt-1 text-[10px] text-warning">This fixes the durable sale resolution only. Then cancel this blocked preview and prepare a new one.</p>
-      </OdooSaveForm>
-    ))}</div>}
+        {group.appliedRecipeId ? <p className="mt-2 text-xs font-bold text-sage">Applied: {recipeNames.get(group.appliedRecipeId) ?? group.appliedRecipeId}</p> : <>
+          <input type="hidden" name="assignment_index" value={group.index} />
+          {group.items.map((item) => <input key={String(item.order_id)} type="hidden" name={`order_id_${group.index}`} value={String(item.order_id)} />)}
+          <div className="mt-2 flex gap-2"><select name={`recipe_id_${group.index}`} defaultValue="" className="min-w-0 flex-1 rounded border border-line px-2 py-1.5"><option value="">Choose the complete recipe</option>{recipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}</select><button name="apply_group" value={group.index} formNoValidate className="rounded bg-terracotta px-3 py-1.5 font-bold text-white">Apply this recipe</button></div>
+        </>}
+      </div>)}
+      {pendingGroups.length > 0 && <button className="w-full rounded bg-cocoa px-3 py-2 font-bold text-white">Apply all assigned recipes</button>}
+      <p className="text-[10px] text-warning">Applied assignments are durable. When all groups are applied, cancel this blocked preview and prepare a new one.</p>
+    </OdooSaveForm>}
   </div>;
 }
 

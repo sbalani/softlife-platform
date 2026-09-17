@@ -15,7 +15,7 @@ export function OdooSaveForm({
     <form action={formAction} className={className}>
       <fieldset disabled={pending} className="contents disabled:opacity-60">{children}</fieldset>
       <span aria-live="polite" className={`text-[10px] font-semibold ${result?.ok ? "text-sage" : "text-danger"}`}>
-        {pending ? "Saving..." : result?.ok ? "Saved." : result?.error ?? ""}
+        {pending ? "Saving..." : result?.ok ? result.message ?? "Saved." : result?.error ?? ""}
       </span>
     </form>
   );

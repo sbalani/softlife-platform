@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mergeRecipeVersionComponents, OdooContractError, parsePeriodInput, presentManufacturingExport, validateManufacturingResult } from "./odoo-production.ts";
+import { manufacturingSourceOrder, mergeRecipeVersionComponents, OdooContractError, parsePeriodInput, presentManufacturingExport, validateManufacturingResult } from "./odoo-production.ts";
 
 test("period requests freeze exact UTC boundaries and a deterministic fingerprint", () => {
   const input = parsePeriodInput({
@@ -53,7 +53,19 @@ test("accepted manufacturing results must cover every frozen warehouse", () => {
 });
 
 test("manufacturing responses expose the frozen payload contract version", () => {
-  const response = presentManufacturingExport({ id: "run", payload: { payload_contract_version: 2, warehouses: [] } });
+  const response = presentManufacturingExport({ id: "run", payload: { payload_contract_version: 2, manufacturing_contract_version: 2, warehouses: [] } });
   assert.equal(response.payload_contract_version, 2);
+  assert.equal(response.manufacturing_contract_version, 2);
   assert.equal(presentManufacturingExport({ id: "historical", payload: { warehouses: [] } }).payload_contract_version, 1);
+  assert.equal(presentManufacturingExport({ id: "historical", payload: { warehouses: [] } }).manufacturing_contract_version, 1);
+});
+
+test("manufacturing source references preserve order and machine provenance", () => {
+  assert.deepEqual(manufacturingSourceOrder({
+    id: "order-id", order_code: "S00124", machine_id: "machine-id", device_imei: "860000000000001",
+    machines: { name: "Flowers" },
+  }), {
+    platform_order_id: "order-id", order_code: "S00124", machine_id: "machine-id",
+    machine_imei: "860000000000001", machine_name: "Flowers",
+  });
 });

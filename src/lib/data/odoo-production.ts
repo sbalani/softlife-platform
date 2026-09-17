@@ -272,11 +272,23 @@ function resolveOrderLines(
 
 function orderSourceSnapshot(order: Record<string, unknown>) {
   return canonicalJson({
+    order_code: order.order_code,
     order_state: order.order_state, status_code: order.status_code, order_time: order.order_time,
     price: order.price, products: order.products, product_name: order.product_name, nums: order.nums,
     pay_type_raw: order.pay_type_raw, refund_status: order.refund_status, machine_id: order.machine_id,
     device_imei: order.device_imei, odoo_warehouse_id_at_sale: order.odoo_warehouse_id_at_sale, currency: order.currency,
+    machine_name: relation(order.machines)?.name ?? null,
   });
+}
+
+export function manufacturingSourceOrder(order: Record<string, unknown>) {
+  return {
+    platform_order_id: String(order.id),
+    order_code: String(order.order_code),
+    machine_id: order.machine_id == null ? null : String(order.machine_id),
+    machine_imei: order.device_imei == null ? null : String(order.device_imei),
+    machine_name: String(relation(order.machines)?.name ?? order.device_imei ?? "Unknown machine"),
+  };
 }
 
 async function createRecipeVersion(s: SupabaseClient, recipeId: string, machineId: string, context: {
@@ -502,7 +514,6 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       const warehouseId = Number(order.odoo_warehouse_id_at_sale);
       const warehouse = warehouseMap.get(warehouseId);
       if (!warehouseId || !warehouse) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "missing_warehouse_assignment" }); continue; }
-      if (!warehouse.sales_customer_odoo_id) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "missing_warehouse_customer", odoo_warehouse_id: warehouseId }); continue; }
       const currency = String(order.currency ?? settings.currency ?? "EUR");
       if (currency !== settings.currency) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "currency_mismatch", currency, expected_currency: settings.currency }); continue; }
       const versionResult = await createRecipeVersion(s, recipeId, machineId, { products: productsById, defaults, productOverrides, machineOverrides, cupOdooProductId: settings.cup_odoo_product_id == null ? null : Number(settings.cup_odoo_product_id) });
@@ -530,10 +541,11 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
         odoo_warehouse_id: warehouseId, odoo_customer_id: warehouse.sales_customer_odoo_id, warehouse_name: warehouse.name,
         recipe_id: recipeId, recipe_version_id: versionResult.version.id, version: versionResult.version.version,
         name: recipe.name, odoo_finished_product_id: recipe.odoo_finished_product_id, units_sold: 0, gross_sales: 0,
-        currency, components: versionResult.components,
+        currency, components: versionResult.components, source_orders: [],
       };
       current.units_sold = Number(current.units_sold) + Number(order.nums);
       current.gross_sales = Number(current.gross_sales) + Number(order.price ?? 0);
+      (current.source_orders as Record<string, unknown>[]).push(manufacturingSourceOrder(order));
       groups.set(groupKey, current);
     }
     if (resolutionRows.length) {
@@ -543,7 +555,7 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
     const warehouses = new Map<number, Record<string, unknown>>();
     for (const group of groups.values()) {
       const warehouseId = Number(group.odoo_warehouse_id);
-      const warehouse = warehouses.get(warehouseId) ?? { odoo_warehouse_id: warehouseId, odoo_customer_id: group.odoo_customer_id, recipes: [] };
+      const warehouse = warehouses.get(warehouseId) ?? { odoo_warehouse_id: warehouseId, odoo_customer_id: group.odoo_customer_id, source_orders: [], recipes: [] };
       const components = (group.components as { odoo_product_id: number; quantity: number; uom: string; stock_quantity: number; stock_uom: string; package_content_quantity: number | null; package_content_uom: string | null }[]).map((component) => ({
         odoo_product_id: component.odoo_product_id, quantity_per_unit: component.quantity,
         total_quantity: component.quantity * Number(group.units_sold), uom: component.uom,
@@ -551,10 +563,13 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
         stock_total_quantity: component.stock_quantity * Number(group.units_sold), stock_uom: component.stock_uom,
         package_content_quantity: component.package_content_quantity, package_content_uom: component.package_content_uom,
       }));
-      (warehouse.recipes as Record<string, unknown>[]).push({ ...group, components });
+      (warehouse.source_orders as Record<string, unknown>[]).push(...(group.source_orders as Record<string, unknown>[]));
+      const recipeGroup = { ...group };
+      delete recipeGroup.source_orders;
+      (warehouse.recipes as Record<string, unknown>[]).push({ ...recipeGroup, components });
       warehouses.set(warehouseId, warehouse);
     }
-    const payload = { payload_contract_version: 2, export_id: exportId, period_from: input.periodFrom, period_to: input.periodTo, time_zone: input.timeZone, document_date: input.documentDate, warehouses: [...warehouses.values()] };
+    const payload = { payload_contract_version: 2, manufacturing_contract_version: 2, export_id: exportId, period_from: input.periodFrom, period_to: input.periodTo, time_zone: input.timeZone, document_date: input.documentDate, warehouses: [...warehouses.values()] };
     const payloadHash = sha256(payload);
     const configSnapshot = { defaults: defaultsResult.data, product_overrides: [...productOverrides.entries()].map(([product_id, override]) => ({ product_id, ...override })), machine_overrides: machineOverridesResult.data, settings,
       resolved_products: products.map((product) => ({ id: product.id, odoo_id: product.odoo_id, odoo_product: relation(product.odoo_products) })),
@@ -563,7 +578,7 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
     const refreshedOrders = new Map<string, Record<string, unknown>>();
     for (let offset = 0; offset < claimableOrders.length; offset += 200) {
       const ids = claimableOrders.slice(offset, offset + 200).map((order) => String(order.id));
-      const { data, error } = await s.from("huaxin_orders").select("id,order_state,status_code,order_time,price,products,product_name,nums,pay_type_raw,refund_status,machine_id,device_imei,odoo_warehouse_id_at_sale,currency,export_version,export_content_hash").in("id", ids);
+      const { data, error } = await s.from("huaxin_orders").select("id,order_code,order_state,status_code,order_time,price,products,product_name,nums,pay_type_raw,refund_status,machine_id,device_imei,odoo_warehouse_id_at_sale,currency,export_version,export_content_hash,machines(name)").in("id", ids);
       if (error) throw error;
       for (const row of (data as Record<string, unknown>[]) ?? []) refreshedOrders.set(String(row.id), row);
     }
@@ -598,6 +613,7 @@ export function presentManufacturingExport(row: Record<string, unknown>) {
     export_id: row.id, idempotency_key: row.idempotency_key, initiated_by: row.initiated_by, status: row.status,
     period_from: row.period_from, period_to: row.period_to, time_zone: row.time_zone, document_date: row.document_date,
     payload_contract_version: payload.payload_contract_version ?? 1,
+    manufacturing_contract_version: payload.manufacturing_contract_version ?? 1,
     payload_sha256: row.payload_sha256, warehouses: payload.warehouses ?? [], blocked_items: row.blocked_reasons ?? [],
     odoo_result: row.odoo_result ?? null, created_at: row.created_at, updated_at: row.updated_at,
   };

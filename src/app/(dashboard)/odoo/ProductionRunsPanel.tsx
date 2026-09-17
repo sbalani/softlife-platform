@@ -126,7 +126,7 @@ function RunDetails({ run, displayTimeZone, recipes }: { run: Run; displayTimeZo
           <h4 className="font-bold text-cocoa">Frozen warehouse production</h4>
           {warehouses.length ? <div className="mt-2 space-y-3">{warehouses.map((warehouse, warehouseIndex) => (
             <div key={`${value(warehouse.odoo_warehouse_id)}-${warehouseIndex}`} className="rounded-lg bg-cream/60 p-3">
-              <p className="font-bold text-cocoa">Warehouse Odoo ID {value(warehouse.odoo_warehouse_id)} · Customer Odoo ID {value(warehouse.odoo_customer_id)}</p>
+              <p className="font-bold text-cocoa">Warehouse Odoo ID {value(warehouse.odoo_warehouse_id)} · Sales customer configured in Odoo</p>
               <div className="mt-2 space-y-2">{records(warehouse.recipes).map((recipe, recipeIndex) => (
                 <div key={`${value(recipe.recipe_version_id)}-${recipeIndex}`} className="rounded border border-line bg-white p-2">
                   <p className="font-semibold text-cocoa">{value(recipe.name, "Unnamed recipe")} · {value(recipe.units_sold, "0")} units · {value(recipe.gross_sales, "0")} {value(recipe.currency, "")}</p>

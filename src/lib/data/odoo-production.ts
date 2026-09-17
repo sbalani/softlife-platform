@@ -5,6 +5,7 @@ import {
 } from "../odoo-sync-contract.ts";
 import { convertPortionToStock } from "../production-units.ts";
 import { rankRecipeMatches, uniqueExactRecipe, type RecipeMatchCandidate } from "../recipe-matching.ts";
+import { buildManufacturingStockPreflight } from "../manufacturing-stock-preflight.ts";
 
 export class OdooContractError extends Error {
   status: number;
@@ -351,7 +352,7 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
   const { data: existing, error: existingError } = await s.from("manufacturing_period_exports").select("*").eq("idempotency_key", input.idempotencyKey).maybeSingle();
   if (existingError) throw existingError;
   if (existing && existing.request_fingerprint !== input.fingerprint) throw new OdooContractError("Idempotency key already exists with different boundaries", 409, "idempotency_conflict");
-  if (existing && ["draft", "ready", "processing", "completed", "cancelled"].includes(String(existing.status))) return presentManufacturingExport(existing as Record<string, unknown>);
+  if (existing && ["draft", "replenishment_planning", "replenishment_ready", "replenishment_failed", "ready", "processing", "completed", "cancelled"].includes(String(existing.status))) return presentManufacturingExport(existing as Record<string, unknown>);
   if (existing?.status === "failed" && existing.odoo_result) return presentManufacturingExport(existing as Record<string, unknown>);
   if (existing?.status === "preparing" && Date.now() - Date.parse(String(existing.updated_at)) < 5 * 60_000) return presentManufacturingExport(existing as Record<string, unknown>);
 
@@ -407,8 +408,8 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       machineIds.length ? s.from("machine_menu_recipe_assignments").select("machine_id,menu_kind,menu_position,recipe_id,valid_from,valid_to,recipes(name)").in("machine_id", machineIds).lt("valid_from", input.periodTo).or(`valid_to.is.null,valid_to.gt.${input.periodFrom}`) : Promise.resolve({ data: [], error: null }),
       s.from("production_consumption_defaults").select("consumption_type,quantity,uom"),
       machineIds.length ? s.from("machine_product_consumption_overrides").select("machine_id,product_id,quantity,uom").in("machine_id", machineIds) : Promise.resolve({ data: [], error: null }),
-      s.from("production_settings").select("cup_odoo_product_id,currency").eq("singleton", true).single(),
-      s.from("odoo_warehouses").select("odoo_id,name,sales_customer_odoo_id"),
+      s.from("production_settings").select("cup_odoo_product_id,currency,replenishment_source_odoo_warehouse_id").eq("singleton", true).single(),
+      s.from("odoo_warehouses").select("odoo_id,name,sales_customer_odoo_id,stock_location_id"),
       orders.length ? s.from("manufacturing_period_export_orders").select("order_id,export_id").in("order_id", orders.map((order) => order.id as string)).is("released_at", null) : Promise.resolve({ data: [], error: null }),
       machineIds.length ? s.from("menu_recipe_push_operations").select("machine_id,assignments").in("machine_id", machineIds).eq("status", "pending") : Promise.resolve({ data: [], error: null }),
     ]);
@@ -569,7 +570,53 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       (warehouse.recipes as Record<string, unknown>[]).push({ ...recipeGroup, components });
       warehouses.set(warehouseId, warehouse);
     }
-    const payload = { payload_contract_version: 2, manufacturing_contract_version: 2, export_id: exportId, period_from: input.periodFrom, period_to: input.periodTo, time_zone: input.timeZone, document_date: input.documentDate, warehouses: [...warehouses.values()] };
+    const warehousePayload = [...warehouses.values()];
+    let replenishment: Record<string, unknown> = { required: false, plan_complete: true, transfers: [], requirements: [], uncovered: [] };
+    if (blocked.length === 0) {
+      const sourceWarehouseId = Number(settings.replenishment_source_odoo_warehouse_id);
+      if (!Number.isInteger(sourceWarehouseId) || !warehouseMap.has(sourceWarehouseId)) {
+        blocked.push({ problem_code: "missing_replenishment_source", message: "Choose the central Odoo replenishment warehouse before preparing manufacturing." });
+      } else {
+        const destinationIds = [...warehouses.keys()];
+        const productIds = [...new Set(warehousePayload.flatMap((warehouse) => (warehouse.recipes as Record<string, unknown>[]).flatMap((recipe) =>
+          (recipe.components as Record<string, unknown>[]).map((component) => Number(component.odoo_product_id)))))];
+        const { data: snapshotData, error: snapshotError } = await s.rpc("get_manufacturing_stock_snapshot", {
+          p_source_warehouse_id: sourceWarehouseId,
+          p_warehouse_ids: [...new Set([sourceWarehouseId, ...destinationIds])],
+          p_product_ids: productIds,
+        });
+        if (snapshotError) throw snapshotError;
+        const snapshot = snapshotData as Record<string, unknown> | null;
+        const observedAt = snapshot?.observed_at == null ? null : String(snapshot.observed_at);
+        if (!observedAt || Date.now() - Date.parse(observedAt) > 2 * 60 * 60_000) {
+          blocked.push({ problem_code: "stock_snapshot_stale", message: "The Odoo warehouse stock snapshot is missing or more than two hours old. Sync stock before preparing manufacturing.", observed_at: observedAt });
+        } else {
+          replenishment = { ...buildManufacturingStockPreflight({
+            warehouses: warehousePayload,
+            productStock: ((snapshot?.product_stock as Record<string, unknown>[] | undefined) ?? []).map((row) => ({
+              odoo_warehouse_id: Number(row.odoo_warehouse_id), odoo_product_id: Number(row.odoo_product_id), available_quantity: Number(row.available_quantity),
+            })),
+            products: ((snapshot?.products as Record<string, unknown>[] | undefined) ?? []).map((row) => ({
+              odoo_id: Number(row.odoo_id), name: String(row.name), uom: row.uom == null ? null : String(row.uom),
+              tracking: String(row.tracking), uom_rounding: Number(row.uom_rounding),
+              package_content_uom: row.package_content_uom == null ? null : String(row.package_content_uom),
+              package_content_quantity: row.package_content_quantity == null ? null : Number(row.package_content_quantity),
+            })),
+            lotStock: ((snapshot?.lot_stock as Record<string, unknown>[] | undefined) ?? []).map((row) => ({
+              odoo_warehouse_id: Number(row.odoo_warehouse_id), odoo_lot_id: Number(row.odoo_lot_id), available_qty: Number(row.available_qty),
+              lot_name: String(row.lot_name ?? row.odoo_lot_id), expiration_date: row.expiration_date == null ? null : String(row.expiration_date),
+              odoo_product_id: Number(row.odoo_product_id),
+            })),
+            sourceWarehouseId, observedAt,
+          }), effective_date: input.localFrom.slice(0, 10) };
+          const uncovered = replenishment.uncovered as Record<string, unknown>[];
+          if (uncovered.length) blocked.push({
+            problem_code: "insufficient_replenishment_stock", message: "The central warehouse cannot cover every package-rounded shortage.", products: uncovered,
+          });
+        }
+      }
+    }
+    const payload = { payload_contract_version: 2, manufacturing_contract_version: 2, export_id: exportId, period_from: input.periodFrom, period_to: input.periodTo, time_zone: input.timeZone, document_date: input.documentDate, warehouses: warehousePayload, replenishment };
     const payloadHash = sha256(payload);
     const configSnapshot = { defaults: defaultsResult.data, product_overrides: [...productOverrides.entries()].map(([product_id, override]) => ({ product_id, ...override })), machine_overrides: machineOverridesResult.data, settings,
       resolved_products: products.map((product) => ({ id: product.id, odoo_id: product.odoo_id, odoo_product: relation(product.odoo_products) })),
@@ -614,8 +661,8 @@ export function presentManufacturingExport(row: Record<string, unknown>) {
     period_from: row.period_from, period_to: row.period_to, time_zone: row.time_zone, document_date: row.document_date,
     payload_contract_version: payload.payload_contract_version ?? 1,
     manufacturing_contract_version: payload.manufacturing_contract_version ?? 1,
-    payload_sha256: row.payload_sha256, warehouses: payload.warehouses ?? [], blocked_items: row.blocked_reasons ?? [],
-    odoo_result: row.odoo_result ?? null, created_at: row.created_at, updated_at: row.updated_at,
+    payload_sha256: row.payload_sha256, warehouses: payload.warehouses ?? [], replenishment: payload.replenishment ?? null, blocked_items: row.blocked_reasons ?? [],
+    replenishment_result: row.replenishment_result ?? null, odoo_result: row.odoo_result ?? null, created_at: row.created_at, updated_at: row.updated_at,
   };
 }
 
@@ -647,6 +694,107 @@ export async function confirmManufacturingPeriod(s: SupabaseClient, exportId: st
   const { data, error } = await s.rpc("confirm_manufacturing_export", { p_export_id: exportId, p_payload_sha256: hash, p_caller: caller });
   if (error) {
     if (["P0001", "P0002", "P0003", "P0005"].includes(error.code)) throw new OdooContractError(error.message, error.code === "P0005" ? 403 : 409, error.code === "P0002" ? "hash_mismatch" : error.code === "P0003" ? "order_changed" : error.code === "P0005" ? "wrong_initiator" : "invalid_status");
+    throw error;
+  }
+  return presentManufacturingExport(relation(data) ?? data as Record<string, unknown>);
+}
+
+export async function confirmManufacturingReplenishment(s: SupabaseClient, exportId: string, actorId: string, allocations: Record<string, unknown>[]) {
+  if (!/^[0-9a-f-]{36}$/i.test(exportId) || !/^[0-9a-f-]{36}$/i.test(actorId)) throw new OdooContractError("Valid export and actor IDs are required");
+  const { data: run, error } = await s.from("manufacturing_period_exports").select("status,payload").eq("id", exportId).maybeSingle();
+  if (error) throw error;
+  if (!run || run.status !== "replenishment_planning" || !run.payload) throw new OdooContractError("This run no longer has an editable replenishment plan", 409, "invalid_status");
+  const payload = run.payload as Record<string, unknown>;
+  const replenishment = payload.replenishment as Record<string, unknown> | null;
+  const requirements = ((replenishment?.requirements as Record<string, unknown>[] | undefined) ?? []).filter((row) => Number(row.transfer_quantity) > 0);
+  if (!replenishment?.required || requirements.length === 0) throw new OdooContractError("This run does not require replenishment", 409, "invalid_status");
+  if (!replenishment.observed_at || Date.now() - Date.parse(String(replenishment.observed_at)) > 2 * 60 * 60_000) {
+    throw new OdooContractError("The frozen stock snapshot is more than two hours old. Cancel this preview, sync Odoo stock, and prepare it again", 409, "stock_snapshot_stale");
+  }
+  const sourceWarehouseId = Number(replenishment.source_warehouse_id);
+  const allocationGroups = new Map<string, { odoo_lot_id: number; quantity: number }[]>();
+  for (const allocation of allocations) {
+    const destinationId = Number(allocation.destination_warehouse_id);
+    const productId = Number(allocation.odoo_product_id);
+    const lotId = Number(allocation.odoo_lot_id);
+    const quantity = Number(allocation.quantity);
+    if (![destinationId, productId, lotId].every((id) => Number.isInteger(id) && id > 0) || !Number.isFinite(quantity) || quantity <= 0) {
+      throw new OdooContractError("Every selected lot allocation must contain valid IDs and a positive quantity");
+    }
+    const key = `${destinationId}:${productId}`;
+    const rows = allocationGroups.get(key) ?? [];
+    if (rows.some((row) => row.odoo_lot_id === lotId)) throw new OdooContractError("A source lot can only appear once per transfer");
+    rows.push({ odoo_lot_id: lotId, quantity });
+    allocationGroups.set(key, rows);
+  }
+  const usedByLot = new Map<number, number>();
+  const transfers = requirements.map((requirement) => {
+    const destinationId = Number(requirement.destination_warehouse_id);
+    const productId = Number(requirement.odoo_product_id);
+    const quantity = Number(requirement.transfer_quantity);
+    const increment = Number(requirement.transfer_increment);
+    if (destinationId === sourceWarehouseId) throw new OdooContractError("The source warehouse cannot transfer stock to itself");
+    const lots = String(requirement.tracking) === "none" ? [] : allocationGroups.get(`${destinationId}:${productId}`) ?? [];
+    if (String(requirement.tracking) !== "none") {
+      const candidates = new Map(((requirement.lot_candidates as Record<string, unknown>[] | undefined) ?? []).map((candidate) => [Number(candidate.odoo_lot_id), Number(candidate.available_quantity)]));
+      if (Math.abs(lots.reduce((sum, lot) => sum + lot.quantity, 0) - quantity) > 1e-8) throw new OdooContractError(`Selected source lots for ${String(requirement.product_name)} must total ${quantity} ${String(requirement.stock_uom)}`);
+      for (const lot of lots) {
+        if (!candidates.has(lot.odoo_lot_id) || Math.abs(lot.quantity / increment - Math.round(lot.quantity / increment)) > 1e-8) {
+          throw new OdooContractError(`Invalid whole-unit lot allocation for ${String(requirement.product_name)}`);
+        }
+        usedByLot.set(lot.odoo_lot_id, (usedByLot.get(lot.odoo_lot_id) ?? 0) + lot.quantity);
+        if ((usedByLot.get(lot.odoo_lot_id) ?? 0) > Number(candidates.get(lot.odoo_lot_id)) + 1e-8) throw new OdooContractError(`Selected quantity exceeds source availability for lot ${lot.odoo_lot_id}`);
+      }
+    }
+    return {
+      transfer_key: `${sourceWarehouseId}:${destinationId}:${productId}`,
+      source_warehouse_id: sourceWarehouseId, destination_warehouse_id: destinationId,
+      odoo_product_id: productId, stock_uom: requirement.stock_uom, quantity, lots,
+    };
+  });
+  if (allocationGroups.size !== requirements.filter((row) => String(row.tracking) !== "none").length) throw new OdooContractError("The submitted lot allocations do not match the frozen shortage plan");
+  const updatedPayload = { ...payload, replenishment: { ...replenishment, plan_complete: true, transfers } };
+  const payloadHash = sha256(updatedPayload);
+  const { error: saveError } = await s.rpc("save_manufacturing_replenishment_plan", {
+    p_export_id: exportId, p_payload: updatedPayload, p_payload_sha256: payloadHash, p_actor_id: actorId,
+  });
+  if (saveError) throw saveError;
+  const { data: confirmed, error: confirmError } = await s.rpc("confirm_manufacturing_replenishment", {
+    p_export_id: exportId, p_payload_sha256: payloadHash, p_actor_id: actorId,
+  });
+  if (confirmError) throw confirmError;
+  return presentManufacturingExport(relation(confirmed) ?? confirmed as Record<string, unknown>);
+}
+
+export async function recordManufacturingReplenishmentResult(s: SupabaseClient, exportId: string, body: Record<string, unknown>) {
+  const hash = String(body.payload_sha256 ?? "");
+  if (!/^[0-9a-f-]{36}$/i.test(exportId) || !/^[0-9a-f]{64}$/i.test(hash)) throw new OdooContractError("Valid export ID and payload hash are required");
+  if (typeof body.accepted !== "boolean" || canonicalJson(body).length > 100_000) throw new OdooContractError("A bounded replenishment result with accepted boolean is required");
+  if (body.accepted === false && (!body.error || typeof body.error !== "object" && typeof body.error !== "string")) throw new OdooContractError("A structured error is required for rejected replenishment");
+  if (body.accepted === true && (!Array.isArray(body.picking_ids) || body.picking_ids.some((id) => !Number.isInteger(Number(id)) || Number(id) <= 0))) {
+    throw new OdooContractError("Accepted replenishment requires valid picking IDs");
+  }
+  if (body.accepted === true) {
+    const { data: run, error: runError } = await s.from("manufacturing_period_exports").select("payload").eq("id", exportId).maybeSingle();
+    if (runError) throw runError;
+    if (!run) throw new OdooContractError("Production run not found", 404, "not_found");
+    const expectedTransfers = ((((run.payload as Record<string, unknown> | null)?.replenishment as Record<string, unknown> | undefined)?.transfers as Record<string, unknown>[] | undefined) ?? []);
+    const expectedKeys = new Set(expectedTransfers.map((transfer) => String(transfer.transfer_key)));
+    const ids = (body.picking_ids as unknown[]).map(Number);
+    const transfers = Array.isArray(body.transfers) ? body.transfers as Record<string, unknown>[] : [];
+    const receivedKeys = transfers.map((transfer) => String(transfer.transfer_key ?? ""));
+    const transferIds = transfers.map((transfer) => Number(transfer.picking_id));
+    if (!expectedKeys.size || ids.length !== expectedKeys.size || new Set(ids).size !== expectedKeys.size
+      || transfers.length !== expectedKeys.size || new Set(receivedKeys).size !== expectedKeys.size
+      || receivedKeys.some((key) => !expectedKeys.has(key))
+      || transferIds.some((id) => !Number.isInteger(id) || id <= 0 || !ids.includes(id))
+      || new Set(transferIds).size !== expectedKeys.size) {
+      throw new OdooContractError("Accepted replenishment must identify one unique Odoo picking for every frozen transfer");
+    }
+  }
+  const { data, error } = await s.rpc("record_manufacturing_replenishment_result", { p_export_id: exportId, p_payload_sha256: hash, p_result: body });
+  if (error) {
+    if (["P0001", "P0002"].includes(error.code)) throw new OdooContractError(error.message, 409, error.code === "P0002" ? "hash_mismatch" : "result_conflict");
     throw error;
   }
   return presentManufacturingExport(relation(data) ?? data as Record<string, unknown>);

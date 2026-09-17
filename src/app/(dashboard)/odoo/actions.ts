@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth/session";
 import { recordProductChange } from "@/lib/data/change-log";
-import { cancelUnconfirmedManufacturingPeriod, confirmManufacturingPeriod, prepareManufacturingPeriod } from "@/lib/data/odoo-production";
+import { cancelUnconfirmedManufacturingPeriod, confirmManufacturingPeriod, confirmManufacturingReplenishment, prepareManufacturingPeriod } from "@/lib/data/odoo-production";
 import { inclusiveLocalDatePeriod, localDateTimeToUtc } from "@/lib/odoo-sync-contract";
 import { parseProductionRecipeAssignments } from "@/lib/production-recipe-assignments";
 
@@ -82,8 +82,14 @@ export async function saveProductionSettings(_state: OdooActionResult | null, fd
     const rawCupOdooProductId = String(fd.get("cup_odoo_product_id") ?? "").trim();
     const cupOdooProductId = rawCupOdooProductId ? Number(rawCupOdooProductId) : null;
     const currency = String(fd.get("currency") ?? "EUR").trim().toUpperCase();
-    if (cupOdooProductId !== null && (!Number.isInteger(cupOdooProductId) || cupOdooProductId <= 0) || !/^[A-Z]{3}$/.test(currency)) throw new Error("Invalid production settings.");
-    const { error } = await s.from("production_settings").update({ cup_odoo_product_id: cupOdooProductId, currency }).eq("singleton", true);
+    const rawSourceWarehouseId = String(fd.get("replenishment_source_odoo_warehouse_id") ?? "").trim();
+    const sourceWarehouseId = rawSourceWarehouseId ? Number(rawSourceWarehouseId) : null;
+    if (cupOdooProductId !== null && (!Number.isInteger(cupOdooProductId) || cupOdooProductId <= 0)
+      || sourceWarehouseId !== null && (!Number.isInteger(sourceWarehouseId) || sourceWarehouseId <= 0)
+      || !/^[A-Z]{3}$/.test(currency)) throw new Error("Invalid production settings.");
+    const { error } = await s.from("production_settings").update({
+      cup_odoo_product_id: cupOdooProductId, currency, replenishment_source_odoo_warehouse_id: sourceWarehouseId,
+    }).eq("singleton", true);
     if (error) throw error;
     revalidatePath("/odoo");
     return { ok: true };
@@ -151,7 +157,7 @@ export async function preparePlatformPeriod(fd: FormData): Promise<void> {
   const periodTo = localDateTimeToUtc(localTo, timeZone);
   const { data: active, error: activeError } = await s.from("manufacturing_period_exports").select("id,idempotency_key,status")
     .eq("initiated_by", "platform").eq("period_from", periodFrom).eq("period_to", periodTo)
-    .in("status", ["preparing", "draft", "blocked", "ready", "processing"]).limit(1).maybeSingle();
+    .in("status", ["preparing", "draft", "blocked", "replenishment_planning", "replenishment_ready", "replenishment_failed", "ready", "processing"]).limit(1).maybeSingle();
   if (activeError) throw activeError;
   if (active?.idempotency_key === `platform:${requestId}`) { revalidatePath("/odoo"); return; }
   if (active) throw new Error(`An active run already exists for these dates: ${active.idempotency_key} (${active.status}). Review or cancel it below.`);
@@ -163,6 +169,33 @@ export async function confirmPlatformPeriod(fd: FormData): Promise<void> {
   const s = await productionAdminClient();
   if (String(fd.get("release_acknowledgement") ?? "") !== "release_frozen_payload") throw new Error("Review and acknowledge the frozen payload before release.");
   await confirmManufacturingPeriod(s, String(fd.get("export_id") ?? ""), { payload_sha256: String(fd.get("payload_sha256") ?? "") }, "platform");
+  revalidatePath("/odoo");
+}
+
+export async function confirmPlatformReplenishment(fd: FormData): Promise<void> {
+  const s = await productionAdminClient();
+  const actor = await getSessionProfile();
+  if (!actor || actor.role !== "admin") throw new Error("Admin access required.");
+  if (String(fd.get("replenishment_acknowledgement") ?? "") !== "confirm_internal_transfers") throw new Error("Review and acknowledge the internal transfers before confirmation.");
+  const allocations: Record<string, unknown>[] = [];
+  for (const [name, rawValue] of fd.entries()) {
+    if (!name.startsWith("lot_quantity:")) continue;
+    const quantity = Number(rawValue);
+    if (!quantity) continue;
+    const [destinationWarehouseId, productId, lotId] = name.slice("lot_quantity:".length).split(":").map(Number);
+    allocations.push({ destination_warehouse_id: destinationWarehouseId, odoo_product_id: productId, odoo_lot_id: lotId, quantity });
+  }
+  await confirmManufacturingReplenishment(s, String(fd.get("export_id") ?? ""), actor.id, allocations);
+  revalidatePath("/odoo");
+}
+
+export async function retryPlatformReplenishment(fd: FormData): Promise<void> {
+  const s = await productionAdminClient();
+  const actor = await getSessionProfile();
+  if (!actor || actor.role !== "admin") throw new Error("Admin access required.");
+  if (String(fd.get("retry_acknowledgement") ?? "") !== "retry_same_transfers") throw new Error("Acknowledge the frozen transfer retry.");
+  const { error } = await s.rpc("retry_manufacturing_replenishment", { p_export_id: String(fd.get("export_id") ?? ""), p_actor_id: actor.id });
+  if (error) throw error;
   revalidatePath("/odoo");
 }
 

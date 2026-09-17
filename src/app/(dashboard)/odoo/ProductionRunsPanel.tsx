@@ -2,7 +2,7 @@ import Link from "next/link";
 import { formatDateTime } from "@/lib/dates";
 import type { ProductionAdminData } from "@/lib/data/odoo-production-admin";
 import { manufacturingOverlapGuidance } from "@/lib/manufacturing-overlap";
-import { cancelPlatformPeriod, confirmPlatformPeriod, preparePlatformPeriod, resolveProductionOrdersToRecipe } from "./actions";
+import { cancelPlatformPeriod, confirmPlatformPeriod, confirmPlatformReplenishment, preparePlatformPeriod, resolveProductionOrdersToRecipe, retryPlatformReplenishment } from "./actions";
 import { RunSubmitButton } from "./RunSubmitButton";
 import { OdooSaveForm } from "./OdooSaveForm";
 
@@ -16,6 +16,9 @@ const STATUS_COPY: Record<string, string> = {
   failed: "Odoo or preparation reported a failure. Review the result before retrying anything.",
   preparing: "The platform is still building the preview.",
   processing: "Odoo is processing this confirmed run. Do not submit it again.",
+  replenishment_failed: "Odoo rejected or rolled back the replenishment. Review the structured result before retrying.",
+  replenishment_planning: "Stock shortages require internal transfers. Select source lots and confirm replenishment before manufacturing.",
+  replenishment_ready: "Replenishment is confirmed and waiting for Odoo to complete every internal transfer.",
   ready: "Confirmed and released for Odoo processing. This does not mean manufacturing has completed.",
 };
 
@@ -105,7 +108,39 @@ function BlockedItems({ items, recipes, remediable, exportId }: { items: Record<
   </div>;
 }
 
-function RunDetails({ run, displayTimeZone, recipes }: { run: Run; displayTimeZone: string; recipes: { id: string; name: string }[] }) {
+function ReplenishmentPlan({ run, warehouseNames }: { run: Run; warehouseNames: Map<number, string> }) {
+  const replenishment = run.payload?.replenishment as Record<string, unknown> | undefined;
+  if (!replenishment?.required) return null;
+  const requirements = records(replenishment.requirements);
+  const shortages = requirements.filter((requirement) => Number(requirement.transfer_quantity) > 0);
+  return <div className="rounded-lg border border-terracotta/30 bg-terracotta/5 p-3">
+    <h4 className="font-bold text-cocoa">Package-rounded stock replenishment</h4>
+    <p className="mt-1 text-[11px] text-taupe">Snapshot {value(replenishment.observed_at)} · effective date {value(replenishment.effective_date)} · source {warehouseNames.get(Number(replenishment.source_warehouse_id)) ?? `Odoo warehouse ${value(replenishment.source_warehouse_id)}`}</p>
+    <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[760px] text-[10px]">
+      <thead className="text-left uppercase text-taupe"><tr><th className="py-1">Destination / product</th><th>Required</th><th>Available</th><th>Shortage</th><th>Transfer</th><th>Expected residual</th></tr></thead>
+      <tbody className="divide-y divide-line">{requirements.map((requirement) => <tr key={`${value(requirement.destination_warehouse_id)}:${value(requirement.odoo_product_id)}`}>
+        <td className="py-1.5 font-semibold text-cocoa">{warehouseNames.get(Number(requirement.destination_warehouse_id)) ?? value(requirement.destination_warehouse_id)} · {value(requirement.product_name)}</td>
+        <td>{value(requirement.required_quantity)} {value(requirement.stock_uom)}</td><td>{value(requirement.available_quantity)}</td><td>{value(requirement.shortage_quantity)}</td><td className="font-bold text-terracotta">{value(requirement.transfer_quantity)}</td><td>{value(requirement.expected_residual_quantity)}</td>
+      </tr>)}</tbody>
+    </table></div>
+    {run.status === "replenishment_planning" && <form action={confirmPlatformReplenishment} className="mt-3 space-y-3">
+      <input type="hidden" name="export_id" value={run.id} />
+      {shortages.filter((requirement) => String(requirement.tracking) !== "none").map((requirement) => <fieldset key={`${value(requirement.destination_warehouse_id)}:${value(requirement.odoo_product_id)}`} className="rounded border border-line bg-white p-2">
+        <legend className="px-1 font-bold text-cocoa">Select whole source units for {value(requirement.product_name)} to {warehouseNames.get(Number(requirement.destination_warehouse_id)) ?? value(requirement.destination_warehouse_id)} · total {value(requirement.transfer_quantity)} {value(requirement.stock_uom)}</legend>
+        <div className="mt-1 grid gap-2 sm:grid-cols-2">{records(requirement.lot_candidates).map((lot) => <label key={String(lot.odoo_lot_id)} className="rounded bg-cream px-2 py-1.5 text-taupe"><span className="block font-semibold text-cocoa">{value(lot.lot_name)} · {value(lot.available_quantity)} available</span><span className="text-[9px]">Expires {value(lot.expiration_date, "not recorded")}</span><input name={`lot_quantity:${value(requirement.destination_warehouse_id)}:${value(requirement.odoo_product_id)}:${value(lot.odoo_lot_id)}`} type="number" min="0" max={Number(lot.available_quantity)} step={Number(requirement.transfer_increment)} defaultValue="0" className="mt-1 w-full rounded border border-line px-2 py-1 text-cocoa" /></label>)}</div>
+      </fieldset>)}
+      <label className="flex items-start gap-2 text-[11px] font-semibold text-cocoa"><input type="checkbox" name="replenishment_acknowledgement" value="confirm_internal_transfers" required className="mt-0.5" />I reviewed the rounded transfer quantities, destinations, source lots, available stock, snapshot time, and historical document date. Create all internal transfers atomically in Odoo.</label>
+      <RunSubmitButton idle="Confirm replenishment transfers" pending="Confirming replenishment..." className="rounded bg-terracotta px-3 py-2 text-xs font-bold text-white" />
+    </form>}
+    {run.status === "replenishment_failed" && <form action={retryPlatformReplenishment} className="mt-3 rounded border border-warning/40 bg-warning/10 p-2">
+      <input type="hidden" name="export_id" value={run.id} />
+      <label className="flex items-start gap-2 text-[11px] text-cocoa"><input type="checkbox" name="retry_acknowledgement" value="retry_same_transfers" required className="mt-0.5" />Retry the exact frozen destinations, quantities, and lots. I verified the failure cause has been corrected in Odoo.</label>
+      <RunSubmitButton idle="Retry frozen replenishment" pending="Scheduling retry..." className="mt-2 rounded bg-warning px-3 py-2 text-xs font-bold text-white" />
+    </form>}
+  </div>;
+}
+
+function RunDetails({ run, displayTimeZone, recipes, warehouseNames }: { run: Run; displayTimeZone: string; recipes: { id: string; name: string }[]; warehouseNames: Map<number, string> }) {
   const warehouses = records(run.payload?.warehouses);
   return (
     <details className="mt-3 rounded-lg border border-line bg-white">
@@ -147,7 +182,9 @@ function RunDetails({ run, displayTimeZone, recipes }: { run: Run; displayTimeZo
           ))}</div> : <p className="mt-1 text-taupe">No warehouse production is present in this payload.</p>}
         </div>
 
+        <ReplenishmentPlan run={run} warehouseNames={warehouseNames} />
         {run.blocked_items.length > 0 && <BlockedItems items={run.blocked_items} recipes={recipes} remediable={run.status === "blocked" && run.initiated_by === "platform"} exportId={run.id} />}
+        {run.replenishment_result && <div><h4 className="font-bold text-cocoa">Odoo replenishment result</h4><pre className="mt-1 max-h-52 overflow-auto whitespace-pre-wrap rounded bg-cream p-2 text-[10px] text-cocoa">{JSON.stringify(run.replenishment_result, null, 2)}</pre></div>}
         {run.odoo_result && <div><h4 className="font-bold text-cocoa">Odoo result</h4><pre className="mt-1 max-h-52 overflow-auto whitespace-pre-wrap rounded bg-cream p-2 text-[10px] text-cocoa">{JSON.stringify(run.odoo_result, null, 2)}</pre></div>}
 
         {run.initiated_by === "platform" && run.status === "draft" && run.payload_sha256 && (
@@ -160,10 +197,10 @@ function RunDetails({ run, displayTimeZone, recipes }: { run: Run; displayTimeZo
             <RunSubmitButton idle="Confirm and release to Odoo" pending="Releasing to Odoo..." className="mt-3 rounded bg-cocoa px-3 py-2 text-xs font-bold text-white" />
           </form>
         )}
-        {run.initiated_by === "platform" && (run.status === "draft" || run.status === "blocked") && (
+        {run.initiated_by === "platform" && (run.status === "draft" || run.status === "blocked" || run.status === "replenishment_planning") && (
           <form action={cancelPlatformPeriod} className="rounded-lg border border-line p-3">
             <input type="hidden" name="export_id" value={run.id} />
-            <label className="flex items-start gap-2 text-[11px] text-cocoa"><input type="checkbox" name="cancel_acknowledgement" value="cancel_unconfirmed_preview" required className="mt-0.5" />{run.order_count ? "Cancel this unconfirmed preview and release its reserved orders." : "Remove this empty, unconfirmed preview."} Nothing will be sent to Odoo.</label>
+            <label className="flex items-start gap-2 text-[11px] text-cocoa"><input type="checkbox" name="cancel_acknowledgement" value="cancel_unconfirmed_preview" required className="mt-0.5" />{run.replenishment_result?.accepted === true ? "Cancel manufacturing and release its reserved orders. The completed Odoo internal transfers remain in place and are not reversed." : `${run.order_count ? "Cancel this unconfirmed preview and release its reserved orders." : "Remove this empty, unconfirmed preview."} Nothing will be sent to Odoo.`}</label>
             <RunSubmitButton idle={run.order_count ? "Cancel unconfirmed preview" : "Remove empty preview"} pending="Cancelling preview..." className="mt-2 rounded border border-line bg-white px-3 py-2 text-xs font-bold text-cocoa" />
           </form>
         )}
@@ -172,7 +209,8 @@ function RunDetails({ run, displayTimeZone, recipes }: { run: Run; displayTimeZo
   );
 }
 
-export function ProductionRunsPanel({ runs, timeZone, recipes }: { runs: Run[]; timeZone: string; recipes: { id: string; name: string }[] }) {
+export function ProductionRunsPanel({ runs, timeZone, recipes, warehouses }: { runs: Run[]; timeZone: string; recipes: { id: string; name: string }[]; warehouses: { odoo_id: number; name: string }[] }) {
+  const warehouseNames = new Map(warehouses.map((warehouse) => [warehouse.odoo_id, warehouse.name]));
   return (
     <div className="rounded-xl border border-line p-4">
       <h3 className="text-sm font-bold text-cocoa">Manufacturing runs</h3>
@@ -190,7 +228,7 @@ export function ProductionRunsPanel({ runs, timeZone, recipes }: { runs: Run[]; 
           <div className="flex flex-wrap items-center justify-between gap-2"><span className="break-all font-mono font-semibold text-cocoa">{run.idempotency_key}</span><span className="font-bold uppercase text-taupe">{run.status} · {run.initiated_by}</span></div>
           <p className="mt-1 font-semibold text-cocoa">{run.status === "blocked" && !run.order_count && run.blocked_items.length > 0 && run.blocked_items.every((item) => item.problem_code === "already_in_production_run") ? "This duplicate reserved no orders and sent nothing to Odoo. It can be removed safely." : STATUS_COPY[run.status] ?? "Review this run before taking another action."}</p>
           <p className="mt-1 text-taupe">{formatDateTime(run.period_from, run.time_zone)} to {formatDateTime(run.period_to, run.time_zone)} ({run.time_zone}, end exclusive) · {run.order_count} reserved order rows{run.blocked_items.length ? ` · ${run.blocked_items.length} blocker findings` : ""}</p>
-          <RunDetails run={run} displayTimeZone={timeZone} recipes={recipes} />
+          <RunDetails run={run} displayTimeZone={timeZone} recipes={recipes} warehouseNames={warehouseNames} />
         </div>
       ))}{!runs.length && <p className="text-sm text-taupe">No manufacturing runs prepared.</p>}</div>
     </div>

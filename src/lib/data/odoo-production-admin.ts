@@ -1,4 +1,6 @@
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { normalizeObservedName } from "@/lib/odoo-sync-contract";
+import { rankRecipeMatches, type RecipeMatchCandidate } from "@/lib/recipe-matching";
 
 export type ProductionAdminData = {
   available: boolean;
@@ -23,9 +25,9 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
   try {
     const s = await createServiceClient();
     const [products, odooProducts, recipes, defaults, settings, warehouses, pending, runs] = await Promise.all([
-      s.from("products").select("id,name,consumption_type,default_portion_size,default_portion_uom,odoo_id,odoo_products(uom,qty_available,package_content_quantity,package_content_uom),production_product_consumption_overrides(quantity,uom)").order("name"),
+      s.from("products").select("id,name,consumption_type,default_portion_size,default_portion_uom,odoo_id,product_aliases(alias,normalized_alias),odoo_products(uom,qty_available,package_content_quantity,package_content_uom),production_product_consumption_overrides(quantity,uom)").order("name"),
       s.from("odoo_products").select("odoo_id,name,sku,uom,package_content_quantity,package_content_uom").order("name"),
-      s.from("recipes").select("id,name").eq("active", true).order("name"),
+      s.from("recipes").select("id,name,recipe_components(product_id)").eq("active", true).order("name"),
       s.from("production_consumption_defaults").select("consumption_type,quantity,uom").order("consumption_type"),
       s.from("production_settings").select("cup_odoo_product_id,currency").eq("singleton", true).maybeSingle(),
       s.from("odoo_warehouses").select("odoo_id,name,sales_customer_odoo_id").order("name"),
@@ -57,6 +59,19 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
       };
     });
     const productionProductsById = new Map(productionProducts.map((product) => [product.id, product]));
+    const productsByName = new Map<string, string[]>();
+    for (const product of (products.data as unknown as Record<string, unknown>[]) ?? []) {
+      const aliases = objectRecords(product.product_aliases);
+      const keys = [normalizeObservedName(String(product.name)), ...aliases.map((alias) => String(alias.normalized_alias || normalizeObservedName(String(alias.alias))))];
+      for (const key of keys) {
+        const ids = productsByName.get(key) ?? [];
+        if (!ids.includes(String(product.id))) productsByName.set(key, [...ids, String(product.id)]);
+      }
+    }
+    const recipeCandidates: RecipeMatchCandidate[] = ((recipes.data as unknown as Record<string, unknown>[]) ?? []).map((recipe) => ({
+      id: String(recipe.id), name: String(recipe.name),
+      componentIds: objectRecords(recipe.recipe_components).map((component) => String(component.product_id)),
+    }));
     const blockedOrderIds = [...new Set(runRows.flatMap((run) => objectRecords(run.blocked_reasons)
       .filter((item) => item.problem_code === "already_in_production_run")
       .map((item) => String(item.order_id ?? ""))
@@ -103,7 +118,7 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
       available: true,
       products: productionProducts,
       odooProducts: odooProducts.data ?? [],
-      recipes: recipes.data ?? [],
+      recipes: recipeCandidates.map((recipe) => ({ id: recipe.id, name: recipe.name })),
       defaults: (defaults.data ?? []).map((row) => ({ ...row, quantity: Number(row.quantity) })),
       settings: settings.data,
       warehouses: warehouses.data ?? [],
@@ -127,6 +142,13 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
             const orderId = String(item.order_id ?? "");
             const owner = item.problem_code === "already_in_production_run" ? blockingRuns.get(orderId) : undefined;
             const ingredient = item.platform_product_id ? productionProductsById.get(String(item.platform_product_id)) : undefined;
+            const resolutionEvidence = item.problem_code === "missing_recipe" ? missingRecipeEvidence.get(orderId) ?? objectRecords(item.resolution_evidence) : [];
+            const inferredProductIds = resolutionEvidence.filter((line) => line.resolution_status !== "ignored").map((line) => {
+              if (line.platform_product_id) return String(line.platform_product_id);
+              const matches = productsByName.get(normalizeObservedName(String(line.raw_name ?? ""))) ?? [];
+              return matches.length === 1 ? matches[0] : null;
+            }).filter((id): id is string => Boolean(id));
+            const recipeSuggestions = rankRecipeMatches(inferredProductIds, recipeCandidates).slice(0, 5);
             return {
               ...item,
               ...(ingredient ? {
@@ -135,7 +157,10 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
                 package_content_quantity: ingredient.package_content_quantity,
                 package_content_uom: ingredient.package_content_uom,
               } : {}),
-              ...(item.problem_code === "missing_recipe" ? { resolution_evidence: missingRecipeEvidence.get(orderId) ?? item.resolution_evidence ?? [] } : {}),
+              ...(item.problem_code === "missing_recipe" ? {
+                resolution_evidence: resolutionEvidence,
+                recipe_suggestions: recipeSuggestions,
+              } : {}),
               ...(owner ? { blocking_export_id: owner.id, blocking_idempotency_key: owner.idempotency_key, blocking_status: owner.status } : {}),
             };
           }),

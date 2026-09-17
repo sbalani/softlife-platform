@@ -36,16 +36,17 @@ function blockerMessage(item: Record<string, unknown>) {
 }
 
 function BlockedItems({ items, recipes, remediable, exportId }: { items: Record<string, unknown>[]; recipes: { id: string; name: string }[]; remediable: boolean; exportId: string }) {
-  const recipeGroups = new Map<string, { items: Record<string, unknown>[]; evidence: Record<string, unknown>[] }>();
+  const recipeGroups = new Map<string, { items: Record<string, unknown>[]; evidence: Record<string, unknown>[]; suggestions: Record<string, unknown>[] }>();
   for (const item of items.filter((candidate) => candidate.problem_code === "missing_recipe" && candidate.order_id)) {
     const evidence = records(item.resolution_evidence);
+    const suggestions = records(item.recipe_suggestions);
     const signature = evidence.length
       ? `${value(item.machine)}:${evidence.map((line) => [
         value(line.raw_position), value(line.raw_name), value(line.mapping_method), value(line.resolution_status),
         value(line.platform_product_id), value(line.recipe_id),
       ].join(":")).sort().join("|")}`
       : String(item.order_id);
-    const group = recipeGroups.get(signature) ?? { items: [], evidence };
+    const group = recipeGroups.get(signature) ?? { items: [], evidence, suggestions };
     group.items.push(item);
     recipeGroups.set(signature, group);
   }
@@ -54,7 +55,8 @@ function BlockedItems({ items, recipes, remediable, exportId }: { items: Record<
     const manuallyResolved = group.evidence.filter((line) => line.mapping_method === "manual" && line.resolution_status === "resolved" && line.recipe_id);
     const appliedRecipeId = manuallyResolved.length === 1 && group.evidence.every((line) => ["resolved", "ignored"].includes(String(line.resolution_status)))
       ? String(manuallyResolved[0].recipe_id) : null;
-    return { ...group, signature, index, appliedRecipeId };
+    const suggestion = group.suggestions.find((candidate) => Number(candidate.confidence) >= 50 && recipeNames.has(String(candidate.recipe_id)));
+    return { ...group, signature, index, appliedRecipeId, suggestion };
   });
   const pendingGroups = groups.filter((group) => !group.appliedRecipeId);
   return <div>
@@ -79,7 +81,8 @@ function BlockedItems({ items, recipes, remediable, exportId }: { items: Record<
         {group.appliedRecipeId ? <p className="mt-2 text-xs font-bold text-sage">Applied: {recipeNames.get(group.appliedRecipeId) ?? group.appliedRecipeId}</p> : <>
           <input type="hidden" name="assignment_index" value={group.index} />
           {group.items.map((item) => <input key={String(item.order_id)} type="hidden" name={`order_id_${group.index}`} value={String(item.order_id)} />)}
-          <div className="mt-2 flex gap-2"><select name={`recipe_id_${group.index}`} defaultValue="" className="min-w-0 flex-1 rounded border border-line px-2 py-1.5"><option value="">Choose the complete recipe</option>{recipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}</select><button name="apply_group" value={group.index} formNoValidate className="rounded bg-terracotta px-3 py-1.5 font-bold text-white">Apply this recipe</button></div>
+          {group.suggestion && <p className="mt-2 text-[10px] font-semibold text-sage">Suggested at {value(group.suggestion.confidence)}% confidence: {value(group.suggestion.recipe_name)} · {value(group.suggestion.matched_components, "0")} matched, {value(group.suggestion.missing_components, "0")} missing, {value(group.suggestion.extra_components, "0")} extra</p>}
+          <div className="mt-2 flex gap-2"><select name={`recipe_id_${group.index}`} defaultValue={group.suggestion ? String(group.suggestion.recipe_id) : ""} className="min-w-0 flex-1 rounded border border-line px-2 py-1.5"><option value="">Choose the complete recipe</option>{recipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}</select><button name="apply_group" value={group.index} formNoValidate className="rounded bg-terracotta px-3 py-1.5 font-bold text-white">Confirm recipe</button></div>
         </>}
       </div>)}
       {pendingGroups.length > 0 && <button className="w-full rounded bg-cocoa px-3 py-2 font-bold text-white">Apply all assigned recipes</button>}

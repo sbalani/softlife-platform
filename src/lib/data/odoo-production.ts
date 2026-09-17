@@ -4,6 +4,7 @@ import {
   normalizeObservedName, productionDocumentDate, sha256, type SyncCursor,
 } from "../odoo-sync-contract.ts";
 import { convertPortionToStock } from "../production-units.ts";
+import { rankRecipeMatches, uniqueExactRecipe, type RecipeMatchCandidate } from "../recipe-matching.ts";
 
 export class OdooContractError extends Error {
   status: number;
@@ -388,8 +389,9 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
         existingResolutions.set(String(row.order_id), byLine);
       }
     }
-    const [productsResult, assignmentsResult, defaultsResult, machineOverridesResult, settingsResult, warehousesResult, membershipsResult, pendingPushesResult] = await Promise.all([
+    const [productsResult, recipesResult, assignmentsResult, defaultsResult, machineOverridesResult, settingsResult, warehousesResult, membershipsResult, pendingPushesResult] = await Promise.all([
       s.from("products").select("id,name,type,consumption_type,odoo_id,default_portion_size,default_portion_uom,updated_at,product_aliases(alias,normalized_alias),odoo_products(uom,package_content_quantity,package_content_uom),production_product_consumption_overrides(quantity,uom)"),
+      s.from("recipes").select("id,name,recipe_components(product_id)").eq("active", true),
       machineIds.length ? s.from("machine_menu_recipe_assignments").select("machine_id,menu_kind,menu_position,recipe_id,valid_from,valid_to,recipes(name)").in("machine_id", machineIds).lt("valid_from", input.periodTo).or(`valid_to.is.null,valid_to.gt.${input.periodFrom}`) : Promise.resolve({ data: [], error: null }),
       s.from("production_consumption_defaults").select("consumption_type,quantity,uom"),
       machineIds.length ? s.from("machine_product_consumption_overrides").select("machine_id,product_id,quantity,uom").in("machine_id", machineIds) : Promise.resolve({ data: [], error: null }),
@@ -398,7 +400,7 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       orders.length ? s.from("manufacturing_period_export_orders").select("order_id,export_id").in("order_id", orders.map((order) => order.id as string)).is("released_at", null) : Promise.resolve({ data: [], error: null }),
       machineIds.length ? s.from("menu_recipe_push_operations").select("machine_id,assignments").in("machine_id", machineIds).eq("status", "pending") : Promise.resolve({ data: [], error: null }),
     ]);
-    for (const result of [productsResult, assignmentsResult, defaultsResult, machineOverridesResult, settingsResult, warehousesResult, membershipsResult, pendingPushesResult]) if (result.error) throw result.error;
+    for (const result of [productsResult, recipesResult, assignmentsResult, defaultsResult, machineOverridesResult, settingsResult, warehousesResult, membershipsResult, pendingPushesResult]) if (result.error) throw result.error;
     if (!settingsResult.data) throw new OdooContractError("Production settings are unavailable", 503, "not_configured");
     const settings = settingsResult.data;
     const products = (productsResult.data as unknown as ProductRow[]) ?? [];
@@ -411,6 +413,11 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
         if (!matches.some((match) => match.id === product.id)) productsByName.set(key, [...matches, product]);
       }
     }
+    const recipeCandidates: RecipeMatchCandidate[] = ((recipesResult.data as unknown as Record<string, unknown>[]) ?? []).map((recipe) => ({
+      id: String(recipe.id),
+      name: String(recipe.name),
+      componentIds: ((recipe.recipe_components as Record<string, unknown>[] | null) ?? []).map((component) => String(component.product_id)),
+    }));
     const defaults = new Map(((defaultsResult.data as { consumption_type: string; quantity: number; uom: string }[]) ?? []).map((row) => [row.consumption_type, { quantity: Number(row.quantity), uom: row.uom }]));
     const productOverrides = new Map(products.flatMap((product) => {
       const override = relation(product.production_product_consumption_overrides);
@@ -465,8 +472,16 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       const activeResolutions = resolutions.filter((resolution) => resolution.status !== "ignored");
       const recipeIds = [...new Set(activeResolutions.map((resolution) => resolution.recipeId).filter((id): id is string => Boolean(id)))];
       const productIds = [...new Set(activeResolutions.map((resolution) => resolution.productId).filter((id): id is string => Boolean(id)))];
+      const inferredProductIds = activeResolutions.map((resolution) => {
+        if (resolution.productId) return resolution.productId;
+        const nameMatches = productsByName.get(resolution.normalizedName) ?? [];
+        return nameMatches.length === 1 ? nameMatches[0].id : null;
+      });
+      const recipeSuggestions = rankRecipeMatches(inferredProductIds.filter((id): id is string => Boolean(id)), recipeCandidates);
+      const exactRecipe = inferredProductIds.every((id): id is string => Boolean(id)) ? uniqueExactRecipe(recipeSuggestions) : null;
       let recipeId: string;
-      if (recipeIds.length === 1 && productIds.length === 0) recipeId = recipeIds[0];
+      if (exactRecipe) recipeId = exactRecipe.recipe_id;
+      else if (recipeIds.length === 1 && productIds.length === 0) recipeId = recipeIds[0];
       else if (recipeIds.length === 0 && activeResolutions.length > 0 && productIds.length === activeResolutions.length) {
         const displayName = productIds.map((id) => productsById.get(id)?.name).filter(Boolean).join(" + ");
         const { data, error } = await s.rpc("create_or_reuse_recipe", { p_product_ids: productIds, p_name: displayName });
@@ -480,6 +495,7 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
             platform_product_id: resolution.productId, ingredient_name: resolution.productId ? productsById.get(resolution.productId)?.name ?? null : null,
             recipe_id: resolution.recipeId,
           })),
+          recipe_suggestions: recipeSuggestions.slice(0, 5),
         });
         continue;
       }

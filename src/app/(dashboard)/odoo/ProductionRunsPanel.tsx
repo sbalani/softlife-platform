@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { formatDateTime } from "@/lib/dates";
 import type { ProductionAdminData } from "@/lib/data/odoo-production-admin";
+import { manufacturingOverlapGuidance } from "@/lib/manufacturing-overlap";
 import { cancelPlatformPeriod, confirmPlatformPeriod, preparePlatformPeriod, resolveProductionOrdersToRecipe } from "./actions";
 import { RunSubmitButton } from "./RunSubmitButton";
 import { OdooSaveForm } from "./OdooSaveForm";
@@ -36,6 +37,10 @@ function blockerMessage(item: Record<string, unknown>) {
 }
 
 function BlockedItems({ items, recipes, remediable, exportId }: { items: Record<string, unknown>[]; recipes: { id: string; name: string }[]; remediable: boolean; exportId: string }) {
+  const overlapRuns = new Map<string, Record<string, unknown>>();
+  for (const item of items.filter((candidate) => candidate.problem_code === "already_in_production_run" && candidate.blocking_export_id)) {
+    overlapRuns.set(String(item.blocking_export_id), item);
+  }
   const recipeGroups = new Map<string, { items: Record<string, unknown>[]; evidence: Record<string, unknown>[]; suggestions: Record<string, unknown>[] }>();
   for (const item of items.filter((candidate) => candidate.problem_code === "missing_recipe" && candidate.order_id)) {
     const evidence = records(item.resolution_evidence);
@@ -61,6 +66,15 @@ function BlockedItems({ items, recipes, remediable, exportId }: { items: Record<
   const pendingGroups = groups.filter((group) => !group.appliedRecipeId);
   return <div>
     <h4 className="font-bold text-warning">Blocked items</h4>
+    {[...overlapRuns.values()].map((item) => {
+      const guidance = manufacturingOverlapGuidance({
+        periodFrom: String(item.blocking_period_from ?? ""), periodTo: String(item.blocking_period_to ?? ""),
+        timeZone: String(item.blocking_time_zone ?? "Europe/Madrid"), status: String(item.blocking_status ?? ""),
+      });
+      return guidance && <p key={String(item.blocking_export_id)} className="mt-2 rounded border border-warning/40 bg-warning/10 p-2 text-[11px] font-semibold text-cocoa">
+        {guidance} Owner: <Link href={`#run-${String(item.blocking_export_id)}`} className="font-mono underline">{value(item.blocking_idempotency_key, String(item.blocking_export_id))}</Link> ({value(item.blocking_status)}).
+      </p>;
+    })}
     <div className="mt-2 space-y-2">{items.map((item, index) => {
       const ownerId = String(item.blocking_export_id ?? "");
       const evidence = records(item.resolution_evidence);

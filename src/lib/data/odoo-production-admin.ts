@@ -80,18 +80,21 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
       .filter((item) => item.problem_code === "missing_recipe")
       .map((item) => String(item.order_id ?? ""))
       .filter(Boolean)))];
-    const blockingRuns = new Map<string, { id: string; idempotency_key: string; status: string }>();
+    const blockingRuns = new Map<string, { id: string; idempotency_key: string; status: string; period_from: string; period_to: string; time_zone: string }>();
     for (let offset = 0; offset < blockedOrderIds.length; offset += 200) {
       const ownerResult = await s.from("manufacturing_period_export_orders")
-        .select("order_id,manufacturing_period_exports!inner(id,idempotency_key,status)")
+        .select("order_id,manufacturing_period_exports!inner(id,idempotency_key,status,period_from,period_to,time_zone)")
         .in("order_id", blockedOrderIds.slice(offset, offset + 200)).is("released_at", null);
       if (ownerResult.error) throw ownerResult.error;
       for (const row of (ownerResult.data as unknown as Record<string, unknown>[]) ?? []) {
         const owner = Array.isArray(row.manufacturing_period_exports) ? row.manufacturing_period_exports[0] : row.manufacturing_period_exports;
         if (owner && typeof owner === "object") blockingRuns.set(String(row.order_id), {
-          id: String((owner as Record<string, unknown>).id),
-          idempotency_key: String((owner as Record<string, unknown>).idempotency_key),
-          status: String((owner as Record<string, unknown>).status),
+           id: String((owner as Record<string, unknown>).id),
+           idempotency_key: String((owner as Record<string, unknown>).idempotency_key),
+           status: String((owner as Record<string, unknown>).status),
+           period_from: String((owner as Record<string, unknown>).period_from),
+           period_to: String((owner as Record<string, unknown>).period_to),
+           time_zone: String((owner as Record<string, unknown>).time_zone),
         });
       }
     }
@@ -161,7 +164,10 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
                 resolution_evidence: resolutionEvidence,
                 recipe_suggestions: recipeSuggestions,
               } : {}),
-              ...(owner ? { blocking_export_id: owner.id, blocking_idempotency_key: owner.idempotency_key, blocking_status: owner.status } : {}),
+              ...(owner ? {
+                blocking_export_id: owner.id, blocking_idempotency_key: owner.idempotency_key, blocking_status: owner.status,
+                blocking_period_from: owner.period_from, blocking_period_to: owner.period_to, blocking_time_zone: owner.time_zone,
+              } : {}),
             };
           }),
           odoo_result: row.odoo_result && typeof row.odoo_result === "object" ? row.odoo_result as Record<string, unknown> : null,

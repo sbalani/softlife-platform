@@ -18,6 +18,7 @@ export async function POST(request: Request) {
     return Response.json({ ok: true });
   } catch (error) {
     console.error("[odoo-stock-snapshot]", error);
-    return Response.json({ error: "Unable to replace stock snapshot" }, { status: 500 });
+    const detail = error && typeof error === "object" && "message" in error ? String(error.message) : "Unknown database error";
+    return Response.json({ error: `Unable to replace stock snapshot: ${detail}` }, { status: 500 });
   }
 }

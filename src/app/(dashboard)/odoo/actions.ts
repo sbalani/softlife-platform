@@ -96,6 +96,30 @@ export async function saveProductionSettings(_state: OdooActionResult | null, fd
   } catch (error) { return actionError(error); }
 }
 
+export async function requestOdooStockSync(_state: OdooActionResult | null, _fd: FormData): Promise<OdooActionResult> {
+  void _state;
+  void _fd;
+  try {
+    const s = await productionAdminClient();
+    const actor = await getSessionProfile();
+    if (!actor || actor.role !== "admin") throw new Error("Admin access required.");
+    const { data: active, error: activeError } = await s.from("odoo_sync_requests")
+      .select("id,status,requested_at").in("status", ["pending", "processing"]).eq("kind", "stock_snapshot").maybeSingle();
+    if (activeError) throw activeError;
+    if (active) {
+      revalidatePath("/odoo");
+      return { ok: true, message: `Sync already ${active.status}; Odoo will report the result here.` };
+    }
+    const { error } = await s.from("odoo_sync_requests").insert({ kind: "stock_snapshot", requested_by: actor.id });
+    if (error) {
+      if (error.code === "23505") return { ok: true, message: "A stock sync is already queued." };
+      throw error;
+    }
+    revalidatePath("/odoo");
+    return { ok: true, message: "Full Odoo sync queued. The connector polls within one minute; refresh this page for its result." };
+  } catch (error) { return actionError(error); }
+}
+
 export async function saveWarehouseCustomer(_state: OdooActionResult | null, fd: FormData): Promise<OdooActionResult> {
   try {
     const s = await productionAdminClient();

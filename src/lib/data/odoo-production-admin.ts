@@ -10,11 +10,18 @@ export type ProductionAdminData = {
   defaults: { consumption_type: string; quantity: number; uom: string }[];
   settings: { cup_odoo_product_id: number | null; currency: string; replenishment_source_odoo_warehouse_id: number | null } | null;
   warehouses: { odoo_id: number; name: string; sales_customer_odoo_id: number | null; stock_location_id: number | null }[];
+  stockSnapshot: {
+    checkedAt: string;
+    warehouseProductObservedAt: string | null; lotStockObservedAt: string | null;
+    warehouseProductRows: number; lotStockRows: number; products: number; trackedProducts: number; warehouses: number;
+    warehouseRows: { odoo_warehouse_id: number; name: string; stock_location_id: number | null; product_rows: number; lot_rows: number }[];
+    latestRequest: { id: string; status: string; requested_at: string; claimed_at: string | null; completed_at: string | null; attempts: number; result: Record<string, unknown> | null; error: string | null } | null;
+  } | null;
   pending: { id: string; order_id: string; line_index: number; raw_name: string | null; normalized_name: string | null; raw_position: string | null; menu_kind: string | null; problem_code: string | null; order_code: string | null; order_time: string | null; machine_name: string | null }[];
   runs: { id: string; idempotency_key: string; initiated_by: string; status: string; period_from: string; period_to: string; time_zone: string; document_date: string; payload_sha256: string | null; payload: Record<string, unknown> | null; blocked_items: Record<string, unknown>[]; replenishment_result: Record<string, unknown> | null; odoo_result: Record<string, unknown> | null; order_count: number; created_at: string; replenishment_confirmed_at: string | null; confirmed_at: string | null; updated_at: string }[];
 };
 
-const empty: ProductionAdminData = { available: false, products: [], odooProducts: [], recipes: [], defaults: [], settings: null, warehouses: [], pending: [], runs: [] };
+const empty: ProductionAdminData = { available: false, products: [], odooProducts: [], recipes: [], defaults: [], settings: null, warehouses: [], stockSnapshot: null, pending: [], runs: [] };
 
 function objectRecords(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object") : [];
@@ -24,17 +31,19 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
   if (!isSupabaseConfigured() || !process.env.SUPABASE_SERVICE_ROLE_KEY) return empty;
   try {
     const s = await createServiceClient();
-    const [products, odooProducts, recipes, defaults, settings, warehouses, pending, runs] = await Promise.all([
+    const [products, odooProducts, recipes, defaults, settings, warehouses, snapshot, latestRequest, pending, runs] = await Promise.all([
       s.from("products").select("id,name,consumption_type,default_portion_size,default_portion_uom,odoo_id,product_aliases(alias,normalized_alias),odoo_products(uom,qty_available,package_content_quantity,package_content_uom),production_product_consumption_overrides(quantity,uom)").order("name"),
       s.from("odoo_products").select("odoo_id,name,sku,uom,package_content_quantity,package_content_uom").order("name"),
       s.from("recipes").select("id,name,recipe_components(product_id)").eq("active", true).order("name"),
       s.from("production_consumption_defaults").select("consumption_type,quantity,uom").order("consumption_type"),
       s.from("production_settings").select("cup_odoo_product_id,currency,replenishment_source_odoo_warehouse_id").eq("singleton", true).maybeSingle(),
       s.from("odoo_warehouses").select("odoo_id,name,sales_customer_odoo_id,stock_location_id").order("name"),
+      s.rpc("get_odoo_stock_snapshot_diagnostics"),
+      s.from("odoo_sync_requests").select("id,status,requested_at,claimed_at,completed_at,attempts,result,error").order("requested_at", { ascending: false }).limit(1).maybeSingle(),
       s.from("order_product_resolutions").select("id,order_id,line_index,raw_name,normalized_name,raw_position,menu_kind,problem_code,huaxin_orders(order_code,order_time,machines(name))").eq("resolution_status", "pending").order("created_at").limit(100),
       s.from("manufacturing_period_exports").select("id,idempotency_key,initiated_by,status,period_from,period_to,time_zone,document_date,payload_sha256,payload,blocked_reasons,replenishment_result,odoo_result,created_at,replenishment_confirmed_at,confirmed_at,updated_at,manufacturing_period_export_orders(count)").is("manufacturing_period_export_orders.released_at", null).order("created_at", { ascending: false }).limit(50),
     ]);
-    for (const result of [products, odooProducts, recipes, defaults, settings, warehouses, pending, runs]) if (result.error) throw result.error;
+    for (const result of [products, odooProducts, recipes, defaults, settings, warehouses, snapshot, latestRequest, pending, runs]) if (result.error) throw result.error;
     const defaultsByType = new Map((defaults.data ?? []).map((row) => [row.consumption_type, row]));
     const runRows = (runs.data as unknown as Record<string, unknown>[]) ?? [];
     const productionProducts = (products.data as unknown as Record<string, unknown>[] ?? []).map((row) => {
@@ -125,6 +134,28 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
       defaults: (defaults.data ?? []).map((row) => ({ ...row, quantity: Number(row.quantity) })),
       settings: settings.data,
       warehouses: warehouses.data ?? [],
+      stockSnapshot: snapshot.data && typeof snapshot.data === "object" ? {
+        checkedAt: String(snapshot.data.checked_at),
+        warehouseProductObservedAt: snapshot.data.warehouse_product_observed_at == null ? null : String(snapshot.data.warehouse_product_observed_at),
+        lotStockObservedAt: snapshot.data.lot_stock_observed_at == null ? null : String(snapshot.data.lot_stock_observed_at),
+        warehouseProductRows: Number(snapshot.data.warehouse_product_rows ?? 0),
+        lotStockRows: Number(snapshot.data.lot_stock_rows ?? 0),
+        products: Number(snapshot.data.products ?? 0), trackedProducts: Number(snapshot.data.tracked_products ?? 0),
+        warehouses: Number(snapshot.data.warehouses ?? 0),
+        warehouseRows: objectRecords(snapshot.data.warehouse_rows).map((row) => ({
+          odoo_warehouse_id: Number(row.odoo_warehouse_id), name: String(row.name),
+          stock_location_id: row.stock_location_id == null ? null : Number(row.stock_location_id),
+          product_rows: Number(row.product_rows ?? 0), lot_rows: Number(row.lot_rows ?? 0),
+        })),
+        latestRequest: latestRequest.data ? {
+          id: String(latestRequest.data.id), status: String(latestRequest.data.status), requested_at: String(latestRequest.data.requested_at),
+          claimed_at: latestRequest.data.claimed_at == null ? null : String(latestRequest.data.claimed_at),
+          completed_at: latestRequest.data.completed_at == null ? null : String(latestRequest.data.completed_at),
+          attempts: Number(latestRequest.data.attempts),
+          result: latestRequest.data.result && typeof latestRequest.data.result === "object" ? latestRequest.data.result as Record<string, unknown> : null,
+          error: latestRequest.data.error == null ? null : String(latestRequest.data.error),
+        } : null,
+      } : null,
       pending: (pending.data as unknown as Record<string, unknown>[] ?? []).map((row) => {
         const order = Array.isArray(row.huaxin_orders) ? row.huaxin_orders[0] : row.huaxin_orders as Record<string, unknown> | null;
         const machine = order && (Array.isArray(order.machines) ? order.machines[0] : order.machines) as Record<string, unknown> | null;

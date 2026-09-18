@@ -7,6 +7,7 @@ import { getProductionAdminData } from "@/lib/data/odoo-production-admin";
 import { resolveProductionLine, saveProductionDefault, saveProductionProduct, saveProductionSettings } from "./actions";
 import { ProductionRunsPanel } from "./ProductionRunsPanel";
 import { OdooSaveForm } from "./OdooSaveForm";
+import { StockSnapshotPanel } from "./StockSnapshotPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,8 @@ export default async function OdooPage() {
           Odoo is the system of record for this data — the platform only reads it here.
         </p>
       </header>
+
+      <StockSnapshotPanel snapshot={production.stockSnapshot} timeZone={tz} sourceWarehouseId={production.settings?.replenishment_source_odoo_warehouse_id ?? null} />
 
       <section className="mb-8 rounded-2xl border border-line bg-white p-5">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">

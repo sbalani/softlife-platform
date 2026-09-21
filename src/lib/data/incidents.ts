@@ -29,7 +29,7 @@ export type Incident = {
   locationText: string | null;
   incidentType: string;
   typeLabel: string;
-  sourceKind: "alert" | "schedule" | "manual";
+  sourceKind: "alert" | "schedule" | "manual" | "public";
   sourceAlertId: string | null;
   sourceAlertResolvedAt: string | null;
   title: string;
@@ -50,6 +50,15 @@ export type Incident = {
   closingActionReportId: string | null;
   overdue: boolean;
   events: IncidentEvent[];
+  publicReport: PublicIncidentReport | null;
+};
+
+export type PublicIncidentReport = {
+  reporterName: string;
+  phone: string | null;
+  email: string | null;
+  contactConsent: boolean;
+  attachments: { id: string; kind: "audio" | "image" | "video"; name: string }[];
 };
 
 export type IncidentPolicy = {
@@ -70,7 +79,7 @@ function relation(row: Record<string, unknown>, key: string) {
   return (Array.isArray(value) ? value[0] : value) as Record<string, unknown> | null;
 }
 
-function presentIncident(row: Record<string, unknown>, events: IncidentEvent[]): Incident {
+function presentIncident(row: Record<string, unknown>, events: IncidentEvent[], publicReport: PublicIncidentReport | null): Incident {
   const machine = relation(row, "machines");
   const warehouse = relation(row, "odoo_warehouses");
   const owner = relation(row, "owning_tenant");
@@ -109,6 +118,7 @@ function presentIncident(row: Record<string, unknown>, events: IncidentEvent[]):
     closingActionReportId: row.closing_action_report_id as string | null,
     overdue: Boolean(row.due_at) && Date.parse(row.due_at as string) < Date.now(),
     events,
+    publicReport,
   };
 }
 
@@ -135,6 +145,7 @@ export async function getIncidents(session: SessionProfile, options: { machineId
 
   const ids = rows.map((row) => row.id as string);
   const eventsByIncident = new Map<string, IncidentEvent[]>();
+  const publicReportsByIncident = new Map<string, PublicIncidentReport>();
   if (ids.length) {
     const { data, error } = await s.from("incident_events")
       .select("id,incident_id,event_type,from_status,to_status,message,created_at,profiles(full_name,email)")
@@ -155,7 +166,36 @@ export async function getIncidents(session: SessionProfile, options: { machineId
       eventsByIncident.set(incidentId, [...(eventsByIncident.get(incidentId) ?? []), event]);
     }
   }
-  return rows.map((row) => presentIncident(row, eventsByIncident.get(row.id as string) ?? []));
+  if (ids.length && session.role !== "franchisee") {
+    const { data: reports, error } = await s.from("public_incident_submissions")
+      .select("id,incident_id,reporter_name,phone,email,contact_consent")
+      .in("incident_id", ids);
+    if (error) throw error;
+    const reportRows = (reports as Record<string, unknown>[]) ?? [];
+    const reportIds = reportRows.map((report) => report.id as string);
+    const attachmentsBySubmission = new Map<string, PublicIncidentReport["attachments"]>();
+    if (reportIds.length) {
+      const { data: attachments, error: attachmentError } = await s.from("public_incident_attachments")
+        .select("id,submission_id,kind,original_name").in("submission_id", reportIds).not("completed_at", "is", null).order("created_at");
+      if (attachmentError) throw attachmentError;
+      for (const attachment of (attachments as Record<string, unknown>[]) ?? []) {
+        const submissionId = attachment.submission_id as string;
+        attachmentsBySubmission.set(submissionId, [...(attachmentsBySubmission.get(submissionId) ?? []), {
+          id: attachment.id as string,
+          kind: attachment.kind as "audio" | "image" | "video",
+          name: attachment.original_name as string,
+        }]);
+      }
+    }
+    for (const report of reportRows) publicReportsByIncident.set(report.incident_id as string, {
+      reporterName: report.reporter_name as string,
+      phone: report.phone as string | null,
+      email: report.email as string | null,
+      contactConsent: Boolean(report.contact_consent),
+      attachments: attachmentsBySubmission.get(report.id as string) ?? [],
+    });
+  }
+  return rows.map((row) => presentIncident(row, eventsByIncident.get(row.id as string) ?? [], publicReportsByIncident.get(row.id as string) ?? null));
 }
 
 export async function getIncidentPolicies(): Promise<IncidentPolicy[]> {

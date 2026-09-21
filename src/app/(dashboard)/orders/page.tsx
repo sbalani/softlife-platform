@@ -5,10 +5,12 @@ import { formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { analyticsRange } from "@/lib/analytics";
 import { getMachines } from "@/lib/data/machines";
+import { filterOrdersByMachinePeriods, getAccessibleMachinePeriods } from "@/lib/data/accessible-machines";
+import { getSessionProfile } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = { dateFrom?: string; dateTo?: string; machine?: string; minPrice?: string; maxPrice?: string; couponOnly?: string; refundedOnly?: string; serverModeOnly?: string };
+type SearchParams = { dateFrom?: string; dateTo?: string; machineId?: string; minPrice?: string; maxPrice?: string; couponOnly?: string; refundedOnly?: string; serverModeOnly?: string };
 
 const STATE_TONE: Record<string, string> = {
   COMPLETE: "bg-sage/15 text-sage",
@@ -21,20 +23,29 @@ const input = "rounded-lg border border-line bg-white px-3 py-2 text-sm text-coc
 const label = "mb-1 block text-[11px] uppercase tracking-wide text-taupe";
 
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const sp = await searchParams;
-  const [tz, { machines }] = await Promise.all([getDisplayTimezone(), getMachines()]);
+  const [sp, tz, session] = await Promise.all([searchParams, getDisplayTimezone(), getSessionProfile()]);
   const range = analyticsRange(sp, tz);
-  const { orders, sync, readError } = await getOrders({
+  const machineAccess = await getAccessibleMachinePeriods(range.from, range.to);
+  const accessibleMachineIds = machineAccess === null ? null : [...new Set(machineAccess.map((period) => period.machine_id))];
+  const { machines } = await getMachines(accessibleMachineIds ?? undefined);
+  const machineOptions = machines.map((machine) => ({ id: machine.id, name: machine.display_name || machine.name, imei: machine.device_imei }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const requestedMachineId = sp.machineId?.trim();
+  const selectedMachineId = requestedMachineId && machineOptions.some((machine) => machine.id === requestedMachineId) ? requestedMachineId : undefined;
+  const machineIds = requestedMachineId && !selectedMachineId ? [] : selectedMachineId ? [selectedMachineId] : accessibleMachineIds ?? undefined;
+  const orderResult = await getOrders({
     dateFrom: range.from,
     dateTo: range.to,
     timeZone: tz,
-    machine: sp.machine,
+    machineIds,
     minPrice: sp.minPrice ? Number(sp.minPrice) : undefined,
     maxPrice: sp.maxPrice ? Number(sp.maxPrice) : undefined,
     couponOnly: sp.couponOnly === "1" ? true : undefined,
     refundedOnly: sp.refundedOnly === "1" ? true : undefined,
     serverModeOnly: sp.serverModeOnly === "1" ? true : undefined,
   });
+  const { sync, readError } = orderResult;
+  const orders = filterOrdersByMachinePeriods(orderResult.orders, machineAccess, tz);
 
   const completed = orders.filter((o) => o.order_state === "COMPLETE");
   const machineRevenue = completed.filter((o) => !o.is_server_mode).reduce((s, o) => s + o.price, 0);
@@ -53,7 +64,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             {" "}{couponCount} coupon(s) · {refundedCount} refund(s)
           </p>
         </div>
-        <UpdateOrdersButton machines={machines.flatMap((machine) => machine.device_imei ? [{ id: machine.id, name: machine.name, imei: machine.device_imei }] : [])} />
+        {session?.role === "admin" && <UpdateOrdersButton machines={machineOptions.flatMap((machine) => machine.imei ? [{ id: machine.id, name: machine.name, imei: machine.imei }] : [])} />}
       </header>
 
       <OrderDataNote sync={sync} readError={readError} requestedTo={range.to} timeZone={tz} />
@@ -64,7 +75,10 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         <label className="block"><span className={label}>To</span><input name="dateTo" type="date" defaultValue={range.to} min={range.from} max={range.today} className={input} /></label>
         <label className="block">
           <span className={label}>Machine</span>
-          <input name="machine" defaultValue={sp.machine} placeholder="Name or IMEI" className={`w-40 ${input}`} />
+          <select name="machineId" defaultValue={selectedMachineId ?? ""} className={`max-w-64 ${input}`}>
+            <option value="">All relevant machines</option>
+            {machineOptions.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}{machine.imei ? ` · ${machine.imei}` : ""}</option>)}
+          </select>
         </label>
         <label className="block">
           <span className={label}>Min price (€)</span>

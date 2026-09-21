@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { ingestOrders } from "@/lib/data/order-sync";
+import { getSessionProfile } from "@/lib/auth/session";
 
 export type UpdateOrdersResult = { ok: boolean; summary: string };
 
@@ -12,6 +13,8 @@ function ymd(d: Date) {
 }
 
 export async function updateOrders(_prev: UpdateOrdersResult | null, fd: FormData): Promise<UpdateOrdersResult> {
+  const actor = await getSessionProfile();
+  if (!actor || actor.role !== "admin") return { ok: false, summary: "Admin access required." };
   const fromRaw = String(fd.get("from") ?? "").trim();
   const toRaw = String(fd.get("to") ?? "").trim();
   const deviceImeis = String(fd.get("deviceImeis") ?? "").split(",").map((imei) => imei.trim()).filter(Boolean);

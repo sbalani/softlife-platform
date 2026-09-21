@@ -62,7 +62,7 @@ export function IncidentCreateForm({ options, policies, isAdmin }: { options: In
 }
 
 export function ActiveIncidentControls({ incidentId, incidentType, status, machineId, sourceKind, sourceResolved, assignedTenantId, assignedUserId, dueAt, options, canAssign, isAdmin }: {
-  incidentId: string; incidentType: string; status: "open" | "in_progress"; machineId: string | null; sourceKind: "alert" | "schedule" | "manual"; sourceResolved: boolean;
+  incidentId: string; incidentType: string; status: "open" | "in_progress"; machineId: string | null; sourceKind: "alert" | "schedule" | "manual" | "public"; sourceResolved: boolean;
   assignedTenantId: string | null; assignedUserId: string | null; dueAt: string | null; options: IncidentWorkspaceOptions; canAssign: boolean; isAdmin: boolean;
 }) {
   const [assignmentResult, assignmentAction, assignmentPending] = useActionState<IncidentActionResult | null, FormData>(updateIncidentAssignment, null);

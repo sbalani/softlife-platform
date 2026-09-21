@@ -5,6 +5,7 @@ import { manufacturingOverlapGuidance } from "@/lib/manufacturing-overlap";
 import { cancelPlatformPeriod, confirmPlatformPeriod, confirmPlatformReplenishment, preparePlatformPeriod, resolveProductionOrdersToRecipe, retryPlatformReplenishment } from "./actions";
 import { RunSubmitButton } from "./RunSubmitButton";
 import { OdooSaveForm } from "./OdooSaveForm";
+import { ManufacturingPreparationRefresh } from "./ManufacturingPreparationRefresh";
 
 type Run = ProductionAdminData["runs"][number];
 
@@ -211,8 +212,10 @@ function RunDetails({ run, displayTimeZone, recipes, warehouseNames }: { run: Ru
 
 export function ProductionRunsPanel({ runs, timeZone, recipes, warehouses }: { runs: Run[]; timeZone: string; recipes: { id: string; name: string }[]; warehouses: { odoo_id: number; name: string }[] }) {
   const warehouseNames = new Map(warehouses.map((warehouse) => [warehouse.odoo_id, warehouse.name]));
+  const preparationActive = runs.some((run) => run.status === "preparing");
   return (
     <div className="rounded-xl border border-line p-4">
+      <ManufacturingPreparationRefresh active={preparationActive} />
       <h3 className="text-sm font-bold text-cocoa">Manufacturing runs</h3>
       <p className="mt-1 text-[11px] text-taupe">Preparing calculates and freezes a reviewable payload. It does not release manufacturing work to Odoo.</p>
       <form action={preparePlatformPeriod} className="mt-3 grid grid-cols-2 gap-2">
@@ -220,13 +223,14 @@ export function ProductionRunsPanel({ runs, timeZone, recipes, warehouses }: { r
         <label className="text-xs text-taupe"><span className="mb-1 block">From date (included)</span><input name="date_from" type="date" required className="w-full rounded border border-line px-2 py-1.5 text-cocoa" /></label>
         <label className="text-xs text-taupe"><span className="mb-1 block">Through date (included)</span><input name="date_to" type="date" required className="w-full rounded border border-line px-2 py-1.5 text-cocoa" /></label>
         <label className="col-span-2 text-xs text-taupe"><span className="mb-1 block">IANA timezone</span><input name="time_zone" required defaultValue={timeZone} className="w-full rounded border border-line px-2 py-1.5 text-cocoa" /></label>
-        <RunSubmitButton idle="Prepare frozen preview only" pending="Preparing frozen preview..." className="col-span-2 rounded bg-terracotta px-3 py-2 text-xs font-bold text-white" />
-        <p className="col-span-2 text-[11px] text-taupe">Preparation can take a few minutes. Keep this page open; the button stays disabled while the frozen payload is built.</p>
+        <RunSubmitButton idle="Queue frozen preview" pending="Queueing preview..." className="col-span-2 rounded bg-terracotta px-3 py-2 text-xs font-bold text-white" />
+        <p className="col-span-2 text-[11px] text-taupe">Preparation continues in the background. You can leave this page; the run will create an alert when it is ready or fails.</p>
       </form>
       <div className="mt-4 max-h-[36rem] space-y-3 overflow-auto">{runs.map((run) => (
         <div id={`run-${run.id}`} key={run.id} className="scroll-mt-4 rounded-lg bg-cream/60 p-3 text-xs">
-          <div className="flex flex-wrap items-center justify-between gap-2"><span className="break-all font-mono font-semibold text-cocoa">{run.idempotency_key}</span><span className="font-bold uppercase text-taupe">{run.status} · {run.initiated_by}</span></div>
+          <div className="flex flex-wrap items-center justify-between gap-2"><span className="break-all font-mono font-semibold text-cocoa">{run.idempotency_key}</span><span className="font-bold uppercase text-taupe">{run.status === "preparing" && run.preparation_stage ? run.preparation_stage : run.status} · {run.initiated_by}</span></div>
           <p className="mt-1 font-semibold text-cocoa">{run.status === "blocked" && !run.order_count && run.blocked_items.length > 0 && run.blocked_items.every((item) => item.problem_code === "already_in_production_run") ? "This duplicate reserved no orders and sent nothing to Odoo. It can be removed safely." : STATUS_COPY[run.status] ?? "Review this run before taking another action."}</p>
+          {run.preparation_error && <p className="mt-1 text-warning">{run.preparation_error}</p>}
           <p className="mt-1 text-taupe">{formatDateTime(run.period_from, run.time_zone)} to {formatDateTime(run.period_to, run.time_zone)} ({run.time_zone}, end exclusive) · {run.order_count} reserved order rows{run.blocked_items.length ? ` · ${run.blocked_items.length} blocker findings` : ""}</p>
           <RunDetails run={run} displayTimeZone={timeZone} recipes={recipes} warehouseNames={warehouseNames} />
         </div>

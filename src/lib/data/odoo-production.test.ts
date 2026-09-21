@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { describeManufacturingPreparationError, manufacturingQueryBatches, manufacturingSourceOrder, mergeRecipeVersionComponents, OdooContractError, parsePeriodInput, presentManufacturingExport, validateManufacturingResult } from "./odoo-production.ts";
+import { describeManufacturingPreparationError, manufacturingClaimBody, manufacturingQueryBatches, manufacturingSourceOrder, mergeRecipeVersionComponents, OdooContractError, parsePeriodInput, presentManufacturingExport, validateManufacturingResult } from "./odoo-production.ts";
 
 test("period requests freeze exact UTC boundaries and a deterministic fingerprint", () => {
   const input = parsePeriodInput({
@@ -16,6 +16,23 @@ test("period requests freeze exact UTC boundaries and a deterministic fingerprin
 test("period requests reject missing keys and backwards ranges", () => {
   assert.throws(() => parsePeriodInput({ local_from: "2026-08-01T00:00", local_to: "2026-08-02T00:00", time_zone: "UTC" }), OdooContractError);
   assert.throws(() => parsePeriodInput({ idempotency_key: "x", local_from: "2026-08-02T00:00", local_to: "2026-08-01T00:00", time_zone: "UTC", initiated_by: "odoo" }), /after/);
+});
+
+test("worker claims reconstruct the original local period across daylight saving time", () => {
+  assert.deepEqual(manufacturingClaimBody({
+    idempotency_key: "platform:august", period_from: "2026-07-31T22:00:00.000Z",
+    period_to: "2026-08-31T22:00:00.000Z", time_zone: "Europe/Madrid", initiated_by: "platform",
+  }), {
+    idempotency_key: "platform:august", local_from: "2026-08-01T00:00:00",
+    local_to: "2026-09-01T00:00:00", time_zone: "Europe/Madrid", initiated_by: "platform",
+  });
+  assert.deepEqual(manufacturingClaimBody({
+    idempotency_key: "odoo:partial-day", period_from: "2026-01-15T07:30:00.000Z",
+    period_to: "2026-01-15T10:45:30.000Z", time_zone: "Europe/Madrid", initiated_by: "odoo",
+  }), {
+    idempotency_key: "odoo:partial-day", local_from: "2026-01-15T08:30:00",
+    local_to: "2026-01-15T11:45:30", time_zone: "Europe/Madrid", initiated_by: "odoo",
+  });
 });
 
 test("recipe versions merge direct Odoo packaging in component sequence", () => {

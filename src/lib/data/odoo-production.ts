@@ -25,6 +25,19 @@ export function manufacturingQueryBatches<T>(values: T[], size = 200): T[][] {
   return batches;
 }
 
+async function runManufacturingBatches<T, R>(values: T[], work: (batch: T[]) => Promise<R>, concurrency = 4) {
+  const batches = manufacturingQueryBatches(values);
+  const results = new Array<R>(batches.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, batches.length) }, async () => {
+    while (next < batches.length) {
+      const index = next++;
+      results[index] = await work(batches[index]);
+    }
+  }));
+  return results;
+}
+
 export function describeManufacturingPreparationError(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (error && typeof error === "object") {
@@ -242,6 +255,25 @@ export function parsePeriodInput(body: Record<string, unknown>): PeriodInput & {
   return { ...input, periodFrom, periodTo, documentDate: productionDocumentDate(input.localTo), fingerprint };
 }
 
+function localDateTimeAt(timestamp: string, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).formatToParts(new Date(timestamp));
+  const value = new Map(parts.map((part) => [part.type, part.value]));
+  return `${value.get("year")}-${value.get("month")}-${value.get("day")}T${value.get("hour")}:${value.get("minute")}:${value.get("second")}`;
+}
+
+export function manufacturingClaimBody(row: Record<string, unknown>) {
+  const timeZone = String(row.time_zone);
+  return {
+    idempotency_key: String(row.idempotency_key),
+    local_from: localDateTimeAt(String(row.period_from), timeZone),
+    local_to: localDateTimeAt(String(row.period_to), timeZone),
+    time_zone: timeZone,
+    initiated_by: row.initiated_by,
+  };
+}
+
 function rawLines(order: Record<string, unknown>) {
   const products = Array.isArray(order.products) ? order.products as Record<string, unknown>[] : [];
   return products.length ? products : [{ goodsName: order.product_name }];
@@ -368,17 +400,46 @@ async function createRecipeVersion(s: SupabaseClient, recipeId: string, machineI
   return { version: relation(version) ?? version as Record<string, unknown>, components, problems: [] };
 }
 
-export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record<string, unknown>, caller: "odoo" | "platform" = "odoo") {
+export async function enqueueManufacturingPeriod(s: SupabaseClient, body: Record<string, unknown>, caller: "odoo" | "platform" = "odoo", requestedBy?: string) {
   const input = parsePeriodInput(body);
   if (input.initiatedBy !== caller) throw new OdooContractError("The run initiator does not match the authenticated caller", 403, "wrong_initiator");
   const { data: existing, error: existingError } = await s.from("manufacturing_period_exports").select("*").eq("idempotency_key", input.idempotencyKey).maybeSingle();
   if (existingError) throw existingError;
   if (existing && existing.request_fingerprint !== input.fingerprint) throw new OdooContractError("Idempotency key already exists with different boundaries", 409, "idempotency_conflict");
-  if (existing && ["draft", "replenishment_planning", "replenishment_ready", "replenishment_failed", "ready", "processing", "completed", "cancelled"].includes(String(existing.status))) return presentManufacturingExport(existing as Record<string, unknown>);
-  if (existing?.status === "failed" && existing.odoo_result) return presentManufacturingExport(existing as Record<string, unknown>);
-  if (existing?.status === "preparing" && Date.now() - Date.parse(String(existing.updated_at)) < 5 * 60_000) return presentManufacturingExport(existing as Record<string, unknown>);
+  if (existing) return presentManufacturingExport(existing as Record<string, unknown>);
+  const { data: inserted, error } = await s.from("manufacturing_period_exports").insert({
+    idempotency_key: input.idempotencyKey, request_fingerprint: input.fingerprint, initiated_by: input.initiatedBy,
+    period_from: input.periodFrom, period_to: input.periodTo, time_zone: input.timeZone, document_date: input.documentDate,
+    status: "preparing", preparation_stage: "queued", preparation_requested_by: requestedBy ?? null,
+  }).select("*").single();
+  if (error) {
+    if (error.code === "23505") {
+      const { data: concurrent, error: concurrentError } = await s.from("manufacturing_period_exports").select("*").eq("idempotency_key", input.idempotencyKey).maybeSingle();
+      if (concurrentError) throw concurrentError;
+      if (concurrent?.request_fingerprint === input.fingerprint) return presentManufacturingExport(concurrent as Record<string, unknown>);
+      throw new OdooContractError("The period overlaps a concurrent request", 409, "idempotency_conflict");
+    }
+    throw error;
+  }
+  return presentManufacturingExport(inserted as Record<string, unknown>);
+}
 
-  let exportId = existing?.id as string | undefined;
+export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record<string, unknown>, caller: "odoo" | "platform" = "odoo", workerClaim?: { exportId: string; claimToken: string }) {
+  const input = parsePeriodInput(body);
+  if (input.initiatedBy !== caller) throw new OdooContractError("The run initiator does not match the authenticated caller", 403, "wrong_initiator");
+  const { data: existing, error: existingError } = workerClaim
+    ? await s.from("manufacturing_period_exports").select("*").eq("id", workerClaim.exportId).maybeSingle()
+    : await s.from("manufacturing_period_exports").select("*").eq("idempotency_key", input.idempotencyKey).maybeSingle();
+  if (existingError) throw existingError;
+  if (existing && (existing.idempotency_key !== input.idempotencyKey || existing.request_fingerprint !== input.fingerprint)) throw new OdooContractError("Idempotency key already exists with different boundaries", 409, "idempotency_conflict");
+  if (workerClaim && (!existing || existing.status !== "preparing" || existing.preparation_claim_token !== workerClaim.claimToken)) {
+    throw new OdooContractError("The preparation claim is no longer active", 409, "invalid_status");
+  }
+  if (!workerClaim && existing && ["draft", "replenishment_planning", "replenishment_ready", "replenishment_failed", "ready", "processing", "completed", "cancelled"].includes(String(existing.status))) return presentManufacturingExport(existing as Record<string, unknown>);
+  if (!workerClaim && existing?.status === "failed" && existing.odoo_result) return presentManufacturingExport(existing as Record<string, unknown>);
+  if (!workerClaim && existing?.status === "preparing" && Date.now() - Date.parse(String(existing.updated_at)) < 5 * 60_000) return presentManufacturingExport(existing as Record<string, unknown>);
+
+  let exportId = workerClaim?.exportId ?? existing?.id as string | undefined;
   if (!exportId) {
     const { data: inserted, error } = await s.from("manufacturing_period_exports").insert({
       idempotency_key: input.idempotencyKey, request_fingerprint: input.fingerprint, initiated_by: input.initiatedBy,
@@ -394,7 +455,7 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       throw error;
     }
     exportId = inserted.id;
-  } else {
+  } else if (!workerClaim) {
     const { error } = await s.rpc("claim_manufacturing_export_preparation", { p_export_id: exportId, p_expected_updated_at: existing.updated_at });
     if (error) {
       if (error.code === "P0001") throw new OdooContractError("The production run changed while preparation was starting", 409, "invalid_status");
@@ -414,25 +475,28 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
     const orders = orderRows.filter(saleCandidate);
     const machineIds = [...new Set(orders.map((order) => order.machine_id as string).filter(Boolean))];
     const existingResolutions = new Map<string, Map<number, Record<string, unknown>>>();
-    for (let offset = 0; offset < orders.length; offset += 200) {
-      const ids = orders.slice(offset, offset + 200).map((order) => String(order.id));
+    const resolutionResults = await runManufacturingBatches(orders.map((order) => String(order.id)), async (ids) => {
       const { data, error } = await s.from("order_product_resolutions").select("order_id,line_index,raw_name,normalized_name,raw_position,menu_kind,platform_product_id,recipe_id,recipe_version_id,mapping_method,resolution_status,problem_code,resolution_note,resolved_by,resolved_at").in("order_id", ids);
       if (error) throw error;
-      for (const row of (data as Record<string, unknown>[]) ?? []) {
+      return (data as Record<string, unknown>[]) ?? [];
+    });
+    for (const rows of resolutionResults) {
+      for (const row of rows) {
         const byLine = existingResolutions.get(String(row.order_id)) ?? new Map<number, Record<string, unknown>>();
         byLine.set(Number(row.line_index), row);
         existingResolutions.set(String(row.order_id), byLine);
       }
     }
-    const membershipRows: Record<string, unknown>[] = [];
-    for (const ids of manufacturingQueryBatches(orders.map((order) => String(order.id)))) {
+    const membershipResults = await runManufacturingBatches(orders.map((order) => String(order.id)), async (ids) => {
       const { data, error } = await s.from("manufacturing_period_export_orders").select("order_id,export_id").in("order_id", ids).is("released_at", null);
       if (error) throw error;
-      membershipRows.push(...((data as Record<string, unknown>[]) ?? []));
-    }
+      return (data as Record<string, unknown>[]) ?? [];
+    });
+    const membershipRows: Record<string, unknown>[] = [];
+    for (const rows of membershipResults) membershipRows.push(...rows);
     const [productsResult, recipesResult, assignmentsResult, defaultsResult, machineOverridesResult, settingsResult, warehousesResult, pendingPushesResult] = await Promise.all([
       s.from("products").select("id,name,type,consumption_type,odoo_id,default_portion_size,default_portion_uom,updated_at,product_aliases(alias,normalized_alias),odoo_products(uom,package_content_quantity,package_content_uom),production_product_consumption_overrides(quantity,uom)"),
-      s.from("recipes").select("id,name,recipe_components(product_id)").eq("active", true),
+      s.from("recipes").select("id,name,odoo_finished_product_id,recipe_components(product_id)").eq("active", true),
       machineIds.length ? s.from("machine_menu_recipe_assignments").select("machine_id,menu_kind,menu_position,recipe_id,valid_from,valid_to,recipes(name)").in("machine_id", machineIds).lt("valid_from", input.periodTo).or(`valid_to.is.null,valid_to.gt.${input.periodFrom}`) : Promise.resolve({ data: [], error: null }),
       s.from("production_consumption_defaults").select("consumption_type,quantity,uom"),
       machineIds.length ? s.from("machine_product_consumption_overrides").select("machine_id,product_id,quantity,uom").in("machine_id", machineIds) : Promise.resolve({ data: [], error: null }),
@@ -453,11 +517,26 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
         if (!matches.some((match) => match.id === product.id)) productsByName.set(key, [...matches, product]);
       }
     }
-    const recipeCandidates: RecipeMatchCandidate[] = ((recipesResult.data as unknown as Record<string, unknown>[]) ?? []).map((recipe) => ({
+    const recipeRows = (recipesResult.data as unknown as Record<string, unknown>[]) ?? [];
+    const recipeCandidates: RecipeMatchCandidate[] = recipeRows.map((recipe) => ({
       id: String(recipe.id),
       name: String(recipe.name),
       componentIds: ((recipe.recipe_components as Record<string, unknown>[] | null) ?? []).map((component) => String(component.product_id)),
     }));
+    const recipeMetadata = new Map(recipeRows.map((recipe) => [String(recipe.id), { name: String(recipe.name), odoo_finished_product_id: recipe.odoo_finished_product_id }]));
+    const recipeMetadataRequests = new Map<string, Promise<{ name: string; odoo_finished_product_id: unknown }>>();
+    const getRecipeMetadata = (recipeId: string) => {
+      const known = recipeMetadata.get(recipeId);
+      if (known) return Promise.resolve(known);
+      const pending = recipeMetadataRequests.get(recipeId);
+      if (pending) return pending;
+      const request = Promise.resolve(s.from("recipes").select("name,odoo_finished_product_id").eq("id", recipeId).single()).then(({ data, error }) => {
+        if (error) throw error;
+        return { name: String(data.name), odoo_finished_product_id: data.odoo_finished_product_id };
+      });
+      recipeMetadataRequests.set(recipeId, request);
+      return request;
+    };
     const defaults = new Map(((defaultsResult.data as { consumption_type: string; quantity: number; uom: string }[]) ?? []).map((row) => [row.consumption_type, { quantity: Number(row.quantity), uom: row.uom }]));
     const productOverrides = new Map(products.flatMap((product) => {
       const override = relation(product.production_product_consumption_overrides);
@@ -481,6 +560,7 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
     });
     const groups = new Map<string, Record<string, unknown>>();
     const resolutionRows: Record<string, unknown>[] = [];
+    const recipeVersionRequests = new Map<string, ReturnType<typeof createRecipeVersion>>();
 
     for (const order of orders) {
       const orderId = String(order.id);
@@ -544,7 +624,13 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       if (!warehouseId || !warehouse) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "missing_warehouse_assignment" }); continue; }
       const currency = String(order.currency ?? settings.currency ?? "EUR");
       if (currency !== settings.currency) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "currency_mismatch", currency, expected_currency: settings.currency }); continue; }
-      const versionResult = await createRecipeVersion(s, recipeId, machineId, { products: productsById, defaults, productOverrides, machineOverrides, cupOdooProductId: settings.cup_odoo_product_id == null ? null : Number(settings.cup_odoo_product_id) });
+      const versionKey = `${recipeId}:${machineId}`;
+      let versionRequest = recipeVersionRequests.get(versionKey);
+      if (!versionRequest) {
+        versionRequest = createRecipeVersion(s, recipeId, machineId, { products: productsById, defaults, productOverrides, machineOverrides, cupOdooProductId: settings.cup_odoo_product_id == null ? null : Number(settings.cup_odoo_product_id) });
+        recipeVersionRequests.set(versionKey, versionRequest);
+      }
+      const versionResult = await versionRequest;
       if (!versionResult.version) {
         for (const problem of versionResult.problems) {
           const ingredient = problem.platform_product_id ? productsById.get(problem.platform_product_id) : null;
@@ -562,8 +648,7 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
         row.recipe_id = recipeId;
         row.recipe_version_id = versionResult.version.id;
       }
-      const { data: recipe, error: recipeError } = await s.from("recipes").select("name,odoo_finished_product_id").eq("id", recipeId).single();
-      if (recipeError) throw recipeError;
+      const recipe = await getRecipeMetadata(recipeId);
       const groupKey = `${warehouseId}:${versionResult.version.id}:${currency}`;
       const current = groups.get(groupKey) ?? {
         odoo_warehouse_id: warehouseId, odoo_customer_id: warehouse.sales_customer_odoo_id, warehouse_name: warehouse.name,
@@ -577,10 +662,10 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       groups.set(groupKey, current);
     }
     if (resolutionRows.length) {
-      for (const rows of manufacturingQueryBatches(resolutionRows)) {
+      await runManufacturingBatches(resolutionRows, async (rows) => {
         const { error } = await s.from("order_product_resolutions").upsert(rows, { onConflict: "order_id,line_index" });
         if (error) throw error;
-      }
+      });
     }
     const warehouses = new Map<number, Record<string, unknown>>();
     for (const group of groups.values()) {
@@ -668,9 +753,10 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       const refreshed = refreshedOrders.get(String(order.id))!;
       return { order_id: order.id, export_version: refreshed.export_version, export_content_hash: refreshed.export_content_hash };
     });
-    const { data: saved, error: saveError } = await s.rpc("finalize_manufacturing_export", {
+    const { data: saved, error: saveError } = await s.rpc(workerClaim ? "finalize_manufacturing_export_worker" : "finalize_manufacturing_export", {
       p_export_id: exportId, p_expected_orders: expectedOrders, p_payload: payload,
       p_payload_sha256: payloadHash, p_config_snapshot: configSnapshot, p_blocked_reasons: blocked,
+      ...(workerClaim ? { p_claim_token: workerClaim.claimToken } : {}),
     });
     if (saveError) {
       if (["P0003", "P0004"].includes(saveError.code)) throw new OdooContractError(saveError.message, 409, saveError.code === "P0003" ? "order_changed" : "period_overlap");
@@ -678,7 +764,9 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
     }
     return presentManufacturingExport(relation(saved) ?? saved as Record<string, unknown>);
   } catch (error) {
-    await s.from("manufacturing_period_exports").update({ status: "failed", blocked_reasons: [{ problem_code: "preparation_failed", message: describeManufacturingPreparationError(error) }] }).eq("id", exportId);
+    const message = describeManufacturingPreparationError(error);
+    if (workerClaim) await s.rpc("fail_manufacturing_export_preparation", { p_export_id: exportId, p_claim_token: workerClaim.claimToken, p_error: message });
+    else await s.from("manufacturing_period_exports").update({ status: "failed", blocked_reasons: [{ problem_code: "preparation_failed", message }] }).eq("id", exportId);
     throw error;
   }
 }
@@ -692,6 +780,7 @@ export function presentManufacturingExport(row: Record<string, unknown>) {
     manufacturing_contract_version: payload.manufacturing_contract_version ?? 1,
     payload_sha256: row.payload_sha256, warehouses: payload.warehouses ?? [], replenishment: payload.replenishment ?? null, blocked_items: row.blocked_reasons ?? [],
     replenishment_result: row.replenishment_result ?? null, odoo_result: row.odoo_result ?? null, created_at: row.created_at, updated_at: row.updated_at,
+    preparation_stage: row.preparation_stage ?? null, preparation_attempt_count: Number(row.preparation_attempt_count ?? 0), preparation_error: row.preparation_error ?? null,
   };
 }
 

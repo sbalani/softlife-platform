@@ -8,6 +8,12 @@ test("public signup does not expose private franchisee administration", () => {
   assert.equal(isPublicWebPath("/users"), false);
 });
 
+test("the permanent customer incident form is public without opening internal incidents", () => {
+  assert.equal(isPublicWebPath("/report-incident"), true);
+  assert.equal(isPublicWebPath("/report-incident/machine-token"), false);
+  assert.equal(isPublicWebPath("/incidents"), false);
+});
+
 test("downloads are available to every authenticated role", () => {
   for (const role of ["admin", "operator", "franchisee"] as const) {
     assert.equal(canAccessWebPath(role, "/downloads"), true);
@@ -19,6 +25,9 @@ test("existing role restrictions remain intact", () => {
   assert.equal(canAccessWebPath("operator", "/refills"), true);
   assert.equal(canAccessWebPath("operator", "/dashboard"), false);
   assert.equal(canAccessWebPath("franchisee", "/analytics"), true);
+  assert.equal(canAccessWebPath("franchisee", "/orders"), true);
+  assert.equal(canAccessWebPath("franchisee", "/orders/history"), true);
+  assert.equal(canAccessWebPath("operator", "/orders"), false);
   assert.equal(canAccessWebPath("franchisee", "/incidents"), true);
   assert.equal(canAccessWebPath("franchisee", "/refills"), true);
   assert.equal(canAccessWebPath("franchisee", "/account"), true);

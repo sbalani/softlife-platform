@@ -365,6 +365,12 @@ deno_version = 2
 [functions.defrost]
 verify_jwt = false
 
+[functions.manufacturing-preparation]
+verify_jwt = false
+
+[functions.public-incident-cleanup]
+verify_jwt = false
+
 [functions.softlife-mcp]
 verify_jwt = false
 

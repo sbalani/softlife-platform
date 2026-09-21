@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth/session";
 import { recordProductChange } from "@/lib/data/change-log";
-import { cancelUnconfirmedManufacturingPeriod, confirmManufacturingPeriod, confirmManufacturingReplenishment, prepareManufacturingPeriod } from "@/lib/data/odoo-production";
+import { cancelUnconfirmedManufacturingPeriod, confirmManufacturingPeriod, confirmManufacturingReplenishment, enqueueManufacturingPeriod } from "@/lib/data/odoo-production";
 import { inclusiveLocalDatePeriod, localDateTimeToUtc } from "@/lib/odoo-sync-contract";
 import { parseProductionRecipeAssignments } from "@/lib/production-recipe-assignments";
 
@@ -186,12 +186,9 @@ export async function preparePlatformPeriod(fd: FormData): Promise<void> {
   if (active?.idempotency_key === `platform:${requestId}`) { revalidatePath("/odoo"); return; }
   if (active) throw new Error(`An active run already exists for these dates: ${active.idempotency_key} (${active.status}). Review or cancel it below.`);
   const idempotencyKey = `platform:${requestId}`;
-  try {
-    await prepareManufacturingPeriod(s, { idempotency_key: idempotencyKey, local_from: localFrom, local_to: localTo, time_zone: timeZone, initiated_by: "platform" }, "platform");
-  } catch (error) {
-    const { data: failed } = await s.from("manufacturing_period_exports").select("status").eq("idempotency_key", idempotencyKey).maybeSingle();
-    if (failed?.status !== "failed") throw error;
-  }
+  const actor = await getSessionProfile();
+  if (!actor || actor.role !== "admin") throw new Error("Admin access required.");
+  await enqueueManufacturingPeriod(s, { idempotency_key: idempotencyKey, local_from: localFrom, local_to: localTo, time_zone: timeZone, initiated_by: "platform" }, "platform", actor.id);
   revalidatePath("/odoo");
 }
 

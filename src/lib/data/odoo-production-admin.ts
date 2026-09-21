@@ -18,7 +18,7 @@ export type ProductionAdminData = {
     latestRequest: { id: string; status: string; requested_at: string; claimed_at: string | null; completed_at: string | null; attempts: number; result: Record<string, unknown> | null; error: string | null } | null;
   } | null;
   pending: { id: string; order_id: string; line_index: number; raw_name: string | null; normalized_name: string | null; raw_position: string | null; menu_kind: string | null; problem_code: string | null; order_code: string | null; order_time: string | null; machine_name: string | null }[];
-  runs: { id: string; idempotency_key: string; initiated_by: string; status: string; period_from: string; period_to: string; time_zone: string; document_date: string; payload_sha256: string | null; payload: Record<string, unknown> | null; blocked_items: Record<string, unknown>[]; replenishment_result: Record<string, unknown> | null; odoo_result: Record<string, unknown> | null; order_count: number; created_at: string; replenishment_confirmed_at: string | null; confirmed_at: string | null; updated_at: string }[];
+  runs: { id: string; idempotency_key: string; initiated_by: string; status: string; preparation_stage: string | null; preparation_attempt_count: number; preparation_error: string | null; period_from: string; period_to: string; time_zone: string; document_date: string; payload_sha256: string | null; payload: Record<string, unknown> | null; blocked_items: Record<string, unknown>[]; replenishment_result: Record<string, unknown> | null; odoo_result: Record<string, unknown> | null; order_count: number; created_at: string; replenishment_confirmed_at: string | null; confirmed_at: string | null; updated_at: string }[];
 };
 
 const empty: ProductionAdminData = { available: false, products: [], odooProducts: [], recipes: [], defaults: [], settings: null, warehouses: [], stockSnapshot: null, pending: [], runs: [] };
@@ -41,7 +41,7 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
       s.rpc("get_odoo_stock_snapshot_diagnostics"),
       s.from("odoo_sync_requests").select("id,status,requested_at,claimed_at,completed_at,attempts,result,error").order("requested_at", { ascending: false }).limit(1).maybeSingle(),
       s.from("order_product_resolutions").select("id,order_id,line_index,raw_name,normalized_name,raw_position,menu_kind,problem_code,huaxin_orders(order_code,order_time,machines(name))").eq("resolution_status", "pending").order("created_at").limit(100),
-      s.from("manufacturing_period_exports").select("id,idempotency_key,initiated_by,status,period_from,period_to,time_zone,document_date,payload_sha256,payload,blocked_reasons,replenishment_result,odoo_result,created_at,replenishment_confirmed_at,confirmed_at,updated_at,manufacturing_period_export_orders(count)").is("manufacturing_period_export_orders.released_at", null).order("created_at", { ascending: false }).limit(50),
+      s.from("manufacturing_period_exports").select("id,idempotency_key,initiated_by,status,preparation_stage,preparation_attempt_count,preparation_error,period_from,period_to,time_zone,document_date,payload_sha256,payload,blocked_reasons,replenishment_result,odoo_result,created_at,replenishment_confirmed_at,confirmed_at,updated_at,manufacturing_period_export_orders(count)").is("manufacturing_period_export_orders.released_at", null).order("created_at", { ascending: false }).limit(50),
     ]);
     for (const result of [products, odooProducts, recipes, defaults, settings, warehouses, snapshot, latestRequest, pending, runs]) if (result.error) throw result.error;
     const defaultsByType = new Map((defaults.data ?? []).map((row) => [row.consumption_type, row]));
@@ -169,7 +169,9 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
       runs: runRows.map((row) => {
         const membershipCount = Array.isArray(row.manufacturing_period_export_orders) ? row.manufacturing_period_export_orders[0] as { count?: number } | undefined : undefined;
         return {
-          id: String(row.id), idempotency_key: String(row.idempotency_key), initiated_by: String(row.initiated_by), status: String(row.status), period_from: String(row.period_from), period_to: String(row.period_to),
+          id: String(row.id), idempotency_key: String(row.idempotency_key), initiated_by: String(row.initiated_by), status: String(row.status),
+          preparation_stage: row.preparation_stage as string | null, preparation_attempt_count: Number(row.preparation_attempt_count ?? 0), preparation_error: row.preparation_error as string | null,
+          period_from: String(row.period_from), period_to: String(row.period_to),
           time_zone: String(row.time_zone), document_date: String(row.document_date), payload_sha256: row.payload_sha256 as string | null,
           payload: row.payload && typeof row.payload === "object" ? row.payload as Record<string, unknown> : null,
           blocked_items: objectRecords(row.blocked_reasons).map((item) => {

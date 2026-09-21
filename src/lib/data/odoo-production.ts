@@ -18,6 +18,28 @@ export class OdooContractError extends Error {
   }
 }
 
+export function manufacturingQueryBatches<T>(values: T[], size = 200): T[][] {
+  if (!Number.isInteger(size) || size < 1) throw new Error("Batch size must be a positive integer");
+  const batches: T[][] = [];
+  for (let offset = 0; offset < values.length; offset += size) batches.push(values.slice(offset, offset + size));
+  return batches;
+}
+
+export function describeManufacturingPreparationError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const row = error as Record<string, unknown>;
+    const message = typeof row.message === "string" ? row.message.trim() : "";
+    const details = typeof row.details === "string" ? row.details.trim() : "";
+    const hint = typeof row.hint === "string" ? row.hint.trim() : "";
+    const code = typeof row.code === "string" ? row.code.trim() : "";
+    const text = [message, details && details !== message ? `Details: ${details}` : "", hint ? `Hint: ${hint}` : ""].filter(Boolean).join(" ");
+    if (text) return code ? `${text} (${code})` : text;
+    try { return JSON.stringify(error); } catch { return "Unknown preparation failure"; }
+  }
+  return String(error);
+}
+
 type CatalogPosition = SyncCursor | "done" | null;
 type CatalogCursor = { ingredients: CatalogPosition; recipes: CatalogPosition; updatedAfter: string | null };
 type PeriodInput = { idempotencyKey: string; localFrom: string; localTo: string; timeZone: string; initiatedBy: "odoo" | "platform" };
@@ -402,7 +424,13 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
         existingResolutions.set(String(row.order_id), byLine);
       }
     }
-    const [productsResult, recipesResult, assignmentsResult, defaultsResult, machineOverridesResult, settingsResult, warehousesResult, membershipsResult, pendingPushesResult] = await Promise.all([
+    const membershipRows: Record<string, unknown>[] = [];
+    for (const ids of manufacturingQueryBatches(orders.map((order) => String(order.id)))) {
+      const { data, error } = await s.from("manufacturing_period_export_orders").select("order_id,export_id").in("order_id", ids).is("released_at", null);
+      if (error) throw error;
+      membershipRows.push(...((data as Record<string, unknown>[]) ?? []));
+    }
+    const [productsResult, recipesResult, assignmentsResult, defaultsResult, machineOverridesResult, settingsResult, warehousesResult, pendingPushesResult] = await Promise.all([
       s.from("products").select("id,name,type,consumption_type,odoo_id,default_portion_size,default_portion_uom,updated_at,product_aliases(alias,normalized_alias),odoo_products(uom,package_content_quantity,package_content_uom),production_product_consumption_overrides(quantity,uom)"),
       s.from("recipes").select("id,name,recipe_components(product_id)").eq("active", true),
       machineIds.length ? s.from("machine_menu_recipe_assignments").select("machine_id,menu_kind,menu_position,recipe_id,valid_from,valid_to,recipes(name)").in("machine_id", machineIds).lt("valid_from", input.periodTo).or(`valid_to.is.null,valid_to.gt.${input.periodFrom}`) : Promise.resolve({ data: [], error: null }),
@@ -410,10 +438,9 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       machineIds.length ? s.from("machine_product_consumption_overrides").select("machine_id,product_id,quantity,uom").in("machine_id", machineIds) : Promise.resolve({ data: [], error: null }),
       s.from("production_settings").select("cup_odoo_product_id,currency,replenishment_source_odoo_warehouse_id").eq("singleton", true).single(),
       s.from("odoo_warehouses").select("odoo_id,name,sales_customer_odoo_id,stock_location_id"),
-      orders.length ? s.from("manufacturing_period_export_orders").select("order_id,export_id").in("order_id", orders.map((order) => order.id as string)).is("released_at", null) : Promise.resolve({ data: [], error: null }),
       machineIds.length ? s.from("menu_recipe_push_operations").select("machine_id,assignments").in("machine_id", machineIds).eq("status", "pending") : Promise.resolve({ data: [], error: null }),
     ]);
-    for (const result of [productsResult, recipesResult, assignmentsResult, defaultsResult, machineOverridesResult, settingsResult, warehousesResult, membershipsResult, pendingPushesResult]) if (result.error) throw result.error;
+    for (const result of [productsResult, recipesResult, assignmentsResult, defaultsResult, machineOverridesResult, settingsResult, warehousesResult, pendingPushesResult]) if (result.error) throw result.error;
     if (!settingsResult.data) throw new OdooContractError("Production settings are unavailable", 503, "not_configured");
     const settings = settingsResult.data;
     const products = (productsResult.data as unknown as ProductRow[]) ?? [];
@@ -441,7 +468,7 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
     }));
     const machineOverrides = new Map(((machineOverridesResult.data as { machine_id: string; product_id: string; quantity: number; uom: string }[]) ?? []).map((row) => [`${row.machine_id}:${row.product_id}`, { quantity: Number(row.quantity), uom: row.uom }]));
     const warehouseMap = new Map(((warehousesResult.data as { odoo_id: number; name: string; sales_customer_odoo_id: number | null }[]) ?? []).map((row) => [row.odoo_id, row]));
-    const occupied = new Map(((membershipsResult.data as { order_id: string; export_id: string }[]) ?? []).filter((row) => row.export_id !== exportId).map((row) => [row.order_id, row.export_id]));
+    const occupied = new Map((membershipRows as { order_id: string; export_id: string }[]).filter((row) => row.export_id !== exportId).map((row) => [row.order_id, row.export_id]));
     const pendingMenuKeys = new Set<string>();
     for (const operation of (pendingPushesResult.data as { machine_id: string; assignments: Record<string, unknown>[] }[]) ?? []) {
       for (const assignment of operation.assignments ?? []) pendingMenuKeys.add(`${operation.machine_id}:${String(assignment.menu_kind)}:${String(assignment.menu_position)}`);
@@ -550,8 +577,10 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       groups.set(groupKey, current);
     }
     if (resolutionRows.length) {
-      const { error } = await s.from("order_product_resolutions").upsert(resolutionRows, { onConflict: "order_id,line_index" });
-      if (error) throw error;
+      for (const rows of manufacturingQueryBatches(resolutionRows)) {
+        const { error } = await s.from("order_product_resolutions").upsert(rows, { onConflict: "order_id,line_index" });
+        if (error) throw error;
+      }
     }
     const warehouses = new Map<number, Record<string, unknown>>();
     for (const group of groups.values()) {
@@ -649,7 +678,7 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
     }
     return presentManufacturingExport(relation(saved) ?? saved as Record<string, unknown>);
   } catch (error) {
-    await s.from("manufacturing_period_exports").update({ status: "failed", blocked_reasons: [{ problem_code: "preparation_failed", message: error instanceof Error ? error.message : String(error) }] }).eq("id", exportId);
+    await s.from("manufacturing_period_exports").update({ status: "failed", blocked_reasons: [{ problem_code: "preparation_failed", message: describeManufacturingPreparationError(error) }] }).eq("id", exportId);
     throw error;
   }
 }

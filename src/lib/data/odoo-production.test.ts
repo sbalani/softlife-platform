@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { manufacturingSourceOrder, mergeRecipeVersionComponents, OdooContractError, parsePeriodInput, presentManufacturingExport, validateManufacturingResult } from "./odoo-production.ts";
+import { describeManufacturingPreparationError, manufacturingQueryBatches, manufacturingSourceOrder, mergeRecipeVersionComponents, OdooContractError, parsePeriodInput, presentManufacturingExport, validateManufacturingResult } from "./odoo-production.ts";
 
 test("period requests freeze exact UTC boundaries and a deterministic fingerprint", () => {
   const input = parsePeriodInput({
@@ -68,4 +68,18 @@ test("manufacturing source references preserve order and machine provenance", ()
     platform_order_id: "order-id", order_code: "S00124", machine_id: "machine-id",
     machine_imei: "860000000000001", machine_name: "Flowers",
   });
+});
+
+test("large manufacturing queries are split into URL-safe batches", () => {
+  const values = Array.from({ length: 1001 }, (_, index) => `order-${index}`);
+  const batches = manufacturingQueryBatches(values);
+  assert.deepEqual(batches.map((batch) => batch.length), [200, 200, 200, 200, 200, 1]);
+  assert.deepEqual(batches.flat(), values);
+});
+
+test("structured preparation errors remain actionable", () => {
+  assert.equal(describeManufacturingPreparationError({
+    message: "Request URI is too long", details: "The order filter exceeded the proxy limit", hint: "Send fewer IDs", code: "PGRST000",
+  }), "Request URI is too long Details: The order filter exceeded the proxy limit Hint: Send fewer IDs (PGRST000)");
+  assert.equal(describeManufacturingPreparationError(new Error("Network unavailable")), "Network unavailable");
 });

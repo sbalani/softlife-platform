@@ -185,7 +185,13 @@ export async function preparePlatformPeriod(fd: FormData): Promise<void> {
   if (activeError) throw activeError;
   if (active?.idempotency_key === `platform:${requestId}`) { revalidatePath("/odoo"); return; }
   if (active) throw new Error(`An active run already exists for these dates: ${active.idempotency_key} (${active.status}). Review or cancel it below.`);
-  await prepareManufacturingPeriod(s, { idempotency_key: `platform:${requestId}`, local_from: localFrom, local_to: localTo, time_zone: timeZone, initiated_by: "platform" }, "platform");
+  const idempotencyKey = `platform:${requestId}`;
+  try {
+    await prepareManufacturingPeriod(s, { idempotency_key: idempotencyKey, local_from: localFrom, local_to: localTo, time_zone: timeZone, initiated_by: "platform" }, "platform");
+  } catch (error) {
+    const { data: failed } = await s.from("manufacturing_period_exports").select("status").eq("idempotency_key", idempotencyKey).maybeSingle();
+    if (failed?.status !== "failed") throw error;
+  }
   revalidatePath("/odoo");
 }
 

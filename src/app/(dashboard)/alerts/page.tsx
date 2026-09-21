@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { getAlerts } from "@/lib/data/alerts";
+import { getAlertCustomerOptions, getAlerts } from "@/lib/data/alerts";
+import { resolveAlertHistoryCustomer } from "@/lib/alert-history-filter";
 import { formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { getChangeAlertRules } from "@/lib/data/change-alert-rules";
@@ -18,12 +19,16 @@ const SEV: Record<string, { ring: string; dot: string; label: string }> = {
   info: { ring: "border-sage/30", dot: "bg-sage", label: "Info" },
 };
 
-export default async function AlertsPage() {
+export default async function AlertsPage({ searchParams }: { searchParams: Promise<{ tenant?: string | string[] }> }) {
+  const params = await searchParams;
   const [session, machineScope, tz] = await Promise.all([getSessionProfile(), getAccessibleMachineIds(), getDisplayTimezone()]);
   const isAdmin = session?.role === "admin";
+  const customerOptions = isAdmin ? await getAlertCustomerOptions() : [];
+  const requestedTenant = typeof params.tenant === "string" ? params.tenant : null;
+  const selectedTenant = resolveAlertHistoryCustomer(session, requestedTenant, customerOptions);
   const [{ alerts, source }, { alerts: history }, adminData] = await Promise.all([
     getAlerts(false, machineScope ?? undefined),
-    getAlerts(true, machineScope ?? undefined),
+    getAlerts(true, machineScope ?? undefined, selectedTenant ?? undefined),
     isAdmin
       ? Promise.all([getChangeAlertRules(), getMachines(), getProducts()])
       : Promise.resolve(null),
@@ -79,7 +84,14 @@ export default async function AlertsPage() {
       </div>
       {alerts.length === 0 && <p className="rounded-2xl border border-line bg-white p-5 text-sm text-taupe">No active alerts.</p>}
       <section className="mt-8">
-        <h2 className="mb-3 font-display text-xl font-bold text-cocoa">Alert history</h2>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <div><h2 className="font-display text-xl font-bold text-cocoa">Alert history</h2><p className="mt-1 text-xs text-taupe">Customer ownership is evaluated when each alert started.</p></div>
+          {isAdmin && <form className="flex flex-wrap items-end gap-2">
+            <label><span className="mb-1 block text-[11px] uppercase tracking-wide text-taupe">Customer</span><select name="tenant" defaultValue={selectedTenant ?? ""} className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-cocoa"><option value="">All customers</option>{customerOptions.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></label>
+            <button className="rounded-lg bg-cocoa px-3 py-2 text-sm font-bold text-white">Filter history</button>
+            {selectedTenant && <Link href="/alerts" className="px-2 py-2 text-sm font-semibold text-terracotta">Clear</Link>}
+          </form>}
+        </div>
         <div className="overflow-x-auto rounded-2xl border border-line bg-white">
           <table className="w-full min-w-[720px] text-sm">
             <thead className="bg-sand/60 text-left text-[11px] uppercase tracking-wide text-taupe"><tr><th className="px-4 py-3">Machine</th><th className="px-4 py-3">Alert</th><th className="px-4 py-3">Started</th><th className="px-4 py-3">Recovered</th></tr></thead>

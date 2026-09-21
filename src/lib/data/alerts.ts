@@ -1,4 +1,5 @@
 import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import type { AlertCustomerOption } from "@/lib/alert-history-filter";
 
 export type Alert = {
   id: string;
@@ -25,7 +26,15 @@ const SAMPLE: Alert[] = [
   { id: "a2", type: "warehouse_restock", severity: "critical", machine_name: null, product_name: null, title: "Warehouse stock low", message: "Consigned stock is at 22%. Schedule a restock.", remaining_pct: 22, created_at: "2026-07-01T07:30:00Z", change_log_id: null, device_imei: null, change_field: null, entity_key: null, resolved_at: null, resolved_by: null, incident_id: null, incident_status: null },
 ];
 
-export async function getAlerts(resolved = false, machineIds?: string[]): Promise<{ alerts: Alert[]; source: "supabase" | "sample" }> {
+export async function getAlertCustomerOptions(): Promise<AlertCustomerOption[]> {
+  if (!isSupabaseConfigured()) return [];
+  const s = await createServiceClient();
+  const { data, error } = await s.from("tenants").select("id,name").eq("kind", "franchisee").order("name");
+  if (error) throw error;
+  return (data ?? []).map((tenant) => ({ id: String(tenant.id), name: String(tenant.name) }));
+}
+
+export async function getAlerts(resolved = false, machineIds?: string[], customerTenantId?: string): Promise<{ alerts: Alert[]; source: "supabase" | "sample" }> {
   if (machineIds?.length === 0) return { alerts: [], source: "supabase" };
   if (!isSupabaseConfigured()) return { alerts: resolved ? [] : SAMPLE, source: "sample" };
   try {
@@ -38,6 +47,7 @@ export async function getAlerts(resolved = false, machineIds?: string[]): Promis
     query = resolved ? query.not("resolved_at", "is", null) : query.is("resolved_at", null);
     if (!resolved) query = query.or("machine_id.is.null,machine_deployed.eq.true,type.eq.defrost_automation_failed");
     if (machineIds) query = query.in("machine_id", machineIds);
+    if (resolved && customerTenantId) query = query.eq("customer_tenant_id", customerTenantId);
     const { data, error } = await query;
     if (error || !data) return machineIds ? { alerts: [], source: "supabase" } : { alerts: resolved ? [] : SAMPLE, source: "sample" };
     const rows = data as Omit<Alert, "incident_id" | "incident_status">[];

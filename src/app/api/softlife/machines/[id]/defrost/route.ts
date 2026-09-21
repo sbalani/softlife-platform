@@ -30,7 +30,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const result = await authorizedMachine(request, (await params).id);
     if ("response" in result) return result.response;
     const [scheduleResult, runsResult] = await Promise.all([
-      result.service.from("machine_defrost_schedules").select("defrost_seconds,formation_timeout_seconds,requires_intervention").eq("machine_id", result.machine.id).maybeSingle(),
+      result.service.from("machine_defrost_schedules").select("enabled,local_start_time,time_zone,defrost_seconds,formation_timeout_seconds,requires_intervention").eq("machine_id", result.machine.id).maybeSingle(),
       result.service.from("machine_defrost_runs").select(RUN_FIELDS).eq("machine_id", result.machine.id).order("created_at", { ascending: false }).limit(10),
     ]);
     if (scheduleResult.error) throw scheduleResult.error;
@@ -39,12 +39,60 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return Response.json({
       machine_id: result.machine.id,
       schedule: scheduleResult.data ? {
+        enabled: Boolean(scheduleResult.data.enabled),
+        local_start_time: String(scheduleResult.data.local_start_time).slice(0, 5),
+        time_zone: String(scheduleResult.data.time_zone),
         defrost_seconds: Number(scheduleResult.data.defrost_seconds),
         formation_timeout_seconds: Number(scheduleResult.data.formation_timeout_seconds),
         requires_intervention: Boolean(scheduleResult.data.requires_intervention),
       } : null,
       active_run: runs.find((run) => ACTIVE_STATES.includes(String(run.state))) ?? null,
       runs,
+    });
+  } catch (error) {
+    return Response.json({ error: { message: error instanceof Error ? error.message : String(error) } }, { status: 500 });
+  }
+}
+
+export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const result = await authorizedMachine(request, (await params).id);
+    if ("response" in result) return result.response;
+    const body = await request.json().catch(() => null) as { enabled?: unknown; local_start_time?: unknown; defrost_minutes?: unknown } | null;
+    const enabled = body?.enabled;
+    const localStartTime = typeof body?.local_start_time === "string" ? body.local_start_time.trim() : "";
+    const defrostMinutes = Number(body?.defrost_minutes);
+    if (typeof enabled !== "boolean") return Response.json({ error: { message: "enabled must be boolean" } }, { status: 400 });
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(localStartTime)) return Response.json({ error: { message: "Invalid defrost start time" } }, { status: 400 });
+    if (!Number.isInteger(defrostMinutes) || defrostMinutes < 1 || defrostMinutes > 30) {
+      return Response.json({ error: { message: "Defrost duration must be between 1 and 30 minutes" } }, { status: 400 });
+    }
+    const { error } = await result.service.rpc("set_machine_operations", {
+      p_machine_id: result.machine.id,
+      p_deployed: Boolean(result.machine.deployed),
+      p_defrost_enabled: enabled,
+      p_defrost_time: localStartTime,
+      p_defrost_seconds: defrostMinutes * 60,
+      p_updated_by: result.session.id,
+    });
+    if (error) {
+      const conflict = /deployment|intervention/i.test(error.message);
+      return Response.json({ error: { message: error.message } }, { status: conflict ? 409 : 500 });
+    }
+    const { data: schedule, error: readError } = await result.service.from("machine_defrost_schedules")
+      .select("enabled,local_start_time,time_zone,defrost_seconds,formation_timeout_seconds,requires_intervention")
+      .eq("machine_id", result.machine.id).single();
+    if (readError) throw readError;
+    return Response.json({
+      ok: true,
+      schedule: {
+        enabled: Boolean(schedule.enabled),
+        local_start_time: String(schedule.local_start_time).slice(0, 5),
+        time_zone: String(schedule.time_zone),
+        defrost_seconds: Number(schedule.defrost_seconds),
+        formation_timeout_seconds: Number(schedule.formation_timeout_seconds),
+        requires_intervention: Boolean(schedule.requires_intervention),
+      },
     });
   } catch (error) {
     return Response.json({ error: { message: error instanceof Error ? error.message : String(error) } }, { status: 500 });

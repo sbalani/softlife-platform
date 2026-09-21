@@ -37,7 +37,7 @@ export async function GET(request: Request) {
   const allowedIds = await mobileMachineIds(s, session);
   if (allowedIds?.length === 0) return Response.json({ records: [], scope_version: session.scopeVersion });
   let query = s.from("service_action_reports")
-    .select("id,client_uuid,machine_id,occurred_at,action_kind,action_modes,status,notes,cleaning_material_used,water_bucket_count,provenance_status,revision,mobile_draft_payload,updated_at,service_action_refill_lines(id,line_number,quantity,unit,product_name,observed_lot_code,observed_odoo_lot_id,finished_bottle,left_unfinished_bottle,inventory_quantity,provenance_status,unresolved_reason),service_action_attachments(id,refill_line_id,kind,mime_type,size_bytes,created_at)")
+    .select("id,client_uuid,machine_id,occurred_at,action_kind,action_modes,status,notes,cleaning_material_used,water_bucket_count,provenance_status,revision,mobile_draft_payload,updated_at,service_action_refill_lines(id,line_number,quantity,unit,product_name,observed_lot_code,observed_odoo_lot_id,finished_bottle,left_unfinished_bottle,inventory_quantity,provenance_status,unresolved_reason),service_action_attachments(id,refill_line_id,kind,mime_type,size_bytes,created_at),service_action_report_incidents(incident_id)")
     .eq("operator_id", session.id).eq("status", "draft").order("updated_at", { ascending: false }).limit(100);
   if (allowedIds) query = query.in("machine_id", allowedIds);
   const { data, error } = await query;
@@ -56,7 +56,8 @@ export async function GET(request: Request) {
       const serverLine = hasCanonicalLine ? serverLines[serverLineIndex++] : null;
       return { ...line, finished_bottle: serverLine?.finished_bottle ?? line.finished_bottle ?? false, left_unfinished_bottle: serverLine?.left_unfinished_bottle ?? line.left_unfinished_bottle ?? false, inventory_quantity: serverLine?.inventory_quantity ?? null, server_line_id: serverLine?.id ?? null, provenance_status: serverLine?.provenance_status ?? null, unresolved_reason: serverLine?.unresolved_reason ?? null };
     });
-    return { ...payload, action_kind: row.action_kind, action_modes: row.action_modes, refill_lines: refillLines, report_id: row.id, revision: row.revision, updated_at: row.updated_at, provenance_status: row.provenance_status, attachments: row.service_action_attachments };
+    const incidentIds = ((row.service_action_report_incidents as { incident_id: string }[]) ?? []).map((link) => link.incident_id).sort();
+    return { ...payload, action_kind: row.action_kind, action_modes: row.action_modes, refill_lines: refillLines, incident_ids: incidentIds, report_id: row.id, revision: row.revision, updated_at: row.updated_at, provenance_status: row.provenance_status, attachments: row.service_action_attachments };
   });
   return Response.json({ records, scope_version: session.scopeVersion });
 }

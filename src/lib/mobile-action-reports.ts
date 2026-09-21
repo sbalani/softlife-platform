@@ -4,7 +4,7 @@ import { canAccessMobileMachine } from "@/lib/auth/mobile-authorization";
 import { legacyKindFromModes, parseActionReportModes } from "@/lib/action-report-modes";
 import { isValidBottleQuantity } from "@/lib/action-report-refills";
 
-const UUID = /^[0-9a-f-]{36}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type MobileActionRecord = Record<string, unknown>;
 
@@ -43,6 +43,14 @@ export async function persistMobileActionReport(s: SupabaseClient, session: Mobi
   if (status === "confirmed" && actionModes.includes("other") && !notes) throw new Error("Notes are required for other actions");
   const expectedRevision = Number(record.revision ?? 0);
   if (!Number.isInteger(expectedRevision) || expectedRevision < 0) throw new Error("Invalid draft revision");
+  if (record.incident_ids !== undefined && !Array.isArray(record.incident_ids)) throw new Error("Invalid incident links");
+  const incidentIds = [...new Set((record.incident_ids as unknown[] | undefined ?? []).map((value) => String(value)))].sort();
+  if (incidentIds.length > 20 || incidentIds.some((id) => !UUID.test(id))) throw new Error("Invalid incident links");
+  if (status === "confirmed" && incidentIds.length) {
+    const { data: incidents, error: incidentError } = await s.from("incidents").select("source_kind,source_alert_resolved_at").in("id", incidentIds);
+    if (incidentError) throw incidentError;
+    if ((incidents ?? []).some((incident) => incident.source_kind === "alert" && !incident.source_alert_resolved_at)) throw new Error("Telemetry still reports one or more incident alerts as active");
+  }
   const mobilePayload = {
     client_uuid: clientUuid, machine_id: machineId, occurred_at: new Date(occurredAt).toISOString(), status,
     revision: expectedRevision, action_kind: actionKind, action_modes: actionModes, notes,
@@ -56,13 +64,16 @@ export async function persistMobileActionReport(s: SupabaseClient, session: Mobi
       ...(line.finished_bottle === true ? { finished_bottle: true } : {}),
       ...(line.left_unfinished_bottle === true ? { left_unfinished_bottle: true } : {}),
     })) : [],
+    incident_ids: incidentIds,
   };
-  const { data, error } = await s.rpc("record_mobile_service_action_report", {
+  const { data, error } = await s.rpc("record_revisioned_service_action_report", {
     p_client_uuid: clientUuid, p_machine_id: machineId, p_operator_id: session.id,
-    p_occurred_at: new Date(occurredAt).toISOString(), p_action_kind: actionKind, p_status: status,
+    p_actor_id: session.id,
+    p_occurred_at: new Date(occurredAt).toISOString(), p_status: status,
     p_notes: notes, p_cleaning_material_used: hasCleaning ? materialUsed : null,
     p_water_bucket_count: hasCleaning ? waterBuckets : null, p_refill_lines: lines,
-    p_expected_revision: expectedRevision, p_mobile_payload: mobilePayload,
+    p_source: "mobile", p_expected_revision: expectedRevision, p_draft_payload: mobilePayload,
+    p_incident_ids: incidentIds,
     p_action_modes: actionModes,
   });
   if (error) throw error;

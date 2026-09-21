@@ -10,6 +10,7 @@ export type AnalyticsParams = {
   machine?: string;
   product?: string;
   payType?: string;
+  franchiseeId?: string;
   incident?: string;
   weather?: string;
 };

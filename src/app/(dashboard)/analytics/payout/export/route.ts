@@ -30,7 +30,6 @@ export async function GET(request: Request) {
     if (!report) return privateResponse("Franchisee tenant not found.", { status: 404 });
     const includeBankDetails = url.searchParams.get("includeBankDetails") === "true";
     const storedBankDetails = includeBankDetails ? await getTenantBankDetails(authorization.tenantId) : null;
-    if (includeBankDetails && !storedBankDetails) return privateResponse("Bank details were requested but are not available for this franchisee.", { status: 409 });
     const bankDetails = storedBankDetails ? { accountHolderName: storedBankDetails.account_holder_name, iban: storedBankDetails.iban, bicSwift: storedBankDetails.bic_swift, bankName: storedBankDetails.bank_name } : null;
     const pdf = await createPayoutPdf({ franchiseeName: report.tenantName, from, to: to!, rows: report.rows, bankDetails });
     const safeTenant = report.tenantName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "franchisee";

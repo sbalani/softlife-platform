@@ -4,7 +4,7 @@ import type { Order } from "./data/orders.ts";
 import type { BankDetails } from "./bank-details.ts";
 
 export const PAYOUT_TIME_ZONE = "Europe/Madrid";
-export const PAYOUT_IVA_RATE_PERCENT = 10;
+export const PAYOUT_IVA_RATE_PERCENT = 21;
 
 export type PayoutAssignment = {
   id: string;
@@ -36,8 +36,18 @@ export type PayoutRow = {
   orders: number;
 };
 
-export function calculatePayoutIva(payout: number): number {
-  return payout * (PAYOUT_IVA_RATE_PERCENT / 100);
+export function roundCurrency(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+export function payoutTaxBreakdown(payoutIncludingIva: number): { base: number; iva: number; total: number } {
+  const total = roundCurrency(payoutIncludingIva);
+  const base = roundCurrency(total / (1 + PAYOUT_IVA_RATE_PERCENT / 100));
+  return { base, iva: roundCurrency(total - base), total };
+}
+
+export function calculatePayoutIva(payoutIncludingIva: number): number {
+  return payoutTaxBreakdown(payoutIncludingIva).iva;
 }
 
 function madridDay(timestamp: string): string | null {
@@ -100,7 +110,9 @@ export function calculatePayoutRows(
     rows.set(assignment.id, row);
   }
 
-  return [...rows.values()].sort((a, b) => b.payout - a.payout || a.machineName.localeCompare(b.machineName));
+  return [...rows.values()]
+    .map((row) => ({ ...row, payout: roundCurrency(row.payout) }))
+    .sort((a, b) => b.payout - a.payout || a.machineName.localeCompare(b.machineName));
 }
 
 export type PayoutAuthorization =
@@ -166,21 +178,24 @@ export async function createPayoutPdf(input: {
   document.setSubject(`Payout period ${input.from} to ${input.to}`);
   const regular = await document.embedFont(StandardFonts.Helvetica);
   const bold = await document.embedFont(StandardFonts.HelveticaBold);
-  const columns = [36, 194, 335, 380, 425, 484, 543, 606, 679];
-  const widths = [152, 135, 39, 39, 53, 53, 57, 67, 126];
+  const columns = [36, 169, 289, 330, 371, 433, 495, 557, 619, 686];
+  const widths = [127, 114, 35, 35, 56, 56, 56, 56, 61, 119];
   let page: PDFPage;
   let y: number;
 
   const addPage = (first = false) => {
     page = document.addPage([841.89, 595.28]);
+    page.drawRectangle({ x: 0, y: 0, width: 841.89, height: 595.28, color: rgb(1, 1, 1) });
     y = 558;
     if (first) {
       page.drawText(fit(input.franchiseeName, bold, 24, 770), { x: 36, y, size: 24, font: bold, color: rgb(0.19, 0.12, 0.09) });
       y -= 28;
-      page.drawText("Franchisee payout statement", { x: 36, y, size: 13, font: bold, color: rgb(0.35, 0.55, 0.45) });
+      page.drawText("Franchisee payout statement (not an invoice)", { x: 36, y, size: 13, font: bold, color: rgb(0.35, 0.55, 0.45) });
       y -= 20;
       page.drawText(`Period: ${input.from} to ${input.to} (Europe/Madrid)`, { x: 36, y, size: 10, font: regular });
-      y -= 30;
+      y -= 15;
+      page.drawText(`Sales IVA follows the applicable sales tax rate; total payable includes ${PAYOUT_IVA_RATE_PERCENT}% payout IVA.`, { x: 36, y, size: 8, font: regular });
+      y -= 24;
       const bankLines = payoutBankDetailLines(input.bankDetails);
       if (bankLines.length) {
         page.drawText("Payment account", { x: 36, y, size: 10, font: bold, color: rgb(0.19, 0.12, 0.09) });
@@ -195,7 +210,7 @@ export async function createPayoutPdf(input: {
       page.drawText(fit(`${input.franchiseeName} - payout statement`, bold, 13, 770), { x: 36, y, size: 13, font: bold });
       y -= 25;
     }
-    const headings = ["Machine", "Assignment period", "Share", "Orders", "Gross EUR", "VAT EUR", "Net EUR", "Payout EUR", `IVA (${PAYOUT_IVA_RATE_PERCENT}%)`];
+    const headings = ["Machine", "Assignment period", "Share", "Orders", "Sales gross", "Sales IVA", "Sales net", "Payout base", `IVA ${PAYOUT_IVA_RATE_PERCENT}%`, "Total payable"];
     page.drawRectangle({ x: 32, y: y - 6, width: 777, height: 20, color: rgb(0.93, 0.91, 0.87) });
     headings.forEach((heading, index) => page.drawText(heading, { x: columns[index], y, size: 8, font: bold }));
     y -= 19;
@@ -208,6 +223,7 @@ export async function createPayoutPdf(input: {
   } else {
     for (const row of input.rows) {
       if (y! < 68) addPage();
+      const payout = payoutTaxBreakdown(row.payout);
       const values = [
         row.deviceImei ? `${row.machineName} (${row.deviceImei})` : row.machineName,
         row.period,
@@ -216,8 +232,9 @@ export async function createPayoutPdf(input: {
         row.gross.toFixed(2),
         row.vat.toFixed(2),
         row.net.toFixed(2),
-        row.payout.toFixed(2),
-        calculatePayoutIva(row.payout).toFixed(2),
+        payout.base.toFixed(2),
+        payout.iva.toFixed(2),
+        payout.total.toFixed(2),
       ];
       values.forEach((value, index) => page!.drawText(fit(value, regular, 8, widths[index]), { x: columns[index], y: y!, size: 8, font: regular }));
       page!.drawLine({ start: { x: 32, y: y! - 5 }, end: { x: 809, y: y! - 5 }, thickness: 0.4, color: rgb(0.82, 0.82, 0.82) });
@@ -226,16 +243,20 @@ export async function createPayoutPdf(input: {
   }
 
   if (y! < 60) addPage();
-  const totals = input.rows.reduce((sum, row) => ({
-    orders: sum.orders + row.orders,
-    gross: sum.gross + row.gross,
-    vat: sum.vat + row.vat,
-    net: sum.net + row.net,
-    payout: sum.payout + row.payout,
-    payoutIva: sum.payoutIva + calculatePayoutIva(row.payout),
-  }), { orders: 0, gross: 0, vat: 0, net: 0, payout: 0, payoutIva: 0 });
+  const totals = input.rows.reduce((sum, row) => {
+    const payout = payoutTaxBreakdown(row.payout);
+    return {
+      orders: sum.orders + row.orders,
+      gross: sum.gross + row.gross,
+      vat: sum.vat + row.vat,
+      net: sum.net + row.net,
+      payoutBase: sum.payoutBase + payout.base,
+      payoutIva: sum.payoutIva + payout.iva,
+      payoutTotal: sum.payoutTotal + payout.total,
+    };
+  }, { orders: 0, gross: 0, vat: 0, net: 0, payoutBase: 0, payoutIva: 0, payoutTotal: 0 });
   page!.drawText("TOTAL", { x: columns[1], y: y!, size: 9, font: bold });
-  [String(totals.orders), totals.gross.toFixed(2), totals.vat.toFixed(2), totals.net.toFixed(2), totals.payout.toFixed(2), totals.payoutIva.toFixed(2)]
+  [String(totals.orders), totals.gross.toFixed(2), totals.vat.toFixed(2), totals.net.toFixed(2), totals.payoutBase.toFixed(2), totals.payoutIva.toFixed(2), totals.payoutTotal.toFixed(2)]
     .forEach((value, index) => page!.drawText(value, { x: columns[index + 3], y: y!, size: 9, font: bold }));
 
   return document.save();

@@ -16,6 +16,8 @@ import { getDailyWeather } from "@/lib/data/weather";
 import { weatherCodeLabel } from "@/lib/weather";
 import { getSalesContextNotes } from "@/lib/data/sales-context-notes";
 import { SalesNotesPanel } from "./SalesNotesPanel";
+import { payoutTaxBreakdown } from "@/lib/payout-report";
+import { PayoutBulkExport } from "./PayoutBulkExport";
 
 export const dynamic = "force-dynamic";
 
@@ -105,12 +107,21 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   const previousAverage = previousSales.length ? previousRevenue / previousSales.length : 0;
   const refunded = completed.filter((order) => order.refund_status === "Refunded");
   const refundedValue = refunded.reduce((sum, order) => sum + order.price, 0);
-  const payoutOrders = netSales(ordersInPeriod(loadedOrders, range.from, range.to, tz));
+  const payoutOrders = netSales(loadedOrders);
   const allPayoutRows = session?.role === "admin" || session?.role === "franchisee" ? await calculateFranchiseePayouts(payoutOrders, { from: range.from, to: range.to }) : [];
-  const payoutRows = session?.role === "franchisee" ? allPayoutRows.filter((row) => row.tenantId === session.tenant_id) : allPayoutRows;
+  const franchiseeOptions = [...new Map(allPayoutRows.map((row) => [row.tenantId, { id: row.tenantId, name: row.tenantName }])).values()].sort((a, b) => a.name.localeCompare(b.name));
+  const selectedFranchiseeId = session?.role === "admin" && franchiseeOptions.some((tenant) => tenant.id === params.franchiseeId) ? params.franchiseeId : undefined;
+  const payoutRows = session?.role === "franchisee"
+    ? allPayoutRows.filter((row) => row.tenantId === session.tenant_id)
+    : selectedFranchiseeId ? allPayoutRows.filter((row) => row.tenantId === selectedFranchiseeId) : allPayoutRows;
   const payoutGroups = [...new Set(payoutRows.map((row) => row.tenantId))].map((tenantId) => {
     const rows = payoutRows.filter((row) => row.tenantId === tenantId);
-    return { tenantId, tenantName: rows[0]?.tenantName ?? "Franchisee", rows, payout: rows.reduce((sum, row) => sum + row.payout, 0) };
+    const payout = rows.reduce((sum, row) => sum + row.payout, 0);
+    const tax = rows.reduce((sum, row) => {
+      const value = payoutTaxBreakdown(row.payout);
+      return { base: sum.base + value.base, iva: sum.iva + value.iva, total: sum.total + value.total };
+    }, { base: 0, iva: 0, total: 0 });
+    return { tenantId, tenantName: rows[0]?.tenantName ?? "Franchisee", rows, payout, ...tax };
   });
 
   const salesTotals = dailySalesTotals(sales, range.from, range.days, tz);
@@ -176,7 +187,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   }
   const paymentRows = [...paymentStats.entries()].map(([name, values]) => ({ name, ...values })).sort((a, b) => b.revenue - a.revenue);
   const paymentOptions = [...new Set(loadedOrders.map((order) => order.pay_type).filter((value): value is string => !!value))].sort();
-  const query = new URLSearchParams(Object.entries({ dateFrom: range.from, dateTo: range.to, machineId: selectedMachineId, product: params.product, payType: params.payType, incident: selectedIncidentFilter, weather: selectedWeather }).filter((entry): entry is [string, string] => !!entry[1]));
+  const query = new URLSearchParams(Object.entries({ dateFrom: range.from, dateTo: range.to, machineId: selectedMachineId, product: params.product, payType: params.payType, franchiseeId: selectedFranchiseeId, incident: selectedIncidentFilter, weather: selectedWeather }).filter((entry): entry is [string, string] => !!entry[1]));
   const reportUrl = (report?: "weekly" | "monthly") => {
     const reportQuery = new URLSearchParams(query);
     if (report) reportQuery.set("report", report);
@@ -210,6 +221,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         <label><span className={label}>Machine</span><select name="machineId" defaultValue={selectedMachineId ?? ""} className={input}><option value="">All machines</option>{machineOptions.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}</select></label>
         <label><span className={label}>Product</span><input name="product" defaultValue={params.product} placeholder="Name or alias" className={`w-40 ${input}`} /></label>
         <label><span className={label}>Payment</span><select name="payType" defaultValue={params.payType ?? ""} className={input}><option value="">All methods</option>{paymentOptions.map((option) => <option key={option}>{option}</option>)}</select></label>
+        {session?.role === "admin" && <label><span className={label}>Payout franchisee</span><select name="franchiseeId" defaultValue={selectedFranchiseeId ?? ""} className={input}><option value="">All franchisees</option>{franchiseeOptions.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></label>}
         <label><span className={label}>Incident overlay</span><select name="incident" defaultValue={selectedIncidentFilter} className={input}><option value="off">Off</option><option value="all">All incidents</option><option value="cup">All cup incidents</option>{incidentPolicies.map((policy) => <option key={policy.incidentType} value={policy.incidentType}>{policy.label}</option>)}</select></label>
         <label><span className={label}>Weather overlay</span><select name="weather" defaultValue={selectedWeather} className={input}><option value="off">Off</option><option value="temperature">Temperature</option><option value="rain">Rainfall</option></select></label>
         <button className="rounded-lg bg-cocoa px-4 py-2 text-sm font-bold text-white">Apply</button>
@@ -233,7 +245,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         <KpiCard label="Refunded value" value={`€${refundedValue.toFixed(2)}`} hint={`${refunded.length} refunded order(s)`} accent="#b65d5d" />
         <KpiCard label="Completion rate" value={`${eligibleOrders.length ? ((completed.length / eligibleOrders.length) * 100).toFixed(1) : "0.0"}%`} hint={`${completed.length} of ${eligibleOrders.length} non-test orders`} accent="#6fa98c" />
         <KpiCard label="Selling machines" value={`${machineRows.length}`} hint={`${machines.filter((machine) => machine.net_online).length} online now`} accent="#d47e54" />
-        <KpiCard label="Franchisee payout" value={`€${payoutRows.reduce((sum, row) => sum + row.payout, 0).toFixed(2)}`} hint="VAT removed before share" accent="#6fa98c" />
+        <KpiCard label="Franchisee payout" value={`€${payoutGroups.reduce((sum, group) => sum + group.total, 0).toFixed(2)}`} hint={`Includes €${payoutGroups.reduce((sum, group) => sum + group.iva, 0).toFixed(2)} payout IVA at 21%`} accent="#6fa98c" />
       </div>
 
       <section className="mt-6 rounded-2xl border border-line bg-white p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-display text-lg font-bold text-cocoa">Net sales trend</h2><p className="mb-2 text-xs text-taupe">Daily, refund-adjusted revenue and units sold{incidentTrend ? ` with ${incidentFilterLabel.toLowerCase()} by opening day` : ""}{weatherTrend?.length ? ` · Open-Meteo using current coordinates across ${weatherResult.locationCount} location${weatherResult.locationCount === 1 ? "" : "s"}` : ""}</p>{selectedWeather !== "off" && weatherResult.error && <p className="mb-2 text-xs font-semibold text-danger">{weatherResult.error}</p>}</div>{incidentTrend && <div className="flex items-center gap-2 rounded-full bg-danger/10 px-3 py-1 text-xs font-bold text-danger"><span className="h-0 w-5 border-t-2 border-dashed border-danger" />{incidentCount} incident{incidentCount === 1 ? "" : "s"}</div>}</div><div className="overflow-x-auto"><div style={{ minWidth: Math.max(600, revenueTrend.length * 32) }}><LineChart data={revenueTrend} color="#d47e54" height={240} unit="€" secondaryData={incidentTrend} secondaryColor="#b65d5d" secondaryLabel={incidentFilterLabel} quantityData={unitsTrend} quantityLabel="Units sold" weatherData={weatherTrend} weatherLabel={selectedWeather === "rain" ? "Rainfall" : "Mean temperature"} weatherUnit={selectedWeather === "rain" ? " mm" : "°C"} annotations={contextNotes.map((note) => ({ id: note.id, day: note.salesDate, text: note.body, category: note.category, machineName: note.machineName }))} /></div></div></section>
@@ -268,12 +280,13 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
       {(session?.role === "admin" || session?.role === "franchisee") && payoutGroups.length > 0 && (
         <section className="mt-6 rounded-2xl border border-line bg-white p-5">
           <h2 className="font-display text-lg font-bold text-cocoa">Franchisee profit share</h2>
-          <p className="mb-4 text-xs text-taupe">Filtered period · VAT removed before assignment share</p>
+          <p className="mb-4 text-xs text-taupe">Settlement uses the applied date range and payout franchisee only. Machine, product, and payment filters do not alter payout statements. Sales IVA is removed before the share; the displayed payable amount includes 21% payout IVA.</p>
+          {session?.role === "admin" && <PayoutBulkExport franchisees={payoutGroups.map((group) => ({ tenantId: group.tenantId, tenantName: group.tenantName, total: group.total }))} from={range.from} to={range.to} />}
           <div className="space-y-4">
             {payoutGroups.map((group) => (
               <div key={group.tenantId} className="rounded-xl border border-line p-4">
-                <div className="mb-3 flex flex-wrap justify-between gap-3"><span className="font-bold text-cocoa">{group.tenantName}</span><div className="flex flex-wrap items-center gap-3"><span className="font-bold text-sage">€{group.payout.toFixed(2)}</span><PayoutExportForm tenantId={group.tenantId} from={range.from} to={range.to} compact /></div></div>
-                <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-xs"><thead className="text-left uppercase text-taupe"><tr><th className="py-2">Machine</th><th>Period</th><th className="text-right">Share</th><th className="text-right">Orders</th><th className="text-right">Gross</th><th className="text-right">VAT</th><th className="text-right">Net</th><th className="text-right">Payout</th></tr></thead><tbody className="divide-y divide-line">{group.rows.map((row) => <tr key={row.assignmentId}><td className="py-2 font-semibold text-cocoa">{row.machineName}</td><td>{row.period}</td><td className="text-right">{row.sharePercent}%</td><td className="text-right">{row.orders}</td><td className="text-right">€{row.gross.toFixed(2)}</td><td className="text-right">€{row.vat.toFixed(2)}</td><td className="text-right">€{row.net.toFixed(2)}</td><td className="text-right font-bold text-sage">€{row.payout.toFixed(2)}</td></tr>)}</tbody></table></div>
+                <div className="mb-3 flex flex-wrap justify-between gap-3"><span className="font-bold text-cocoa">{group.tenantName}</span><div className="flex flex-wrap items-center gap-3 text-xs"><span>Base €{group.base.toFixed(2)}</span><span>IVA €{group.iva.toFixed(2)}</span><span className="font-bold text-sage">Payable €{group.total.toFixed(2)}</span><PayoutExportForm tenantId={group.tenantId} from={range.from} to={range.to} compact /></div></div>
+                <div className="overflow-x-auto"><table className="w-full min-w-[880px] text-xs"><thead className="text-left uppercase text-taupe"><tr><th className="py-2">Machine</th><th>Period</th><th className="text-right">Share</th><th className="text-right">Orders</th><th className="text-right">Sales gross</th><th className="text-right">Sales IVA</th><th className="text-right">Sales net</th><th className="text-right">Payout base</th><th className="text-right">IVA 21%</th><th className="text-right">Total payable</th></tr></thead><tbody className="divide-y divide-line">{group.rows.map((row) => { const tax = payoutTaxBreakdown(row.payout); return <tr key={row.assignmentId}><td className="py-2 font-semibold text-cocoa">{row.machineName}</td><td>{row.period}</td><td className="text-right">{row.sharePercent}%</td><td className="text-right">{row.orders}</td><td className="text-right">€{row.gross.toFixed(2)}</td><td className="text-right">€{row.vat.toFixed(2)}</td><td className="text-right">€{row.net.toFixed(2)}</td><td className="text-right">€{tax.base.toFixed(2)}</td><td className="text-right">€{tax.iva.toFixed(2)}</td><td className="text-right font-bold text-sage">€{tax.total.toFixed(2)}</td></tr>; })}</tbody></table></div>
               </div>
             ))}
           </div>

@@ -4,6 +4,7 @@ import { mobileAnalyticsRange, mobileOrders } from "@/lib/data/mobile-analytics"
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function GET(req: Request) {
   if (!isSupabaseConfigured()) return Response.json({ error: { message: "Not configured" } }, { status: 503 });
@@ -14,7 +15,11 @@ export async function GET(req: Request) {
   if (!valid) return Response.json({ error: { message: "Use a valid date range of up to 90 days." } }, { status: 400 });
   try {
     const service = await createServiceClient();
-    return Response.json(await mobileOrders(await mobileMachineIds(service, session), dateFrom, dateTo, service));
+    const allowedIds = await mobileMachineIds(service, session);
+    const requestedMachineId = new URL(req.url).searchParams.get("machine_id");
+    if (requestedMachineId && !UUID.test(requestedMachineId)) return Response.json({ error: { message: "Invalid machine" } }, { status: 400 });
+    if (requestedMachineId && allowedIds && !allowedIds.includes(requestedMachineId)) return Response.json({ error: { message: "Not found" } }, { status: 404 });
+    return Response.json(await mobileOrders(requestedMachineId ? [requestedMachineId] : allowedIds, dateFrom, dateTo, service));
   } catch (error) {
     return Response.json({ error: { message: error instanceof Error ? error.message : String(error) } }, { status: 500 });
   }

@@ -115,6 +115,7 @@ export async function mobileOrders(machineIds: string[] | null, dateFrom: string
       id: order.id,
       order_time: order.order_time,
       order_code: order.order_code,
+      machine_id: order.machine_id,
       machine_name: order.machine_name,
       device_imei: order.device_imei,
       product_name: order.product_name,

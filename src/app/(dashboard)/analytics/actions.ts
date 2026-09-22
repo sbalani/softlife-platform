@@ -40,7 +40,7 @@ export async function createSalesContextNote(_previous: SalesNoteActionResult, f
   });
   if (error) return { ok: false, error: error.message };
   revalidatePath("/analytics");
-  return { ok: true, message: "Sales context note added.", resetKey: crypto.randomUUID() };
+  return { ok: true, message: "Event or sales context added.", resetKey: crypto.randomUUID() };
 }
 
 export async function deleteSalesContextNote(noteId: string, expectedRevision: number): Promise<SalesNoteActionResult> {

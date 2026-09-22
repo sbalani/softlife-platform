@@ -35,6 +35,12 @@ function completedSales(orders: Order[]): Order[] {
   return orders.filter((order) => order.order_state === "COMPLETE" && !order.is_admin_override);
 }
 
+function offsetDay(day: string, days: number) {
+  const date = new Date(`${day}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 function PayoutExportForm({ tenantId, from, to, compact = false }: { tenantId: string; from: string; to: string; compact?: boolean }) {
   return <form action="/analytics/payout/export" method="get" className="flex flex-wrap items-center gap-2">
     <input type="hidden" name="tenantId" value={tenantId} />
@@ -54,9 +60,18 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     getSessionProfile(),
   ]);
   const range = analyticsRange(params, tz);
-  const machineAccess = await getAccessibleMachinePeriods(range.previousFrom, range.to);
+  const upcomingEnd = offsetDay(range.today, 730);
+  const [machineAccess, eventMachineAccess] = await Promise.all([
+    getAccessibleMachinePeriods(range.previousFrom, range.to),
+    getAccessibleMachinePeriods("2020-01-01", upcomingEnd),
+  ]);
   const machineIds = machineAccess && new Set(machineAccess.map((period) => period.machine_id));
   const machines = machineIds ? machineResult.machines.filter((machine) => machineIds.has(machine.id)) : machineResult.machines;
+  const eventMachineIds = eventMachineAccess && new Set(eventMachineAccess.map((period) => period.machine_id));
+  const eventMachineOptions = machineResult.machines
+    .filter((machine) => eventMachineIds === null || eventMachineIds.has(machine.id))
+    .map((machine) => ({ id: machine.id, name: machine.display_name || machine.name, location: machine.location }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   const orderResult = await getOrders({
     dateFrom: range.previousFrom,
     dateTo: range.to,
@@ -65,11 +80,16 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   });
   const { sync, readError } = orderResult;
   const loadedOrders = filterOrdersByMachinePeriods(orderResult.orders, machineAccess, tz);
+  const machineById = new Map(machines.map((machine) => [machine.id, machine]));
   const machineOptions = [...new Map([
-    ...machines.map((machine) => [machine.id, { id: machine.id, name: machine.display_name || machine.name, imei: machine.device_imei }] as const),
-    ...loadedOrders.flatMap((order) => order.machine_id ? [[order.machine_id, { id: order.machine_id, name: order.machine_name || "Historical machine", imei: order.device_imei } as const] as const] : []),
+    ...machines.map((machine) => [machine.id, { id: machine.id, name: machine.display_name || machine.name, imei: machine.device_imei, location: machine.location }] as const),
+    ...loadedOrders.flatMap((order) => order.machine_id ? [[order.machine_id, { id: order.machine_id, name: order.machine_name || "Historical machine", imei: order.device_imei, location: machineById.get(order.machine_id)?.location ?? null } as const] as const] : []),
   ]).values()].sort((a, b) => a.name.localeCompare(b.name));
   const selectedMachineId = resolveAnalyticsMachineId(params, machineOptions);
+  const selectedEventMachineId = eventMachineOptions.some((machine) => machine.id === selectedMachineId)
+    && (eventMachineAccess === null || eventMachineAccess.some((period) => period.machine_id === selectedMachineId && period.start_date <= range.today && (!period.end_date || period.end_date >= range.today)))
+    ? selectedMachineId
+    : undefined;
   const selectedWeather = params.weather === "off" || params.weather === "rain" ? params.weather : "temperature";
   const currentMachineIds = machineAccess === null ? null : new Set(machineAccess.filter((period) => period.start_date <= range.to && (!period.end_date || period.end_date >= range.from)).map((period) => period.machine_id));
   const weatherMachines = machines.filter((machine) => (!selectedMachineId || machine.id === selectedMachineId) && (currentMachineIds === null || currentMachineIds.has(machine.id))).map((machine) => ({
@@ -88,10 +108,15 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
       incidentType: selectedIncidentFilter,
       periods: machineAccess,
     });
-  const [weatherResult, contextNotes] = await Promise.all([
+  const upcomingMidpoint = offsetDay(range.today, 365);
+  const [weatherResult, contextNotes, upcomingContextNotes, laterContextNotes] = await Promise.all([
     selectedWeather === "off" ? Promise.resolve({ weather: [], locationCount: 0, error: undefined }) : getDailyWeather(weatherMachines, range.from, range.to, range.today),
     getSalesContextNotes(session, range.from, range.to, selectedMachineId),
+    getSalesContextNotes(session, range.today, upcomingMidpoint, selectedMachineId),
+    getSalesContextNotes(session, offsetDay(upcomingMidpoint, 1), upcomingEnd, selectedMachineId),
   ]);
+  const periodNoteIds = new Set(contextNotes.map((note) => note.id));
+  const upcomingNotes = [...upcomingContextNotes, ...laterContextNotes].filter((note) => !periodNoteIds.has(note.id));
   const filtered = filterAnalyticsOrders(loadedOrders, params, aliasMap);
   const currentOrders = ordersInPeriod(filtered, range.from, range.to, tz);
   const previousOrders = ordersInPeriod(filtered, range.previousFrom, range.previousTo, tz);
@@ -250,7 +275,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
 
       <section className="mt-6 rounded-2xl border border-line bg-white p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-display text-lg font-bold text-cocoa">Net sales trend</h2><p className="mb-2 text-xs text-taupe">Daily, refund-adjusted revenue and units sold{incidentTrend ? ` with ${incidentFilterLabel.toLowerCase()} by opening day` : ""}{weatherTrend?.length ? ` · Open-Meteo using current coordinates across ${weatherResult.locationCount} location${weatherResult.locationCount === 1 ? "" : "s"}` : ""}</p>{selectedWeather !== "off" && weatherResult.error && <p className="mb-2 text-xs font-semibold text-danger">{weatherResult.error}</p>}</div>{incidentTrend && <div className="flex items-center gap-2 rounded-full bg-danger/10 px-3 py-1 text-xs font-bold text-danger"><span className="h-0 w-5 border-t-2 border-dashed border-danger" />{incidentCount} incident{incidentCount === 1 ? "" : "s"}</div>}</div><div className="overflow-x-auto"><div style={{ minWidth: Math.max(600, revenueTrend.length * 32) }}><LineChart data={revenueTrend} color="#d47e54" height={240} unit="€" secondaryData={incidentTrend} secondaryColor="#b65d5d" secondaryLabel={incidentFilterLabel} quantityData={unitsTrend} quantityLabel="Units sold" weatherData={weatherTrend} weatherLabel={selectedWeather === "rain" ? "Rainfall" : "Mean temperature"} weatherUnit={selectedWeather === "rain" ? " mm" : "°C"} annotations={contextNotes.map((note) => ({ id: note.id, day: note.salesDate, text: note.body, category: note.category, machineName: note.machineName }))} /></div></div></section>
 
-      {session && (session.role === "admin" || session.role === "franchisee") && <SalesNotesPanel notes={contextNotes} machines={machineOptions} defaultDate={range.to} selectedMachineId={selectedMachineId} />}
+      {session && (session.role === "admin" || session.role === "franchisee") && <SalesNotesPanel notes={contextNotes} upcomingNotes={upcomingNotes} machines={eventMachineOptions} today={range.today} selectedMachineId={selectedEventMachineId} />}
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <section className="rounded-2xl border border-line bg-white p-5"><h2 className="mb-1 font-display text-lg font-bold text-cocoa">Average sales by weekday</h2><p className="mb-3 text-xs text-taupe">Average per occurrence, avoiding unequal-weekday bias</p><VBarChart data={weekdayData} color="#d47e54" formatValue={(value) => `€${value.toFixed(0)}`} /></section>

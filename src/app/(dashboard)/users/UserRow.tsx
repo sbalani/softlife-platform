@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { deleteUser, sendUserPasswordReset, setUserAccess, setUserMachines } from "./actions";
+import { formatDateTime } from "@/lib/dates";
 
 export type UserRole = "admin" | "operator" | "franchisee";
 export type EmployerKind = "softlife" | "franchisee" | "contractor";
@@ -13,12 +14,13 @@ export type UserRowData = {
   employer_kind: EmployerKind;
   tenant_id: string | null;
   assigned_machine_ids: string[];
+  last_sign_in_at?: string | null;
   isSelf: boolean;
 };
 
 const input = "rounded border border-line bg-white px-2 py-1 text-xs text-cocoa";
 
-export function UserRow({ user, tenants, machines }: { user: UserRowData; tenants: { id: string; name: string }[]; machines: { id: string; name: string }[] }) {
+export function UserRow({ user, tenants, machines, timeZone }: { user: UserRowData; tenants: { id: string; name: string }[]; machines: { id: string; name: string }[]; timeZone: string }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -39,6 +41,9 @@ export function UserRow({ user, tenants, machines }: { user: UserRowData; tenant
     <tr className="border-b border-line align-top last:border-0">
       <td className="px-4 py-3 font-semibold text-cocoa">{user.full_name ?? "—"}</td>
       <td className="px-4 py-3 text-taupe">{user.email ?? "—"}</td>
+      <td className="whitespace-nowrap px-4 py-3 text-taupe">
+        {user.last_sign_in_at === undefined ? "Unavailable" : user.last_sign_in_at ? formatDateTime(user.last_sign_in_at, timeZone) : "Never"}
+      </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-2">
           <select value={role} onChange={(event) => setRole(event.target.value as UserRole)} disabled={user.isSelf || pending} className={input}><option value="operator">Operator</option><option value="franchisee">Franchisee</option><option value="admin">Admin</option></select>

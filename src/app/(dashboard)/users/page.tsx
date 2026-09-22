@@ -4,8 +4,20 @@ import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server
 import { CreateUserForm } from "./CreateUserForm";
 import { UserRow, type UserRowData } from "./UserRow";
 import { getTenants } from "@/lib/data/franchisees";
+import { getDisplayTimezone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
+
+async function getAuthLastSignIns(s: Awaited<ReturnType<typeof createServiceClient>>) {
+  const lastSignIns = new Map<string, string | null>();
+  for (let page = 1; ; page++) {
+    const { data, error } = await s.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw error;
+    for (const user of data.users) lastSignIns.set(user.id, user.last_sign_in_at ?? null);
+    if (data.users.length < 1000) break;
+  }
+  return lastSignIns;
+}
 
 export default async function UsersPage() {
   const session = await getSessionProfile();
@@ -13,13 +25,14 @@ export default async function UsersPage() {
 
   let users: UserRowData[] = [];
   let machines: { id: string; name: string }[] = [];
-  const tenants = await getTenants();
+  const [tenants, timeZone] = await Promise.all([getTenants(), getDisplayTimezone()]);
   if (isSupabaseConfigured()) {
     const s = await createServiceClient();
-    const [{ data }, { data: machineRows }, { data: assignmentRows }] = await Promise.all([
+    const [{ data }, { data: machineRows }, { data: assignmentRows }, authLastSignIns] = await Promise.all([
       s.from("profiles").select("id,email,full_name,role,employer_kind,tenant_id").order("email"),
       s.from("machines").select("id,name,display_name").order("name"),
       s.from("user_machine_assignments").select("user_id,machine_id").lte("starts_at", new Date().toISOString()).or(`ends_at.is.null,ends_at.gte.${new Date().toISOString()}`),
+      getAuthLastSignIns(s),
     ]);
     const assignments = (assignmentRows as { user_id: string; machine_id: string }[]) ?? [];
     machines = ((machineRows as Record<string, unknown>[]) ?? []).map((machine) => ({ id: machine.id as string, name: (machine.display_name as string) || machine.name as string }));
@@ -31,6 +44,7 @@ export default async function UsersPage() {
       employer_kind: (["franchisee", "contractor"].includes(u.employer_kind as string) ? u.employer_kind : "softlife") as UserRowData["employer_kind"],
       tenant_id: (u.tenant_id as string) ?? null,
       assigned_machine_ids: assignments.filter((assignment) => assignment.user_id === u.id).map((assignment) => assignment.machine_id),
+      last_sign_in_at: authLastSignIns.has(u.id as string) ? authLastSignIns.get(u.id as string) ?? null : undefined,
       isSelf: u.id === session.id,
     }));
   }
@@ -52,22 +66,23 @@ export default async function UsersPage() {
       <section>
         <h2 className="mb-3 font-display text-lg font-bold text-cocoa">All users ({users.length})</h2>
         <div className="overflow-x-auto rounded-2xl border border-line bg-white">
-          <table className="w-full min-w-[560px] text-sm">
+          <table className="w-full min-w-[720px] text-sm">
             <thead>
               <tr className="border-b border-line bg-sand/40 text-left text-[11px] uppercase tracking-wide text-taupe">
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Email</th>
+                <th className="px-4 py-3">Last logged in</th>
                 <th className="px-4 py-3">Access &amp; assignments</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {users.map((u) => (
-                  <UserRow key={u.id} user={u} tenants={tenants.map(({ id, name }) => ({ id, name }))} machines={machines} />
+                  <UserRow key={u.id} user={u} tenants={tenants.map(({ id, name }) => ({ id, name }))} machines={machines} timeZone={timeZone} />
               ))}
               {users.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-6 text-center text-taupe">No users yet.</td>
+                  <td colSpan={5} className="px-4 py-6 text-center text-taupe">No users yet.</td>
                 </tr>
               )}
             </tbody>

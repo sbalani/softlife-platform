@@ -28,7 +28,7 @@
     "test:mcp": "npx -y deno test --allow-env supabase/functions/softlife-mcp/index.test.ts",
     "test:action-reports": "node --experimental-strip-types --test src/lib/data/recall.test.ts src/lib/action-report-ai.test.ts src/lib/action-report-calendar.test.ts src/lib/action-report-modes.test.ts src/lib/action-report-refills.test.ts src/lib/action-report-stock-values.test.ts src/lib/action-report-stock-reconstruction.test.ts src/lib/action-report-attachment-errors.test.ts",
     "test:payout": "node --experimental-strip-types --test src/lib/payout-report.test.ts",
-    "test:temperatures": "node --experimental-strip-types --test src/lib/temperature-explorer.test.ts",
+    "test:temperatures": "node --experimental-strip-types --test src/lib/temperature-explorer.test.ts src/lib/pasteurization-pattern.test.ts",
     "test:franchisees": "node --experimental-strip-types --test src/lib/bank-details.test.ts src/lib/auth/web-authorization.test.ts src/lib/data/accessible-machines.test.ts"
   },
   "dependencies": {

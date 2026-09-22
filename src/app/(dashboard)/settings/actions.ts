@@ -12,6 +12,8 @@ import { normalizeHuaxinTimestamp } from "@/lib/data/temperatures";
 import { ingestOrders } from "@/lib/data/order-sync";
 import { revalidatePath } from "next/cache";
 import { syncCouponSnapshots } from "@/lib/data/coupons";
+import { detectMachinePasteurizationPatterns } from "@/lib/data/pasteurization";
+import { getSessionProfile } from "@/lib/auth/session";
 
 export type SyncResult = { ok: boolean; summary: string };
 
@@ -22,6 +24,8 @@ function ymd(d: Date) {
 export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<SyncResult> {
   void _prev;
   void _fd;
+  const actor = await getSessionProfile();
+  if (!actor || actor.role !== "admin") return { ok: false, summary: "Admin access required." };
   const cfg = getConfigFromEnv();
   if (!cfg) return { ok: false, summary: "Huaxin not configured." };
   if (!isSupabaseConfigured()) return { ok: false, summary: "Supabase not configured." };
@@ -68,20 +72,29 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
           const sname = series.seriesname ?? "temperature";
           const sdata = series.data ?? [];
           for (let i = 0; i < sdata.length; i++) {
+            const value = Number(sdata[i]?.value);
+            if (!Number.isFinite(value)) continue;
             rows.push({
               machine_id: machineId,
               reading_time: normalizeHuaxinTimestamp(category[i]?.label, ymd(new Date())),
               series_name: sname,
-              value: Number(sdata[i]?.value ?? 0),
+              value,
             });
           }
         }
         if (rows.length) {
-          const { error } = await supabase.from("huaxin_temperatures").upsert(rows, {
+          const { data: insertedTemperatures, error } = await supabase.from("huaxin_temperatures").upsert(rows, {
             onConflict: "machine_id,reading_time,series_name",
             ignoreDuplicates: true,
-          });
-          if (!error) temps += rows.length;
+          }).select("id,reading_time");
+          if (!error) {
+            temps += rows.length;
+            if (machineId && insertedTemperatures?.length) {
+              const insertedTimes = insertedTemperatures.map((row) => String(row.reading_time)).sort();
+              try { await detectMachinePasteurizationPatterns(supabase, machineId, insertedTimes[insertedTimes.length - 1], insertedTimes[0]); }
+              catch (patternError) { console.error(`[settings-sync] Pasteurization pattern detection failed for ${d.deviceImei}:`, patternError); }
+            }
+          }
         }
       } catch {
         /* per-device temperature errors are non-fatal */

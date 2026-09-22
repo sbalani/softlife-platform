@@ -7,6 +7,7 @@ import { syncMachineMedia } from "@/lib/data/machine-media";
 import { syncCouponSnapshots } from "@/lib/data/coupons";
 import { sendPendingAlertNotifications, type AlertNotificationResult } from "@/lib/data/alert-notifications";
 import { DEFAULT_TZ, ymd } from "@/lib/dates";
+import { detectMachinePasteurizationPatterns } from "@/lib/data/pasteurization";
 
 export async function runHuaxinFleetSync(trigger: OrderSyncTrigger = "cron") {
   const cfg = getConfigFromEnv();
@@ -77,9 +78,15 @@ async function executeFleetSync(
         }] : [];
       }));
       if (rows.length) {
-        const { error: temperatureError } = await supabase.from("huaxin_temperatures").upsert(rows, { onConflict: "machine_id,reading_time,series_name", ignoreDuplicates: true });
+        const { data: insertedTemperatures, error: temperatureError } = await supabase.from("huaxin_temperatures")
+          .upsert(rows, { onConflict: "machine_id,reading_time,series_name", ignoreDuplicates: true }).select("id,reading_time");
         if (temperatureError) throw temperatureError;
         temperatures += rows.length;
+        if (insertedTemperatures?.length) {
+          const insertedTimes = insertedTemperatures.map((row) => String(row.reading_time)).sort();
+          try { await detectMachinePasteurizationPatterns(supabase, machine.id, insertedTimes[insertedTimes.length - 1], insertedTimes[0]); }
+          catch (patternError) { console.error(`[fleet-sync] Pasteurization pattern detection failed for ${device.deviceImei}:`, patternError); }
+        }
       }
     } catch (error) { console.error(`[fleet-sync] Temperature failed for ${device.deviceImei}:`, error); }
   }

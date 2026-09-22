@@ -108,7 +108,7 @@ export default async function SettingsPage() {
           Pulls machines, temperature readings and orders from the Huaxin cloud into Supabase.
           Use this until the Huaxin engineer configures the webhook (notify_url) for real-time data.
         </p>
-        <SyncButton />
+        {profile?.role === "admin" ? <SyncButton /> : <p className="text-sm text-taupe">Manual synchronization is available to administrators.</p>}
         <div className="mt-3 text-xs text-taupe">
           Last machine metadata sync: {lastSync ? formatDateTime(lastSync, tz) : "never"}
         </div>

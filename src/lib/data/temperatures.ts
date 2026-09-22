@@ -99,7 +99,8 @@ export async function getHistoricalTemperatures(params: TemperatureExplorerParam
 
 /** Huaxin's temperature chart-label is sometimes a bare time-of-day
  *  ("23:56:46", no date at all) and sometimes space-separated
- *  ("YYYY-MM-DD HH:mm:ss"). */
+ *  ("YYYY-MM-DD HH:mm:ss"). Preserve the established ingestion convention
+ *  until source timezone correction can migrate existing unique keys safely. */
 export function normalizeHuaxinTimestamp(raw: string | undefined, anchorDate: string): string {
   if (!raw) return new Date().toISOString();
   if (raw.includes("T")) return raw;

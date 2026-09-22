@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getAlertCustomerOptions, getAlerts } from "@/lib/data/alerts";
 import { resolveAlertHistoryCustomer } from "@/lib/alert-history-filter";
-import { formatDateTime } from "@/lib/dates";
+import { formatDateTime, ymd } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { getChangeAlertRules } from "@/lib/data/change-alert-rules";
 import { getMachines } from "@/lib/data/machines";
@@ -10,6 +10,8 @@ import { AlertRuleManager } from "./AlertRuleManager";
 import { getAccessibleMachineIds } from "@/lib/data/accessible-machines";
 import { getSessionProfile } from "@/lib/auth/session";
 import { DismissAlertButton } from "@/components/DismissAlertButton";
+import { getPasteurizationAlertSettings } from "@/lib/data/pasteurization";
+import { PasteurizationManager } from "./PasteurizationManager";
 
 export const dynamic = "force-dynamic";
 
@@ -30,12 +32,13 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
     getAlerts(false, machineScope ?? undefined),
     getAlerts(true, machineScope ?? undefined, selectedTenant ?? undefined),
     isAdmin
-      ? Promise.all([getChangeAlertRules(), getMachines(), getProducts()])
+      ? Promise.all([getChangeAlertRules(), getMachines(), getProducts(), getPasteurizationAlertSettings()])
       : Promise.resolve(null),
   ]);
   const rules = adminData?.[0] ?? [];
   const machines = adminData?.[1].machines ?? [];
   const products = adminData?.[2] ?? [];
+  const pasteurization = adminData?.[3] ?? { schedules: [], suggestions: [] };
   return (
     <div>
       <header className="mb-8">
@@ -44,6 +47,10 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
       </header>
 
       {isAdmin && <AlertRuleManager rules={rules} machines={machines} products={products.map(({ id, name }) => ({ id, name }))} />}
+      {isAdmin && <PasteurizationManager
+        machines={machines.map((machine) => ({ id: machine.id, name: machine.display_name || machine.name }))}
+        schedules={pasteurization.schedules} suggestions={pasteurization.suggestions} timeZone={tz} today={ymd(new Date(), tz)}
+      />}
 
       <h2 className="mb-3 font-display text-xl font-bold text-cocoa">Active alerts</h2>
       <p className="mb-4 rounded-xl border border-sage/25 bg-sage/5 px-4 py-3 text-xs text-cocoa">Machine alerts resolve automatically after a new sync confirms recovery. You can also dismiss an alert after reviewing it; if telemetry still reports the condition, a future check can create a new alert.</p>

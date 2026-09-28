@@ -21,6 +21,10 @@ export const PUBLIC_REPORT_FILE_TYPES = {
 
 export type PublicReportMime = keyof typeof PUBLIC_REPORT_FILE_TYPES;
 
+export function publicReportLocationPreset(value: unknown, machineIds: readonly string[]) {
+  return typeof value === "string" && machineIds.includes(value) ? value : undefined;
+}
+
 export function publicReportFile(mime: unknown, filename: unknown, size: unknown) {
   const rawMime = typeof mime === "string" ? mime.toLowerCase().split(";")[0] : "";
   const extension = typeof filename === "string" ? filename.toLowerCase().split(".").pop() : "";

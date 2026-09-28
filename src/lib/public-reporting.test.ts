@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isSameOrigin, publicReportContact, publicReportFile } from "./public-reporting.ts";
+import { isSameOrigin, publicReportContact, publicReportFile, publicReportLocationPreset } from "./public-reporting.ts";
 import { submissionTokenHash } from "./public-reporting-crypto.ts";
 
 test("public reports require a named, contactable reporter with consent", () => {
@@ -25,4 +25,11 @@ test("submission tokens are hashed and mutations require same-origin requests", 
   assert.match(submissionTokenHash("secret"), /^[0-9a-f]{64}$/);
   assert.equal(isSameOrigin(new Request("https://softlife.example/api/report", { headers: { origin: "https://softlife.example" } })), true);
   assert.equal(isSameOrigin(new Request("https://softlife.example/api/report", { headers: { origin: "https://other.example" } })), false);
+});
+
+test("public report location presets only accept an available machine id", () => {
+  const available = ["0f0b0651-c83a-431f-9095-45a77136ee47"];
+  assert.equal(publicReportLocationPreset(available[0], available), available[0]);
+  assert.equal(publicReportLocationPreset("stale-machine", available), undefined);
+  assert.equal(publicReportLocationPreset([available[0]], available), undefined);
 });

@@ -4,6 +4,12 @@ import type { ActionReportCalendarItem } from "@/lib/data/action-reports";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+function compactMachineName(name: string) {
+  const words = name.trim().split(/\s+/);
+  const identifier = words.at(-1) || name;
+  return identifier.length <= 7 ? identifier : `${identifier.slice(0, 6)}…`;
+}
+
 export function ActionReportCalendar({ month, previousMonth, nextMonth, today, selectedDay, reports }: {
   month: string;
   previousMonth: string;
@@ -50,12 +56,12 @@ export function ActionReportCalendar({ month, previousMonth, nextMonth, today, s
               <div className="mt-1 space-y-1">
                 {visibleItems.map((item) => {
                   const style = item.status === "draft" ? "bg-warning/15 text-warning" : item.status === "confirmed" ? "bg-sage/15 text-sage" : "bg-taupe/15 text-taupe";
-                  const content = <><span className="sm:hidden">●</span><span className="hidden sm:inline">{item.machineName}</span></>;
+                  const content = <><span className="sm:hidden">{compactMachineName(item.machineName)}</span><span className="hidden sm:inline">{item.machineName}</span></>;
                   return item.status === "draft"
-                    ? <Link title={`${item.machineName}: resume draft`} href={`/refills?month=${month}&draft=${item.id}#action-report-form`} key={item.id} className={`block truncate rounded px-1 py-0.5 text-[9px] font-semibold sm:text-[10px] ${style}`}>{content}</Link>
-                    : <span title={`${item.machineName}: ${item.actionKind} · ${item.status}`} key={item.id} className={`block truncate rounded px-1 py-0.5 text-[9px] font-semibold sm:text-[10px] ${style}`}>{content}</span>;
+                    ? <Link aria-label={`${item.machineName}: resume draft`} title={`${item.machineName}: resume draft`} href={`/refills?month=${month}&draft=${item.id}#action-report-form`} key={item.id} className={`block truncate rounded px-0.5 py-0.5 text-center text-[8px] font-semibold sm:px-1 sm:text-left sm:text-[10px] ${style}`}>{content}</Link>
+                    : <span aria-label={`${item.machineName}: ${item.actionKind} · ${item.status}`} title={`${item.machineName}: ${item.actionKind} · ${item.status}`} key={item.id} className={`block truncate rounded px-0.5 py-0.5 text-center text-[8px] font-semibold sm:px-1 sm:text-left sm:text-[10px] ${style}`}>{content}</span>;
                 })}
-                {items.length > visibleItems.length && <p className="text-[9px] font-semibold text-taupe">+{items.length - visibleItems.length} more</p>}
+                {items.length > visibleItems.length && <p className="text-center text-[8px] font-semibold text-taupe sm:text-left sm:text-[9px]">+{items.length - visibleItems.length}<span className="hidden sm:inline"> more</span></p>}
               </div>
             </div>
           );

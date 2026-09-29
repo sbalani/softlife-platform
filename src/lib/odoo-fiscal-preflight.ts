@@ -28,6 +28,8 @@ export type FiscalProductCheck = {
   sale_ok: boolean;
   income_account_code: string | null;
   sale_tax_rates: number[];
+  sale_tax_country_codes: string[];
+  sale_taxes: { odoo_tax_id: number; rate: number; country_code: string; price_include: boolean; amount_type: string; type_tax_use: string }[];
 };
 
 export type FiscalConfigurationEvaluation = {
@@ -99,9 +101,10 @@ export function evaluateFiscalConfiguration(settings: FiscalSettings, body: Reco
   if (positiveInteger(customer.odoo_id) !== settings.customer_odoo_id) findings.push({ severity: "blocker", code: "customer_mismatch", message: `The final-consumer customer must be Odoo ID ${settings.customer_odoo_id}.` });
   if (text(customer.country_code).toUpperCase() !== "ES") findings.push({ severity: "blocker", code: "customer_country_invalid", message: "The final-consumer customer country must be Spain." });
   if (text(customer.vat)) findings.push({ severity: "blocker", code: "customer_vat_present", message: "The anonymous final-consumer customer must not have a VAT number." });
-  if (positiveInteger(tax.odoo_id) === null || text(tax.type_tax_use) !== "sale") findings.push({ severity: "blocker", code: "sales_tax_invalid", message: "Odoo must report a valid Spanish sales tax." });
+  if (positiveInteger(tax.odoo_id) === null || text(tax.type_tax_use) !== "sale" || text(tax.amount_type) !== "percent") findings.push({ severity: "blocker", code: "sales_tax_invalid", message: "Odoo must report a valid percentage-based Spanish sales tax." });
   const reportedTaxRate = Number(tax.rate);
   if (!Number.isFinite(reportedTaxRate) || Math.abs(reportedTaxRate - settings.vat_rate) > 0.0001) findings.push({ severity: "blocker", code: "sales_tax_rate_mismatch", message: `The configured sales tax must be ${settings.vat_rate}%.` });
+  if (text(tax.country_code).toUpperCase() !== "ES") findings.push({ severity: "blocker", code: "sales_tax_country_invalid", message: "The configured sales tax must belong to Spain." });
 
   const products: FiscalProductCheck[] = [];
   const productIds = new Set<number>();
@@ -118,6 +121,21 @@ export function evaluateFiscalConfiguration(settings: FiscalSettings, body: Reco
       sale_ok: product.sale_ok === true,
       income_account_code: text(product.income_account_code) || null,
       sale_tax_rates: numericArray(product.sale_tax_rates),
+      sale_tax_country_codes: Array.isArray(product.sale_tax_country_codes)
+        ? product.sale_tax_country_codes.map((value) => text(value).toUpperCase()).filter(Boolean)
+        : [],
+      sale_taxes: Array.isArray(product.sale_taxes) ? product.sale_taxes.map((value) => record(value)).flatMap((taxRow) => {
+        const taxId = positiveInteger(taxRow.odoo_tax_id);
+        const rate = Number(taxRow.rate);
+        const countryCode = text(taxRow.country_code).toUpperCase();
+        return taxId && Number.isFinite(rate) && countryCode
+          ? [{
+            odoo_tax_id: taxId, rate, country_code: countryCode,
+            price_include: taxRow.price_include === true,
+            amount_type: text(taxRow.amount_type), type_tax_use: text(taxRow.type_tax_use),
+          }]
+          : [];
+      }) : [],
     });
   }
 
@@ -233,7 +251,7 @@ export function buildFiscalPreflightItem(input: {
       else {
         if (!product.sale_ok) findings.push({ severity: "blocker", code: "odoo_product_not_saleable", message: `Odoo product ${product.odoo_product_id} is not saleable.` });
         if (product.income_account_code !== settings.income_account_code) findings.push({ severity: "blocker", code: "income_account_mismatch", message: `Odoo product ${product.odoo_product_id} must resolve to income account ${settings.income_account_code}.` });
-        if (!product.sale_tax_rates.some((rate) => Math.abs(rate - settings.vat_rate) < 0.0001)) findings.push({ severity: "blocker", code: "product_tax_mismatch", message: `Odoo product ${product.odoo_product_id} must carry the ${settings.vat_rate}% customer tax.` });
+        if (!product.sale_taxes.some((taxRow) => Math.abs(taxRow.rate - settings.vat_rate) < 0.0001 && taxRow.country_code === "ES" && taxRow.type_tax_use === "sale" && taxRow.amount_type === "percent")) findings.push({ severity: "blocker", code: "product_tax_mismatch", message: `Odoo product ${product.odoo_product_id} must carry the percentage-based Spanish ${settings.vat_rate}% customer tax.` });
       }
     }
     if (refundRequired) findings.push({ severity: "warning", code: "refund_requires_review", message: "Create the original invoice first; refund evidence needs review before a full credit note can be queued." });

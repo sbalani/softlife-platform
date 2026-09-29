@@ -34,20 +34,28 @@ Example report:
   "tax": {
     "odoo_id": 41,
     "type_tax_use": "sale",
-    "rate": 10
+    "rate": 10,
+    "country_code": "ES",
+    "price_include": true,
+    "amount_type": "percent"
   },
   "products": [
     {
       "odoo_product_id": 101,
       "sale_ok": true,
       "income_account_code": "701000",
-      "sale_tax_rates": [10]
+      "sale_tax_rates": [10],
+      "sale_tax_country_codes": ["ES"],
+      "sale_tax_ids": [41],
+      "sale_taxes": [
+        { "odoo_tax_id": 41, "rate": 10, "country_code": "ES", "price_include": true, "amount_type": "percent", "type_tax_use": "sale" }
+      ]
     }
   ]
 }
 ```
 
-`income_account_code` must be the effective account after product/category fallback. `sale_tax_rates` must contain the effective customer taxes. The connector should submit every active finished product referenced by a platform recipe.
+`income_account_code` must be the effective account after product/category and customer fiscal-position mapping. Tax fields must describe the effective customer taxes after fiscal-position mapping. `price_include` may be true or false; later draft creation must derive the Odoo line price so the final gross remains the amount actually charged. The connector should submit every active finished product referenced by a platform recipe.
 
 ## Control behavior
 
@@ -58,7 +66,7 @@ Example report:
 - Full-refund evidence remains a warning requiring review. The first release cannot infer partial refunds and never mutates a source invoice.
 - Candidate totals above EUR 3,000 are blocked by the vending simplified-invoice control.
 - A report older than 24 hours blocks the overall preflight.
-- `tax_treatment_approved` starts as `false`; an accountant must approve the 10% treatment before a run can be ready.
+- `tax_treatment_approved` records the confirmed 10% treatment for the current vending products. Operations began in July 2026 and no Modelo 303 period had been filed when this treatment was approved.
 - `posting_enabled` is initialized to `false` and there is no platform operation that changes it.
 
-Before implementing invoice execution, obtain accountant approval for product VAT eligibility and historical accounting/tax dates, enable secure posted-entry hashes in Odoo, and add a separate durable document-request contract with idempotent result callbacks.
+Before implementing invoice execution, resolve historical accounting/tax dates, enable secure posted-entry hashes in Odoo, and add a separate durable document-request contract with idempotent result callbacks. Reconfirm VAT eligibility only when adding or changing vending products.

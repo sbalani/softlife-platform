@@ -84,7 +84,7 @@ export async function getFiscalConfigurationRequest(s: SupabaseClient) {
       tax_treatment_approved: settings.tax_treatment_approved,
       posting_enabled: settings.posting_enabled,
     },
-    required_product_fields: ["odoo_product_id", "sale_ok", "income_account_code", "sale_tax_rates"],
+    required_product_fields: ["odoo_product_id", "sale_ok", "income_account_code", "sale_taxes"],
   };
 }
 

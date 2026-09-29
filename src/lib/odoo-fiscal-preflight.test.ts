@@ -26,8 +26,8 @@ const configuration = {
   company: { country_code: "ES", vat: "ESB12345678", currency: "EUR" },
   journal: { code: "VEND", type: "sale", refund_sequence: true, secure_posted_entries: false },
   customer: { odoo_id: 722, country_code: "ES", vat: null },
-  tax: { odoo_id: 41, type_tax_use: "sale", rate: 10 },
-  products: [{ odoo_product_id: 101, sale_ok: true, income_account_code: "701000", sale_tax_rates: [10] }],
+  tax: { odoo_id: 41, type_tax_use: "sale", amount_type: "percent", rate: 10, country_code: "ES", price_include: true },
+  products: [{ odoo_product_id: 101, sale_ok: true, income_account_code: "701000", sale_tax_rates: [10], sale_tax_country_codes: ["ES"], sale_tax_ids: [41], sale_taxes: [{ odoo_tax_id: 41, rate: 10, country_code: "ES", price_include: true, amount_type: "percent", type_tax_use: "sale" }] }],
 };
 
 const baseOrder = {
@@ -58,7 +58,7 @@ function item(overrides: Record<string, unknown> = {}) {
     settings,
     timeZone: "Europe/Madrid",
     duplicatePaymentReference: false,
-    verifiedProducts: new Map([[101, { odoo_product_id: 101, sale_ok: true, income_account_code: "701000", sale_tax_rates: [10] }]]),
+    verifiedProducts: new Map([[101, { odoo_product_id: 101, sale_ok: true, income_account_code: "701000", sale_tax_rates: [10], sale_tax_country_codes: ["ES"], sale_taxes: [{ odoo_tax_id: 41, rate: 10, country_code: "ES", price_include: true, amount_type: "percent", type_tax_use: "sale" }] }]]),
   });
 }
 
@@ -72,8 +72,8 @@ test("evaluates a complete Odoo configuration while preserving the journal-hash 
 test("blocks an Odoo configuration with the wrong tax and income setup", () => {
   const result = evaluateFiscalConfiguration(settings, {
     ...configuration,
-    tax: { odoo_id: 41, type_tax_use: "sale", rate: 21 },
-    products: [{ odoo_product_id: 101, sale_ok: true, income_account_code: "700000", sale_tax_rates: [21] }],
+    tax: { odoo_id: 41, type_tax_use: "sale", amount_type: "percent", rate: 21, country_code: "ES", price_include: true },
+    products: [{ odoo_product_id: 101, sale_ok: true, income_account_code: "700000", sale_tax_rates: [21], sale_tax_country_codes: ["ES"], sale_tax_ids: [41], sale_taxes: [{ odoo_tax_id: 41, rate: 21, country_code: "ES", price_include: true, amount_type: "percent", type_tax_use: "sale" }] }],
   });
   assert.equal(result.accepted, false);
   assert(result.findings.some((finding) => finding.code === "sales_tax_rate_mismatch"));
@@ -81,10 +81,48 @@ test("blocks an Odoo configuration with the wrong tax and income setup", () => {
 
 test("blocks an Odoo configuration with no numeric sales tax rate", () => {
   for (const rate of [null, "not-a-rate"]) {
-    const result = evaluateFiscalConfiguration(settings, { ...configuration, tax: { odoo_id: 41, type_tax_use: "sale", rate } });
+    const result = evaluateFiscalConfiguration(settings, { ...configuration, tax: { odoo_id: 41, type_tax_use: "sale", rate, country_code: "ES" } });
     assert.equal(result.accepted, false);
     assert(result.findings.some((finding) => finding.code === "sales_tax_rate_mismatch"));
   }
+});
+
+test("blocks a fixed-amount tax that happens to have amount 10", () => {
+  const result = evaluateFiscalConfiguration(settings, {
+    ...configuration,
+    tax: { ...configuration.tax, amount_type: "fixed" },
+  });
+  assert.equal(result.accepted, false);
+  assert(result.findings.some((finding) => finding.code === "sales_tax_invalid"));
+});
+
+test("blocks a non-Spanish global sales tax", () => {
+  const result = evaluateFiscalConfiguration(settings, {
+    ...configuration,
+    tax: { odoo_id: 41, type_tax_use: "sale", rate: 10, country_code: "FR" },
+    products: [{ ...configuration.products[0], sale_tax_country_codes: ["FR"] }],
+  });
+  assert.equal(result.accepted, false);
+  assert(result.findings.some((finding) => finding.code === "sales_tax_country_invalid"));
+});
+
+test("blocks a product whose matching-rate tax is not Spanish", () => {
+  const result = buildFiscalPreflightItem({
+    order: baseOrder,
+    resolutions: [{ line_index: 0, raw_name: "Frozen yogurt", raw_position: null, resolution_status: "resolved", recipe_id: "recipe-1" }],
+    recipes: new Map([["recipe-1", { id: "recipe-1", name: "Frozen yogurt", odoo_finished_product_id: 101 }]]),
+    settings, timeZone: "Europe/Madrid", duplicatePaymentReference: false,
+    verifiedProducts: new Map([[101, {
+      odoo_product_id: 101, sale_ok: true, income_account_code: "701000",
+      sale_tax_rates: [10, 21], sale_tax_country_codes: ["FR", "ES"],
+      sale_taxes: [
+        { odoo_tax_id: 41, rate: 10, country_code: "FR", price_include: true, amount_type: "percent", type_tax_use: "sale" },
+        { odoo_tax_id: 42, rate: 21, country_code: "ES", price_include: true, amount_type: "percent", type_tax_use: "sale" },
+      ],
+    }]]),
+  });
+  assert.equal(result.status, "blocked");
+  assert(result.findings.some((finding) => finding.code === "product_tax_mismatch"));
 });
 
 test("calculates included 10 percent VAT deterministically in cents", () => {

@@ -5,6 +5,7 @@ import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server
 import { getSessionProfile } from "@/lib/auth/session";
 import { recordProductChange } from "@/lib/data/change-log";
 import { cancelUnconfirmedManufacturingPeriod, confirmManufacturingPeriod, confirmManufacturingReplenishment, enqueueManufacturingPeriod } from "@/lib/data/odoo-production";
+import { createFiscalPreflight } from "@/lib/data/odoo-fiscal";
 import { inclusiveLocalDatePeriod, localDateTimeToUtc } from "@/lib/odoo-sync-contract";
 import { parseProductionRecipeAssignments } from "@/lib/production-recipe-assignments";
 
@@ -23,6 +24,24 @@ async function productionAdminClient() {
   const actor = await getSessionProfile();
   if (!actor || actor.role !== "admin") throw new Error("Admin access required.");
   return createServiceClient();
+}
+
+export async function prepareFiscalPreflight(_state: OdooActionResult | null, fd: FormData): Promise<OdooActionResult> {
+  try {
+    if (!isSupabaseConfigured()) throw new Error("Supabase not configured.");
+    const actor = await getSessionProfile();
+    if (!actor || actor.role !== "admin") throw new Error("Admin access required.");
+    const dateFrom = String(fd.get("date_from") ?? "");
+    const dateTo = String(fd.get("date_to") ?? "");
+    const timeZone = "Europe/Madrid";
+    const period = inclusiveLocalDatePeriod(dateFrom, dateTo);
+    const periodFrom = localDateTimeToUtc(period.localFrom, timeZone);
+    const periodTo = localDateTimeToUtc(period.localTo, timeZone);
+    if (Date.parse(periodTo) - Date.parse(periodFrom) > 366 * 24 * 60 * 60_000) throw new Error("Fiscal preflight ranges cannot exceed 366 days.");
+    const result = await createFiscalPreflight(await createServiceClient(), { periodFrom, periodTo, timeZone, requestedBy: actor.id });
+    revalidatePath("/odoo");
+    return { ok: true, message: `Frozen preflight ${result.run_id.slice(0, 8)}: ${result.summary.eligible_invoices} eligible, ${result.summary.blocked_orders} blocked.` };
+  } catch (error) { return actionError(error); }
 }
 
 export async function saveProductionDefault(_state: OdooActionResult | null, fd: FormData): Promise<OdooActionResult> {

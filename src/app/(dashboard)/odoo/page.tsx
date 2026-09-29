@@ -4,10 +4,12 @@ import { CreateIngredientButton } from "./CreateIngredientButton";
 import { formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { getProductionAdminData } from "@/lib/data/odoo-production-admin";
+import { getFiscalPreflightAdminData } from "@/lib/data/odoo-fiscal";
 import { resolveProductionLine, saveProductionDefault, saveProductionProduct, saveProductionSettings } from "./actions";
 import { ProductionRunsPanel } from "./ProductionRunsPanel";
 import { OdooSaveForm } from "./OdooSaveForm";
 import { StockSnapshotPanel } from "./StockSnapshotPanel";
+import { FiscalPreflightPanel } from "./FiscalPreflightPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -16,10 +18,11 @@ function isUnitStockUom(uom: string | null) {
 }
 
 export default async function OdooPage() {
-  const [{ skus, source: skuSource }, { lots, source: lotSource }, production] = await Promise.all([
+  const [{ skus, source: skuSource }, { lots, source: lotSource }, production, fiscal] = await Promise.all([
     getOdooSkus(),
     getOdooLots(),
     getProductionAdminData(),
+    getFiscalPreflightAdminData(),
   ]);
 
   const tz = await getDisplayTimezone();
@@ -34,6 +37,8 @@ export default async function OdooPage() {
       </header>
 
       <StockSnapshotPanel snapshot={production.stockSnapshot} timeZone={tz} sourceWarehouseId={production.settings?.replenishment_source_odoo_warehouse_id ?? null} />
+
+      <FiscalPreflightPanel data={fiscal} timeZone={tz} />
 
       <section className="mb-8 rounded-2xl border border-line bg-white p-5">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">

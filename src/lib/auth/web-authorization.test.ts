@@ -3,6 +3,8 @@ import test from "node:test";
 import { canAccessWebPath, isPublicWebPath } from "./web-authorization.ts";
 
 test("public signup does not expose private franchisee administration", () => {
+  assert.equal(isPublicWebPath("/franchisee-intake"), true);
+  assert.equal(isPublicWebPath("/api/franchisee-intake-contract/79b69771-6d3c-43fd-b068-d11e2b2fa9dc"), true);
   assert.equal(isPublicWebPath("/franchisee-signup"), true);
   assert.equal(isPublicWebPath("/franchisees"), false);
   assert.equal(isPublicWebPath("/users"), false);

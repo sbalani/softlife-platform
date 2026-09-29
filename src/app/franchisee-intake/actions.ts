@@ -1,52 +1,115 @@
 "use server";
 
+import { headers } from "next/headers";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { bankDetailsFromForm } from "@/lib/bank-details";
-import { normalizeLocale } from "@/lib/i18n/locale";
+import { validateOnboardingForm } from "@/lib/franchisee-onboarding-validation";
+import { buildCanonicalPayload, canonicalJson, createDownloadToken, hashAuditIp, sha256Hex } from "@/lib/franchisee-onboarding-evidence";
+import { createOnboardingContractPdf } from "@/lib/franchisee-onboarding-pdf";
+import { FRANCHISEE_CONTRACT_VERSION, modalityShare } from "@/lib/franchisee-onboarding-contract";
 
-export type FranchiseeIntakeResult = { ok: boolean; error?: string };
+export type FranchiseeIntakeResult =
+  | { ok: false; error: string }
+  | { ok: true; acceptanceId?: string; downloadUrl?: string };
 
-function field(formData: FormData, name: string) {
-  return String(formData.get(name) ?? "").trim();
+const CONTRACT_BUCKET = "onboarding-contract-evidence";
+const RATE_WINDOW_MS = 60 * 60 * 1000;
+const IP_RATE_LIMIT = 5;
+const EMAIL_RATE_LIMIT = 3;
+
+function requestIp(requestHeaders: Headers): string {
+  const forwarded = requestHeaders.get("cf-connecting-ip")
+    ?? requestHeaders.get("x-vercel-forwarded-for")
+    ?? requestHeaders.get("x-forwarded-for")?.split(",")[0]
+    ?? requestHeaders.get("x-real-ip");
+  return forwarded?.trim() || "unavailable";
 }
 
 export async function submitFranchiseeIntake(
   _previous: FranchiseeIntakeResult | null,
   formData: FormData,
 ): Promise<FranchiseeIntakeResult> {
-  if (field(formData, "website")) return { ok: true };
-  const es = normalizeLocale(field(formData, "locale")) === "es";
-  const tradeName = field(formData, "trade_name");
-  const companyName = field(formData, "company_name");
-  const contactName = field(formData, "contact_name");
-  const contactEmail = field(formData, "contact_email").toLowerCase();
-  const contactPhone = field(formData, "contact_phone");
-  const taxId = field(formData, "tax_id");
-  if (!contactName || !contactEmail || !contactPhone) return { ok: false, error: es ? "Completa el nombre, email y teléfono." : "Name, email, and phone are required." };
-  if ([tradeName, companyName, contactName].some((value) => value.length > 150) || contactEmail.length > 254 || contactPhone.length > 40 || taxId.length > 50) {
-    return { ok: false, error: es ? "Uno o más campos son demasiado largos." : "One or more fields are too long." };
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) return { ok: false, error: es ? "Introduce un email válido." : "Enter a valid email address." };
-  if (!/^[+()\d\s.-]{6,40}$/.test(contactPhone)) return { ok: false, error: es ? "Introduce un teléfono válido." : "Enter a valid phone number." };
-  const bank = bankDetailsFromForm(formData);
-  if (bank.error) return { ok: false, error: bank.error };
-  if (!isSupabaseConfigured()) return { ok: false, error: es ? "El formulario no está disponible temporalmente." : "The form is temporarily unavailable." };
+  if (String(formData.get("website") ?? "").trim()) return { ok: true };
+  const validated = validateOnboardingForm(formData);
+  if (!validated.success) return { ok: false, error: validated.error };
+  if (!isSupabaseConfigured() || !process.env.SUPABASE_SERVICE_ROLE_KEY) return { ok: false, error: "El formulario no está disponible temporalmente." };
 
+  const hmacSecret = process.env.ONBOARDING_AUDIT_HMAC_SECRET
+    || process.env.PUBLIC_REPORT_HASH_SECRET
+    || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!hmacSecret) return { ok: false, error: "El formulario no está disponible temporalmente." };
+
+  const acceptedAt = new Date().toISOString();
+  const acceptanceId = crypto.randomUUID();
+  const input = validated.data;
+  let ipAuditHash: string;
+  let userAgent: string;
+  try {
+    const requestHeaders = await headers();
+    ipAuditHash = hashAuditIp(requestIp(requestHeaders), hmacSecret);
+    userAgent = (requestHeaders.get("user-agent") || "unavailable").trim().replace(/\s+/g, " ").slice(0, 500);
+  } catch {
+    return { ok: false, error: "El formulario no está disponible temporalmente." };
+  }
+
+  let storagePath: string | null = null;
   try {
     const s = await createServiceClient();
-    const { error } = await s.from("franchisee_intake_submissions").insert({
-      trade_name: tradeName || null,
-      company_name: companyName || null,
-      contact_name: contactName,
-      contact_email: contactEmail,
-      contact_phone: contactPhone,
-      tax_id: taxId || null,
-      account_holder_name: bank.details?.accountHolderName ?? null,
-      iban: bank.details?.iban ?? null,
-      bic_swift: bank.details?.bicSwift ?? null,
+    const cutoff = new Date(Date.now() - RATE_WINDOW_MS).toISOString();
+    const [ipRecent, emailRecent] = await Promise.all([
+      s.from("franchisee_intake_submissions").select("id", { count: "exact", head: true }).eq("ip_audit_hash", ipAuditHash).gte("accepted_at", cutoff),
+      s.from("franchisee_intake_submissions").select("id", { count: "exact", head: true }).eq("contact_email", input.representativeEmail).gte("accepted_at", cutoff),
+    ]);
+    if (ipRecent.error || emailRecent.error) throw new Error("Rate-limit lookup failed");
+    if ((ipRecent.count ?? 0) >= IP_RATE_LIMIT || (emailRecent.count ?? 0) >= EMAIL_RATE_LIMIT) {
+      return { ok: false, error: "Demasiados intentos recientes. Espera una hora antes de volver a intentarlo." };
+    }
+
+    const payload = buildCanonicalPayload(input, acceptanceId, acceptedAt, { ipAuditHash, userAgent });
+    const sourcePayload = canonicalJson(payload);
+    const sourceHash = sha256Hex(sourcePayload);
+    const pdf = await createOnboardingContractPdf(payload, sourceHash);
+    const download = createDownloadToken();
+    storagePath = `${acceptanceId}/${pdf.hash}.pdf`;
+    const { error: uploadError } = await s.storage.from(CONTRACT_BUCKET).upload(storagePath, pdf.bytes, { contentType: "application/pdf", upsert: false });
+    if (uploadError) throw uploadError;
+
+    const { error: insertError } = await s.from("franchisee_intake_submissions").insert({
+      id: acceptanceId,
+      trade_name: input.tradeName,
+      company_name: input.legalEntityName,
+      contact_name: input.representativeName,
+      contact_email: input.representativeEmail,
+      contact_phone: input.representativePhone,
+      tax_id: input.taxId,
+      account_holder_name: input.accountHolderName,
+      iban: input.iban,
+      bic_swift: input.bicSwift,
+      representative_title: input.representativeTitle,
+      registered_address: input.registeredAddress,
+      installation_address: input.installationAddress,
+      modality: input.modality,
+      share_percent: modalityShare(input.modality),
+      accepted_at: acceptedAt,
+      contract_version: FRANCHISEE_CONTRACT_VERSION,
+      contract_template_hash: payload.contract.templateHash,
+      canonical_source: payload,
+      canonical_source_sha256: sourceHash,
+      pdf_storage_path: storagePath,
+      pdf_sha256: pdf.hash,
+      download_token_sha256: download.hash,
+      ip_audit_hash: ipAuditHash,
+      user_agent: userAgent,
     });
-    return error ? { ok: false, error: es ? "No se pudo enviar. Inténtalo de nuevo." : "The form could not be submitted. Please try again." } : { ok: true };
+    if (insertError) {
+      await s.storage.from(CONTRACT_BUCKET).remove([storagePath]);
+      storagePath = null;
+      throw insertError;
+    }
+    return { ok: true, acceptanceId, downloadUrl: `/api/franchisee-intake-contract/${acceptanceId}?token=${encodeURIComponent(download.token)}` };
   } catch {
-    return { ok: false, error: es ? "No se pudo enviar. Inténtalo de nuevo." : "The form could not be submitted. Please try again." };
+    if (storagePath) {
+      try { await (await createServiceClient()).storage.from(CONTRACT_BUCKET).remove([storagePath]); } catch { /* Best effort: never hide the original failure. */ }
+    }
+    return { ok: false, error: "No se pudo aceptar el contrato. No se ha registrado ninguna aceptación; inténtalo de nuevo." };
   }
 }

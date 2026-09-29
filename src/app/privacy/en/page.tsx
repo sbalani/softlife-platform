@@ -25,7 +25,7 @@ export default function EnglishPrivacyPage() {
           <p className="mt-10 text-xs font-bold uppercase tracking-[0.22em] text-terracotta">Legal information</p>
           <h1 className="mt-2 font-display text-4xl font-bold text-cocoa sm:text-5xl">Privacy Policy</h1>
           <p className="mt-4 max-w-2xl text-sm leading-7 text-taupe">This policy explains how personal data is processed when you use the SoftLife platform, applications, and operational services.</p>
-          <p className="mt-2 text-xs font-semibold text-taupe">Last updated: 25 August 2026</p>
+          <p className="mt-2 text-xs font-semibold text-taupe">Last updated: 29 September 2026</p>
           <nav aria-label="Language" className="mt-5 flex items-center gap-2 text-xs font-bold">
             <Link href="/privacy" lang="es" className="rounded-full border border-line bg-white px-3 py-1.5 text-cocoa hover:border-terracotta">Español</Link>
             <span aria-current="page" className="rounded-full bg-cocoa px-3 py-1.5 text-white">English</span>
@@ -46,6 +46,7 @@ export default function EnglishPrivacyPage() {
             <div className={copy}>
               <p>We may process identification and professional data, such as your name, email address, company, role, franchise, or relationship with SoftLife.</p>
               <p>For franchisee onboarding and payouts, we may also process tax identifiers, account-holder information, and bank account details needed to calculate and make payments.</p>
+              <p>When an onboarding contract is accepted electronically, we retain the contract text and data, signer identity and capacity, checked declarations, typed signature, date and time, acceptance identifier, contract version, cryptographic hashes, evidence PDF, and an HMAC fingerprint of the IP address. The raw IP address is not stored in the contract record.</p>
               <p>We also process account and security data, access logs, technical identifiers, device information, and data required to provide support and protect the platform.</p>
               <p>When operational features are used, we may process service, cleaning, and refill reports, notes, photographs, voice recordings, transcripts, incidents, assignments, and machine-related activity. Machine telemetry does not normally identify a person by itself, but it may be associated with an account or professional action.</p>
             </div>
@@ -56,6 +57,7 @@ export default function EnglishPrivacyPage() {
             <div className={copy}>
               <p>We process data to create and administer accounts; authenticate users; provide the platform and its features; manage machines, inventory, incidents, operations, and franchisee payouts; answer enquiries; maintain security; prevent misuse; and retain evidence and audit trails.</p>
               <p>The applicable legal bases are the performance of a contract or steps taken before entering into a contract; compliance with legal obligations; and the legitimate interests of SoftLife and its partners in operating, protecting, and improving the service. Where required by law, we will request consent, which may be withdrawn without affecting the lawfulness of earlier processing.</p>
+              <p>Contract-acceptance evidence is collected to enter into, manage, and evidence the relationship and prevent abuse. It is not based on a general GDPR consent checkbox and does not turn contract acceptance into consent for incompatible purposes.</p>
               <p>We do not make decisions producing legal effects based solely on automated processing. Some features may use automated or artificial-intelligence tools to transcribe, classify, or suggest information, subject to human review where appropriate.</p>
             </div>
           </section>

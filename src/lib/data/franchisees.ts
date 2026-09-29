@@ -57,6 +57,10 @@ export type FranchiseeIntakeSubmission = {
   bic_swift: string | null;
   status: "pending" | "processed";
   created_at: string;
+  accepted_at: string | null;
+  contract_version: string | null;
+  modality: "A" | "B" | null;
+  share_percent: number | null;
 };
 
 export type FranchiseeSignupRequest = {
@@ -163,7 +167,7 @@ export async function getFranchiseeIntakeSubmissions(): Promise<FranchiseeIntake
   if (!isSupabaseConfigured()) return [];
   try {
     const s = await createServiceClient();
-    const { data, error } = await s.from("franchisee_intake_submissions").select("id,trade_name,company_name,contact_name,contact_email,contact_phone,tax_id,account_holder_name,iban,bic_swift,status,created_at").eq("status", "pending").order("created_at", { ascending: false });
+    const { data, error } = await s.from("franchisee_intake_submissions").select("id,trade_name,company_name,contact_name,contact_email,contact_phone,tax_id,account_holder_name,iban,bic_swift,status,created_at,accepted_at,contract_version,modality,share_percent").eq("status", "pending").order("created_at", { ascending: false });
     if (error) throw error;
     return (data as FranchiseeIntakeSubmission[]) ?? [];
   } catch {

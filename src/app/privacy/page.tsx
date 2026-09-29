@@ -25,7 +25,7 @@ export default function PrivacyPage() {
           <p className="mt-10 text-xs font-bold uppercase tracking-[0.22em] text-terracotta">Información legal</p>
           <h1 className="mt-2 font-display text-4xl font-bold text-cocoa sm:text-5xl">Política de privacidad</h1>
           <p className="mt-4 max-w-2xl text-sm leading-7 text-taupe">Esta política explica cómo se tratan los datos personales al utilizar la plataforma, las aplicaciones y los servicios operativos de SoftLife.</p>
-          <p className="mt-2 text-xs font-semibold text-taupe">Última actualización: 25 de agosto de 2026</p>
+          <p className="mt-2 text-xs font-semibold text-taupe">Última actualización: 29 de septiembre de 2026</p>
           <nav aria-label="Idioma" className="mt-5 flex items-center gap-2 text-xs font-bold">
             <span aria-current="page" className="rounded-full bg-cocoa px-3 py-1.5 text-white">Español</span>
             <Link href="/privacy/en" lang="en" className="rounded-full border border-line bg-white px-3 py-1.5 text-cocoa hover:border-terracotta">English</Link>
@@ -46,6 +46,7 @@ export default function PrivacyPage() {
             <div className={copy}>
               <p>Podemos tratar datos identificativos y profesionales, como nombre, correo electrónico, empresa, función, franquicia o relación con SoftLife.</p>
               <p>Para el alta y pago de franquiciados, también podemos tratar identificadores fiscales, datos del titular y datos bancarios necesarios para calcular y realizar pagos.</p>
+              <p>Cuando se acepta electrónicamente un contrato de alta, conservamos el texto y datos contractuales, identidad y capacidad del firmante, declaraciones marcadas, firma escrita, fecha y hora, identificador de aceptación, versión contractual, hashes criptográficos, PDF de evidencia y una huella HMAC de la dirección IP. La dirección IP no se almacena en claro en el registro contractual.</p>
               <p>También tratamos datos de cuenta y seguridad, registros de acceso, identificadores técnicos, información del dispositivo y datos necesarios para prestar soporte y proteger la plataforma.</p>
               <p>Cuando se utilizan funciones operativas, podemos tratar informes de servicio, limpieza y reposición, notas, fotografías, grabaciones de voz, transcripciones, incidencias, asignaciones y actividad relacionada con máquinas. La telemetría de máquinas normalmente no identifica por sí sola a una persona, pero puede asociarse a una cuenta o actuación profesional.</p>
             </div>
@@ -56,6 +57,7 @@ export default function PrivacyPage() {
             <div className={copy}>
               <p>Tratamos los datos para crear y administrar cuentas; autenticar usuarios; prestar la plataforma y sus funciones; gestionar máquinas, inventario, incidencias, operaciones y pagos a franquiciados; atender consultas; mantener la seguridad; prevenir usos indebidos; y conservar evidencias y trazabilidad.</p>
               <p>Las bases jurídicas aplicables son la ejecución de un contrato o la aplicación de medidas precontractuales; el cumplimiento de obligaciones legales; y el interés legítimo de SoftLife y sus colaboradores en operar, proteger y mejorar el servicio. Cuando la normativa lo exija, solicitaremos consentimiento, que podrá retirarse sin afectar a la licitud del tratamiento anterior.</p>
+              <p>La recogida de evidencias de aceptación contractual se realiza para formalizar, gestionar y acreditar la relación y prevenir abusos. No se basa en una casilla de consentimiento general del RGPD ni convierte la aceptación del contrato en consentimiento para finalidades incompatibles.</p>
               <p>No se adoptan decisiones con efectos jurídicos basadas únicamente en tratamientos automatizados. Algunas funciones pueden usar herramientas automáticas o de inteligencia artificial para transcribir, clasificar o proponer información, sujeta a revisión humana cuando corresponda.</p>
             </div>
           </section>

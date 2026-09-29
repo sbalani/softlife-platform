@@ -27,3 +27,24 @@ export async function completeOdooSyncRequest(s: SupabaseClient, requestId: stri
   }
   return { request: data };
 }
+
+export async function enqueueOdooFiscalRemediationRequest(s: SupabaseClient, input: {
+  requestedBy: string;
+  payload: Record<string, unknown>;
+  payloadSha256: string;
+}) {
+  if (!/^[0-9a-f]{64}$/.test(input.payloadSha256) || canonicalJson(input.payload) === "{}") {
+    throw new OdooContractError("A nonempty frozen remediation payload and SHA-256 are required");
+  }
+  const { data, error } = await s.from("odoo_sync_requests").insert({
+    kind: "fiscal_product_remediation",
+    requested_by: input.requestedBy,
+    payload: input.payload,
+    payload_sha256: input.payloadSha256,
+  }).select("id").single();
+  if (error) {
+    if (error.code === "23505") throw new OdooContractError("A fiscal product remediation request is already active", 409, "active_request");
+    throw error;
+  }
+  return { requestId: String(data.id) };
+}

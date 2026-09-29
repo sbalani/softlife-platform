@@ -6,6 +6,7 @@ import { getSessionProfile } from "@/lib/auth/session";
 import { recordProductChange } from "@/lib/data/change-log";
 import { cancelUnconfirmedManufacturingPeriod, confirmManufacturingPeriod, confirmManufacturingReplenishment, enqueueManufacturingPeriod } from "@/lib/data/odoo-production";
 import { createFiscalPreflight } from "@/lib/data/odoo-fiscal";
+import { enqueueFiscalProductRemediation } from "@/lib/data/odoo-fiscal-remediation";
 import { inclusiveLocalDatePeriod, localDateTimeToUtc } from "@/lib/odoo-sync-contract";
 import { parseProductionRecipeAssignments } from "@/lib/production-recipe-assignments";
 
@@ -136,6 +137,27 @@ export async function requestOdooStockSync(_state: OdooActionResult | null, _fd:
     }
     revalidatePath("/odoo");
     return { ok: true, message: "Full Odoo sync queued. The connector polls within one minute; refresh this page for its result." };
+  } catch (error) { return actionError(error); }
+}
+
+export async function requestFiscalProductRemediation(_state: OdooActionResult | null, fd: FormData): Promise<OdooActionResult> {
+  try {
+    const s = await productionAdminClient();
+    const actor = await getSessionProfile();
+    if (!actor || actor.role !== "admin") throw new Error("Admin access required.");
+    const reportId = String(fd.get("configuration_report_id") ?? "");
+    const reportSha256 = String(fd.get("configuration_payload_sha256") ?? "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(reportId) || !/^[0-9a-f]{64}$/.test(reportSha256)) throw new Error("A valid source report reference is required.");
+    if (String(fd.get("remediation_acknowledgement") ?? "") !== "write_odoo_product_fiscal_configuration") {
+      throw new Error("Acknowledge the Odoo product configuration write before queueing remediation.");
+    }
+    const result = await enqueueFiscalProductRemediation(s, {
+      configurationReportId: reportId,
+      configurationPayloadSha256: reportSha256,
+      requestedBy: actor.id,
+    });
+    revalidatePath("/odoo");
+    return { ok: true, message: `Queued ${result.productCount} Odoo product${result.productCount === 1 ? "" : "s"}; payload ${result.payloadSha256.slice(0, 12)}.` };
   } catch (error) { return actionError(error); }
 }
 

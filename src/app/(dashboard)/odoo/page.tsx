@@ -10,6 +10,9 @@ import { ProductionRunsPanel } from "./ProductionRunsPanel";
 import { OdooSaveForm } from "./OdooSaveForm";
 import { StockSnapshotPanel } from "./StockSnapshotPanel";
 import { FiscalPreflightPanel } from "./FiscalPreflightPanel";
+import { getFiscalRemediationAdminData } from "@/lib/data/odoo-fiscal-remediation";
+import { FiscalRemediationPanel } from "./FiscalRemediationPanel";
+import { getSessionProfile } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -18,11 +21,13 @@ function isUnitStockUom(uom: string | null) {
 }
 
 export default async function OdooPage() {
-  const [{ skus, source: skuSource }, { lots, source: lotSource }, production, fiscal] = await Promise.all([
+  const actor = await getSessionProfile();
+  const [{ skus, source: skuSource }, { lots, source: lotSource }, production, fiscal, remediation] = await Promise.all([
     getOdooSkus(),
     getOdooLots(),
     getProductionAdminData(),
     getFiscalPreflightAdminData(),
+    actor?.role === "admin" ? getFiscalRemediationAdminData() : null,
   ]);
 
   const tz = await getDisplayTimezone();
@@ -32,13 +37,15 @@ export default async function OdooPage() {
         <h1 className="font-display text-3xl font-bold text-cocoa">Odoo</h1>
         <p className="mt-1 text-sm text-taupe">
           SKUs and lots mirrored from Odoo, refreshed hourly by the softlife_sync cron.
-          Odoo is the system of record for this data — the platform only reads it here.
+          Odoo is the system of record. Platform writes require a separate preview, explicit confirmation, and connector opt-in.
         </p>
       </header>
 
       <StockSnapshotPanel snapshot={production.stockSnapshot} timeZone={tz} sourceWarehouseId={production.settings?.replenishment_source_odoo_warehouse_id ?? null} />
 
       <FiscalPreflightPanel data={fiscal} timeZone={tz} />
+
+      {remediation && <FiscalRemediationPanel data={remediation} timeZone={tz} />}
 
       <section className="mb-8 rounded-2xl border border-line bg-white p-5">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">

@@ -39,7 +39,7 @@ export async function getProductionAdminData(): Promise<ProductionAdminData> {
       s.from("production_settings").select("cup_odoo_product_id,currency,replenishment_source_odoo_warehouse_id").eq("singleton", true).maybeSingle(),
       s.from("odoo_warehouses").select("odoo_id,name,sales_customer_odoo_id,stock_location_id").order("name"),
       s.rpc("get_odoo_stock_snapshot_diagnostics"),
-      s.from("odoo_sync_requests").select("id,status,requested_at,claimed_at,completed_at,attempts,result,error").order("requested_at", { ascending: false }).limit(1).maybeSingle(),
+      s.from("odoo_sync_requests").select("id,status,requested_at,claimed_at,completed_at,attempts,result,error").eq("kind", "stock_snapshot").order("requested_at", { ascending: false }).limit(1).maybeSingle(),
       s.from("order_product_resolutions").select("id,order_id,line_index,raw_name,normalized_name,raw_position,menu_kind,problem_code,huaxin_orders(order_code,order_time,machines(name))").eq("resolution_status", "pending").order("created_at").limit(100),
       s.from("manufacturing_period_exports").select("id,idempotency_key,initiated_by,status,preparation_stage,preparation_attempt_count,preparation_error,period_from,period_to,time_zone,document_date,payload_sha256,payload,blocked_reasons,replenishment_result,odoo_result,created_at,replenishment_confirmed_at,confirmed_at,updated_at,manufacturing_period_export_orders(count)").is("manufacturing_period_export_orders.released_at", null).order("created_at", { ascending: false }).limit(50),
     ]);

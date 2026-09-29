@@ -15,10 +15,17 @@ Example report:
 {
   "contract_version": 1,
   "checked_at": "2026-09-29T12:00:00Z",
+  "capabilities": { "fiscal_product_remediation": 1 },
   "company": {
+    "odoo_id": 3,
     "country_code": "ES",
     "vat": "ESB12345678",
     "currency": "EUR"
+  },
+  "income_account": {
+    "odoo_id": 77,
+    "code": "701000",
+    "account_type": "income"
   },
   "journal": {
     "code": "VEND",
@@ -70,3 +77,13 @@ Example report:
 - `posting_enabled` is initialized to `false` and there is no platform operation that changes it.
 
 Before implementing invoice execution, resolve historical accounting/tax dates, enable secure posted-entry hashes in Odoo, and add a separate durable document-request contract with idempotent result callbacks. Reconfirm VAT eligibility only when adding or changing vending products.
+
+## Fiscal product remediation
+
+The upgraded connector advertises `capabilities.fiscal_product_remediation = 1` and reports exact company, income-account, tax, customer, and effective product configuration identifiers. The `/odoo` admin screen derives distinct candidates only from active recipe `odoo_finished_product_id` values present in the latest immutable report. It uses the same effective income-account and Spanish percentage sales-tax predicates as fiscal preflight.
+
+Queueing is blocked when the report is older than 24 hours, its top-level fiscal configuration is not accepted, exact target identifiers or expected values are invalid, an active recipe product is absent from the report, no product needs a change, or another remediation request is pending or processing. The server action accepts only the displayed report ID/hash and acknowledgement; it reloads the latest report, settings, recipes, and request state and recomputes the candidates.
+
+`odoo_sync_requests` stores the canonical payload and SHA-256 under kind `fiscal_product_remediation`. Source fields are immutable after insertion. Existing `stock_snapshot` requests remain payload-free and are read independently by the stock UI. Connector claim and lease-based idempotent completion behavior is unchanged; claimed rows now include `kind`, `payload`, and `payload_sha256`.
+
+The remediation payload can update only the listed products' income account and/or customer taxes according to each boolean flag. This operation cannot create or post invoices.

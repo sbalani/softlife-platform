@@ -32,6 +32,20 @@ export type FiscalProductCheck = {
   sale_taxes: { odoo_tax_id: number; rate: number; country_code: string; price_include: boolean; amount_type: string; type_tax_use: string }[];
 };
 
+export function hasEffectiveFiscalSaleTax(product: FiscalProductCheck, vatRate: number): boolean {
+  return product.sale_taxes.some((taxRow) => Math.abs(taxRow.rate - vatRate) < 0.0001
+    && taxRow.country_code === "ES"
+    && taxRow.type_tax_use === "sale"
+    && taxRow.amount_type === "percent");
+}
+
+export function fiscalProductRemediationNeeds(product: FiscalProductCheck, settings: FiscalSettings) {
+  return {
+    remediate_income_account: product.income_account_code !== settings.income_account_code,
+    remediate_customer_taxes: !hasEffectiveFiscalSaleTax(product, settings.vat_rate),
+  };
+}
+
 export type FiscalConfigurationEvaluation = {
   accepted: boolean;
   checkedAt: string;
@@ -250,8 +264,9 @@ export function buildFiscalPreflightItem(input: {
       if (!product) findings.push({ severity: "blocker", code: "odoo_product_not_verified", message: `Odoo did not report finished product ${recipe.odoo_finished_product_id} in its fiscal configuration check.` });
       else {
         if (!product.sale_ok) findings.push({ severity: "blocker", code: "odoo_product_not_saleable", message: `Odoo product ${product.odoo_product_id} is not saleable.` });
-        if (product.income_account_code !== settings.income_account_code) findings.push({ severity: "blocker", code: "income_account_mismatch", message: `Odoo product ${product.odoo_product_id} must resolve to income account ${settings.income_account_code}.` });
-        if (!product.sale_taxes.some((taxRow) => Math.abs(taxRow.rate - settings.vat_rate) < 0.0001 && taxRow.country_code === "ES" && taxRow.type_tax_use === "sale" && taxRow.amount_type === "percent")) findings.push({ severity: "blocker", code: "product_tax_mismatch", message: `Odoo product ${product.odoo_product_id} must carry the percentage-based Spanish ${settings.vat_rate}% customer tax.` });
+        const remediation = fiscalProductRemediationNeeds(product, settings);
+        if (remediation.remediate_income_account) findings.push({ severity: "blocker", code: "income_account_mismatch", message: `Odoo product ${product.odoo_product_id} must resolve to income account ${settings.income_account_code}.` });
+        if (remediation.remediate_customer_taxes) findings.push({ severity: "blocker", code: "product_tax_mismatch", message: `Odoo product ${product.odoo_product_id} must carry the percentage-based Spanish ${settings.vat_rate}% customer tax.` });
       }
     }
     if (refundRequired) findings.push({ severity: "warning", code: "refund_requires_review", message: "Create the original invoice first; refund evidence needs review before a full credit note can be queued." });

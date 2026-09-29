@@ -9,6 +9,8 @@ import {
   summarizeFiscalPreflight,
   type FiscalSettings,
 } from "./odoo-fiscal-preflight.ts";
+import { buildFiscalRemediationPreview } from "./odoo-fiscal-remediation.ts";
+import { sha256 } from "./odoo-sync-contract.ts";
 
 const settings: FiscalSettings = {
   journal_code: "VEND",
@@ -190,4 +192,80 @@ test("flags refunded sales for credit-note review without changing the gross inv
     selected_orders: 1, eligible_invoices: 1, blocked_orders: 0, excluded_orders: 0,
     refunds_requiring_review: 1, warning_findings: 1, gross_cents: 380, tax_base_cents: 345, vat_cents: 35,
   });
+});
+
+test("builds a sorted remediation payload from the same effective product checks", () => {
+  const now = Date.now();
+  const reportPayload = {
+    ...configuration,
+    checked_at: new Date(now - 60_000).toISOString(),
+    capabilities: { fiscal_product_remediation: 1 },
+    company: { ...configuration.company, odoo_id: 3 },
+    income_account: { odoo_id: 77, code: "701000", account_type: "income" },
+    products: [
+      { ...configuration.products[0], odoo_product_id: 202, income_account_code: "700000" },
+      { ...configuration.products[0], odoo_product_id: 101, sale_taxes: [] },
+    ],
+  };
+  const preview = buildFiscalRemediationPreview({
+    settings,
+    now,
+    report: { id: "11111111-1111-4111-8111-111111111111", checked_at: reportPayload.checked_at, accepted: true, payload_sha256: sha256(reportPayload), payload: reportPayload },
+    recipes: [
+      { name: "Second", odoo_finished_product_id: 202 },
+      { name: "First", odoo_finished_product_id: 101 },
+      { name: "First alias", odoo_finished_product_id: 101 },
+    ],
+  });
+  assert.deepEqual(preview.blockers, []);
+  assert.deepEqual(preview.payload?.products, [
+    { odoo_product_id: 101, remediate_income_account: false, remediate_customer_taxes: true },
+    { odoo_product_id: 202, remediate_income_account: true, remediate_customer_taxes: false },
+  ]);
+  assert.deepEqual(preview.products[0].names, ["First", "First alias"]);
+  assert.match(preview.payloadSha256 ?? "", /^[0-9a-f]{64}$/);
+});
+
+test("shows missing reported recipe products and blocks remediation", () => {
+  const now = Date.now();
+  const payload = {
+    ...configuration,
+    checked_at: new Date(now - 60_000).toISOString(),
+    capabilities: { fiscal_product_remediation: 1 },
+    company: { ...configuration.company, odoo_id: 3 },
+    income_account: { odoo_id: 77, code: "701000", account_type: "income" },
+    products: [{ ...configuration.products[0], income_account_code: "700000" }],
+  };
+  const preview = buildFiscalRemediationPreview({
+    settings, now,
+    report: { id: "11111111-1111-4111-8111-111111111111", checked_at: payload.checked_at, accepted: true, payload_sha256: sha256(payload), payload },
+    recipes: [{ name: "Reported", odoo_finished_product_id: 101 }, { name: "Missing", odoo_finished_product_id: 303 }],
+  });
+  assert.deepEqual(preview.missingProducts, [{ odoo_product_id: 303, names: ["Missing"] }]);
+  assert.equal(preview.products.length, 1);
+  assert.equal(preview.payload, null);
+  assert(preview.blockers.some((blocker) => blocker.includes("missing")));
+});
+
+test("blocks stale, incapable, invalid-target, and active remediation previews", () => {
+  const now = Date.now();
+  const payload = {
+    ...configuration,
+    checked_at: new Date(now - 25 * 60 * 60_000).toISOString(),
+    capabilities: {},
+    company: { ...configuration.company, odoo_id: null },
+    income_account: { odoo_id: null, code: "700000", account_type: "asset_current" },
+    products: [{ ...configuration.products[0], income_account_code: "700000" }],
+  };
+  const preview = buildFiscalRemediationPreview({
+    settings, now,
+    report: { id: "11111111-1111-4111-8111-111111111111", checked_at: payload.checked_at, accepted: true, payload_sha256: sha256(payload), payload },
+    recipes: [{ name: "Reported", odoo_finished_product_id: 101 }],
+    latestRequest: { id: "request", status: "processing", requested_at: payload.checked_at, claimed_at: null, completed_at: null, attempts: 1, result: null, error: null },
+  });
+  assert.equal(preview.payload, null);
+  assert(preview.blockers.some((blocker) => blocker.includes("24 hours")));
+  assert(preview.blockers.some((blocker) => blocker.includes("capability")));
+  assert(preview.blockers.some((blocker) => blocker.includes("income account")));
+  assert(preview.blockers.some((blocker) => blocker.includes("already active")));
 });

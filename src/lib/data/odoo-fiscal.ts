@@ -35,10 +35,11 @@ export type FiscalPreflightAdminData = {
     summary: ReturnType<typeof summarizeFiscalPreflight>;
     created_at: string;
   }[];
+  latestReady: FiscalPreflightAdminData["runs"][number] | null;
   latestItems: FiscalPreflightItem[];
 };
 
-const EMPTY: FiscalPreflightAdminData = { available: false, settings: null, configuration: null, runs: [], latestItems: [] };
+const EMPTY: FiscalPreflightAdminData = { available: false, settings: null, configuration: null, runs: [], latestReady: null, latestItems: [] };
 
 function rows(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object") : [];
@@ -83,6 +84,10 @@ export async function getFiscalConfigurationRequest(s: SupabaseClient) {
       income_account_code: settings.income_account_code,
       tax_treatment_approved: settings.tax_treatment_approved,
       posting_enabled: settings.posting_enabled,
+    },
+    required_capabilities: {
+      fiscal_invoice_draft_creation: 1,
+      fiscal_invoice_bulk_confirmation: 1,
     },
     required_product_fields: ["odoo_product_id", "sale_ok", "income_account_code", "sale_taxes"],
   };
@@ -194,7 +199,7 @@ export async function createFiscalPreflight(s: SupabaseClient, input: {
     }
   }
   if (!settings.tax_treatment_approved) globalFindings.push({ severity: "blocker", code: "tax_treatment_not_approved", message: `An accountant must approve the ${settings.vat_rate}% vending sales tax treatment before this preflight can be ready.` });
-  if (!settings.posting_enabled) globalFindings.push({ severity: "info", code: "posting_disabled", message: "Invoice posting is intentionally disabled. This run is a read-only preflight." });
+  if (!settings.posting_enabled) globalFindings.push({ severity: "info", code: "posting_disabled", message: "The legacy posting switch remains disabled. Invoice confirmation requires the separate explicit fiscal confirmation workflow." });
 
   const verifiedProducts = configurationEvaluation?.accepted ? productsFromEvaluation(configurationEvaluation) : null;
   const items = orders.map((order) => {
@@ -252,16 +257,29 @@ function presentItem(row: Record<string, unknown>): FiscalPreflightItem {
   };
 }
 
+function presentRun(run: Record<string, unknown>): FiscalPreflightAdminData["runs"][number] {
+  return {
+    id: String(run.id), status: run.status as "ready" | "blocked", period_from: String(run.period_from), period_to: String(run.period_to),
+    time_zone: String(run.time_zone), tax_rate: Number(run.tax_rate), currency: String(run.currency),
+    global_findings: rows(run.global_findings) as FiscalFinding[],
+    summary: run.summary as ReturnType<typeof summarizeFiscalPreflight>, created_at: String(run.created_at),
+  };
+}
+
 export async function getFiscalPreflightAdminData(): Promise<FiscalPreflightAdminData> {
   if (!isSupabaseConfigured() || !process.env.SUPABASE_SERVICE_ROLE_KEY) return EMPTY;
   try {
     const s = await createServiceClient();
-    const [settings, configuration, runsResult] = await Promise.all([
+    const runColumns = "id,status,period_from,period_to,time_zone,tax_rate,currency,global_findings,summary,created_at";
+    const [settings, configuration, runsResult, readyResult] = await Promise.all([
       getSettings(s), getLatestConfiguration(s),
-      s.from("fiscal_preflight_runs").select("id,status,period_from,period_to,time_zone,tax_rate,currency,global_findings,summary,created_at")
+      s.from("fiscal_preflight_runs").select(runColumns)
         .order("created_at", { ascending: false }).limit(20),
+      s.from("fiscal_preflight_runs").select(runColumns).eq("status", "ready")
+        .order("created_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
     if (runsResult.error) throw runsResult.error;
+    if (readyResult.error) throw readyResult.error;
     const runRows = (runsResult.data as Record<string, unknown>[]) ?? [];
     const latestId = runRows[0]?.id == null ? null : String(runRows[0].id);
     const itemsResult = latestId
@@ -275,12 +293,8 @@ export async function getFiscalPreflightAdminData(): Promise<FiscalPreflightAdmi
         id: String(configuration.id), checked_at: String(configuration.checked_at), accepted: Boolean(configuration.accepted),
         findings: rows(configuration.findings) as FiscalFinding[], payload_sha256: String(configuration.payload_sha256),
       } : null,
-      runs: runRows.map((run) => ({
-        id: String(run.id), status: run.status as "ready" | "blocked", period_from: String(run.period_from), period_to: String(run.period_to),
-        time_zone: String(run.time_zone), tax_rate: Number(run.tax_rate), currency: String(run.currency),
-        global_findings: rows(run.global_findings) as FiscalFinding[],
-        summary: run.summary as ReturnType<typeof summarizeFiscalPreflight>, created_at: String(run.created_at),
-      })),
+      runs: runRows.map(presentRun),
+      latestReady: readyResult.data ? presentRun(readyResult.data as Record<string, unknown>) : null,
       latestItems: ((itemsResult.data as Record<string, unknown>[]) ?? []).map(presentItem),
     };
   } catch {

@@ -119,6 +119,7 @@ export function evaluateFiscalConfiguration(settings: FiscalSettings, body: Reco
   const reportedTaxRate = Number(tax.rate);
   if (!Number.isFinite(reportedTaxRate) || Math.abs(reportedTaxRate - settings.vat_rate) > 0.0001) findings.push({ severity: "blocker", code: "sales_tax_rate_mismatch", message: `The configured sales tax must be ${settings.vat_rate}%.` });
   if (text(tax.country_code).toUpperCase() !== "ES") findings.push({ severity: "blocker", code: "sales_tax_country_invalid", message: "The configured sales tax must belong to Spain." });
+  if (typeof tax.price_include !== "boolean") findings.push({ severity: "blocker", code: "sales_tax_price_mode_invalid", message: "Odoo must report whether the configured sales tax is price-included." });
 
   const products: FiscalProductCheck[] = [];
   const productIds = new Set<number>();

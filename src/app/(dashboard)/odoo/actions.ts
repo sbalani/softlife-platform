@@ -7,6 +7,8 @@ import { recordProductChange } from "@/lib/data/change-log";
 import { cancelUnconfirmedManufacturingPeriod, confirmManufacturingPeriod, confirmManufacturingReplenishment, enqueueManufacturingPeriod } from "@/lib/data/odoo-production";
 import { createFiscalPreflight } from "@/lib/data/odoo-fiscal";
 import { enqueueFiscalProductRemediation } from "@/lib/data/odoo-fiscal-remediation";
+import { enqueueFiscalInvoiceDraftBatch } from "@/lib/data/odoo-fiscal-invoices";
+import { enqueueFiscalInvoiceConfirmation, retryFiscalInvoiceDraftBatch } from "@/lib/data/odoo-fiscal-invoice-requests";
 import { inclusiveLocalDatePeriod, localDateTimeToUtc } from "@/lib/odoo-sync-contract";
 import { parseProductionRecipeAssignments } from "@/lib/production-recipe-assignments";
 
@@ -42,6 +44,55 @@ export async function prepareFiscalPreflight(_state: OdooActionResult | null, fd
     const result = await createFiscalPreflight(await createServiceClient(), { periodFrom, periodTo, timeZone, requestedBy: actor.id });
     revalidatePath("/odoo");
     return { ok: true, message: `Frozen preflight ${result.run_id.slice(0, 8)}: ${result.summary.eligible_invoices} eligible, ${result.summary.blocked_orders} blocked.` };
+  } catch (error) { return actionError(error); }
+}
+
+export async function requestFiscalInvoiceDrafts(_state: OdooActionResult | null, fd: FormData): Promise<OdooActionResult> {
+  try {
+    const s = await productionAdminClient();
+    const actor = await getSessionProfile();
+    if (!actor || actor.role !== "admin") throw new Error("Admin access required.");
+    if (String(fd.get("draft_acknowledgement") ?? "") !== "create_odoo_invoice_drafts") {
+      throw new Error("Acknowledge creation of customer invoice drafts in Odoo.");
+    }
+    const preflightRunId = String(fd.get("preflight_run_id") ?? "");
+    if (!/^[0-9a-f-]{36}$/i.test(preflightRunId)) throw new Error("A valid ready preflight is required.");
+    const result = await enqueueFiscalInvoiceDraftBatch(s, { preflightRunId, requestedBy: actor.id });
+    revalidatePath("/odoo");
+    return { ok: true, message: `Queued ${result.document_count} customer invoice draft${result.document_count === 1 ? "" : "s"}.` };
+  } catch (error) { return actionError(error); }
+}
+
+export async function requestFiscalInvoiceConfirmation(_state: OdooActionResult | null, fd: FormData): Promise<OdooActionResult> {
+  try {
+    const s = await productionAdminClient();
+    const actor = await getSessionProfile();
+    if (!actor || actor.role !== "admin") throw new Error("Admin access required.");
+    if (String(fd.get("confirmation_acknowledgement") ?? "") !== "post_selected_odoo_invoices") {
+      throw new Error("Acknowledge posting the selected customer invoices in Odoo.");
+    }
+    const batchId = String(fd.get("batch_id") ?? "");
+    const documentIds = fd.getAll("document_id").map(String);
+    if (!/^[0-9a-f-]{36}$/i.test(batchId) || documentIds.some((id) => !/^[0-9a-f-]{36}$/i.test(id))) throw new Error("Invalid invoice selection.");
+    const result = await enqueueFiscalInvoiceConfirmation(s, { batchId, documentIds, requestedBy: actor.id });
+    revalidatePath("/odoo");
+    return { ok: true, message: `Queued confirmation for ${result.document_count} selected invoice${result.document_count === 1 ? "" : "s"}.` };
+  } catch (error) { return actionError(error); }
+}
+
+export async function retryFiscalInvoiceDrafts(_state: OdooActionResult | null, fd: FormData): Promise<OdooActionResult> {
+  try {
+    const s = await productionAdminClient();
+    const actor = await getSessionProfile();
+    if (!actor || actor.role !== "admin") throw new Error("Admin access required.");
+    if (String(fd.get("retry_acknowledgement") ?? "") !== "retry_exact_invoice_drafts") {
+      throw new Error("Acknowledge retrying the exact frozen Odoo draft payload.");
+    }
+    const batchId = String(fd.get("batch_id") ?? "");
+    if (!/^[0-9a-f-]{36}$/i.test(batchId)) throw new Error("A valid failed invoice batch is required.");
+    const result = await retryFiscalInvoiceDraftBatch(s, { batchId, requestedBy: actor.id });
+    revalidatePath("/odoo");
+    return { ok: true, message: `Retried the frozen payload for ${result.document_count} invoice draft${result.document_count === 1 ? "" : "s"}.` };
   } catch (error) { return actionError(error); }
 }
 

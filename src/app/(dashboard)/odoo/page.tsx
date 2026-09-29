@@ -13,6 +13,8 @@ import { FiscalPreflightPanel } from "./FiscalPreflightPanel";
 import { getFiscalRemediationAdminData } from "@/lib/data/odoo-fiscal-remediation";
 import { FiscalRemediationPanel } from "./FiscalRemediationPanel";
 import { getSessionProfile } from "@/lib/auth/session";
+import { getFiscalInvoiceAdminData } from "@/lib/data/odoo-fiscal-invoices";
+import { isFiscalCalendarMonth } from "@/lib/odoo-fiscal-invoices";
 
 export const dynamic = "force-dynamic";
 
@@ -20,13 +22,18 @@ function isUnitStockUom(uom: string | null) {
   return uom != null && ["unit", "units", "u", "each"].includes(uom.trim().toLowerCase());
 }
 
-export default async function OdooPage() {
+export default async function OdooPage({ searchParams }: { searchParams: Promise<{ fiscal_month?: string }> }) {
   const actor = await getSessionProfile();
-  const [{ skus, source: skuSource }, { lots, source: lotSource }, production, fiscal, remediation] = await Promise.all([
+  const { fiscal_month: fiscalMonth } = await searchParams;
+  const monthParts = new Intl.DateTimeFormat("en", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit" }).formatToParts(new Date());
+  const monthValues = new Map(monthParts.map((part) => [part.type, part.value]));
+  const selectedFiscalMonth = isFiscalCalendarMonth(fiscalMonth) ? fiscalMonth : `${monthValues.get("year")}-${monthValues.get("month")}`;
+  const [{ skus, source: skuSource }, { lots, source: lotSource }, production, fiscal, invoices, remediation] = await Promise.all([
     getOdooSkus(),
     getOdooLots(),
     getProductionAdminData(),
     getFiscalPreflightAdminData(),
+    getFiscalInvoiceAdminData(selectedFiscalMonth),
     actor?.role === "admin" ? getFiscalRemediationAdminData() : null,
   ]);
 
@@ -43,7 +50,7 @@ export default async function OdooPage() {
 
       <StockSnapshotPanel snapshot={production.stockSnapshot} timeZone={tz} sourceWarehouseId={production.settings?.replenishment_source_odoo_warehouse_id ?? null} />
 
-      <FiscalPreflightPanel data={fiscal} timeZone={tz} />
+      <FiscalPreflightPanel data={fiscal} invoices={invoices} timeZone={tz} calendarMonth={selectedFiscalMonth} />
 
       {remediation && <FiscalRemediationPanel data={remediation} timeZone={tz} />}
 

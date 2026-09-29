@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canonicalJson } from "../odoo-sync-contract.ts";
+import { validateFiscalInvoiceResult } from "../odoo-fiscal-invoices.ts";
 import { OdooContractError } from "./odoo-production.ts";
 
 export async function claimOdooSyncRequest(s: SupabaseClient) {
@@ -13,12 +14,22 @@ export async function completeOdooSyncRequest(s: SupabaseClient, requestId: stri
   const claimToken = String(body.claim_token ?? "");
   if (!/^[0-9a-f-]{36}$/i.test(claimToken)) throw new OdooContractError("Valid sync request lease is required");
   if (typeof body.accepted !== "boolean") throw new OdooContractError("accepted must be boolean");
-  if (canonicalJson(body).length > 20_000) throw new OdooContractError("Sync result is too large", 413, "payload_too_large");
-  if (body.accepted && (typeof body.summary !== "string" || !body.summary.trim())) {
-    throw new OdooContractError("Successful sync results require a summary");
-  }
   if (!body.accepted && (typeof body.error !== "string" || !body.error.trim())) {
     throw new OdooContractError("Failed sync results require an error");
+  }
+  const { data: source, error: sourceError } = await s.from("odoo_sync_requests").select("kind,payload").eq("id", requestId).single();
+  if (sourceError) throw sourceError;
+  const fiscalInvoiceKind = ["fiscal_invoice_draft_creation", "fiscal_invoice_bulk_confirmation"].includes(source.kind);
+  if (canonicalJson(body).length > (fiscalInvoiceKind ? 250_000 : 20_000)) throw new OdooContractError("Sync result is too large", 413, "payload_too_large");
+  if (body.accepted && !fiscalInvoiceKind && (typeof body.summary !== "string" || !body.summary.trim())) {
+    throw new OdooContractError("Successful sync results require a summary");
+  }
+  if (fiscalInvoiceKind) {
+    try {
+      validateFiscalInvoiceResult(source.kind, source.payload as Record<string, unknown>, body);
+    } catch (error) {
+      throw new OdooContractError(error instanceof Error ? error.message : "Invalid fiscal invoice result");
+    }
   }
   const { data, error } = await s.rpc("complete_odoo_sync_request", { p_request_id: requestId, p_claim_token: claimToken, p_result: body });
   if (error) {

@@ -5,7 +5,7 @@ import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server
 import { validateOnboardingForm } from "@/lib/franchisee-onboarding-validation";
 import { buildCanonicalPayload, canonicalJson, createDownloadToken, hashAuditIp, sha256Hex } from "@/lib/franchisee-onboarding-evidence";
 import { createOnboardingContractPdf } from "@/lib/franchisee-onboarding-pdf";
-import { FRANCHISEE_CONTRACT_VERSION, modalityShare } from "@/lib/franchisee-onboarding-contract";
+import { FRANCHISEE_CONTRACT_VERSION } from "@/lib/franchisee-onboarding-contract";
 
 export type FranchiseeIntakeResult =
   | { ok: false; error: string }
@@ -84,11 +84,12 @@ export async function submitFranchiseeIntake(
       account_holder_name: input.accountHolderName,
       iban: input.iban,
       bic_swift: input.bicSwift,
+      bank_details_deferred: input.bankDetailsDeferred,
       representative_title: input.representativeTitle,
       registered_address: input.registeredAddress,
       installation_address: input.installationAddress,
-      modality: input.modality,
-      share_percent: modalityShare(input.modality),
+      modality: null,
+      share_percent: null,
       accepted_at: acceptedAt,
       contract_version: FRANCHISEE_CONTRACT_VERSION,
       contract_template_hash: payload.contract.templateHash,

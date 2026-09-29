@@ -6,7 +6,6 @@ import {
   EVIDENCE_DECLARATION,
   FRANCHISEE_CONTRACT_TEMPLATE_HASH,
   FRANCHISEE_CONTRACT_VERSION,
-  modalityShare,
   type ContractPartyValues,
 } from "./franchisee-onboarding-contract.ts";
 
@@ -15,7 +14,7 @@ export type OnboardingCanonicalPayload = {
   acceptanceId: string;
   acceptedAt: string;
   contract: { version: string; templateHash: string; bindingLanguage: "es" };
-  manager: ContractPartyValues & { sharePercent: 26 | 18 };
+  manager: ContractPartyValues & { modality: null; sharePercent: null };
   signer: { name: string; title: string; email: string; phone: string; typedSignature: string };
   declarations: {
     terms: { accepted: true; wording: string };
@@ -77,8 +76,9 @@ export function buildCanonicalPayload(
       accountHolderName: input.accountHolderName,
       iban: input.iban,
       bicSwift: input.bicSwift,
-      modality: input.modality,
-      sharePercent: modalityShare(input.modality),
+      bankDetailsDeferred: input.bankDetailsDeferred,
+      modality: null,
+      sharePercent: null,
     },
     signer: { name: input.representativeName, title: input.representativeTitle, email: input.representativeEmail, phone: input.representativePhone, typedSignature: input.typedSignature },
     declarations: {

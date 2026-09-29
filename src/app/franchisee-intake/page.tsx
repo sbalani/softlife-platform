@@ -15,7 +15,7 @@ export default async function FranchiseeIntakePage() {
           <div className="mb-3 flex justify-end"><LanguageSelector locale={locale} /></div>
           <div className="text-xs font-bold uppercase tracking-[0.28em] text-[#c87954]">SoftLife</div>
           <h1 className="mt-3 font-display text-3xl font-bold text-[#4a3428] sm:text-4xl">{es ? "Alta y aceptación del contrato" : "Onboarding and contract acceptance"}</h1>
-          <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[#806f63]">{es ? "Completa los datos, elige una modalidad y revisa íntegramente la oferta contractual antes de aceptarla." : "Complete the details, choose one modality, and review the complete contractual offer before accepting it. The binding contract is Spanish."}</p>
+          <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[#806f63]">{es ? "Completa los datos y revisa íntegramente la oferta contractual antes de aceptarla. SOFTLIFE asignará la modalidad más adelante." : "Complete the details and review the complete contractual offer before accepting it. SOFTLIFE will assign the modality later. The binding contract is Spanish."}</p>
         </div>
         <section className="rounded-3xl border border-[#e0d6cb] bg-[#fffdfa] p-6 shadow-[0_18px_60px_rgba(74,52,40,0.08)] sm:p-8">
           <FranchiseeIntakeForm locale={locale} />

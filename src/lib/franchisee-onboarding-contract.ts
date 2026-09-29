@@ -1,12 +1,10 @@
-export const FRANCHISEE_CONTRACT_VERSION = "SL-GESTOR-2026-09-29-v1";
-export const FRANCHISEE_CONTRACT_TEMPLATE_HASH = "9aad3647fdeee3ab5770f6ed7dda9be7251631b342a737365ed6ed1a675a6470";
+export const FRANCHISEE_CONTRACT_VERSION = "SL-GESTOR-2026-09-29-v2";
+export const FRANCHISEE_CONTRACT_TEMPLATE_HASH = "50fc46c68c4a281256431a08ca5381c9b366f5d958d1943ed1af36b4f342bdef";
 
 export const ACCEPTANCE_DECLARATION = "He revisado y acepto íntegramente todas las condiciones del contrato vinculante en español.";
 export const AUTHORITY_DECLARATION = "Declaro que tengo facultades suficientes para obligar a la entidad gestora indicada.";
 export const EVIDENCE_DECLARATION = "Reconozco que la aceptación electrónica generará evidencias técnicas y un PDF exacto del contrato aceptado.";
 export const ACCEPT_BUTTON_LABEL = "Aceptar y firmar contrato";
-
-export type FranchiseeModality = "A" | "B";
 
 export type ContractPartyValues = {
   representativeName: string;
@@ -18,10 +16,10 @@ export type ContractPartyValues = {
   registeredAddress: string;
   tradeName: string | null;
   installationAddress: string;
-  accountHolderName: string;
-  iban: string;
+  accountHolderName: string | null;
+  iban: string | null;
   bicSwift: string | null;
-  modality: FranchiseeModality;
+  bankDetailsDeferred: boolean;
 };
 
 export type ContractSection = { title: string; paragraphs: string[] };
@@ -33,16 +31,6 @@ export type RenderedContract = {
 };
 
 const value = (input: string | null | undefined, fallback: string) => input?.trim() || fallback;
-
-export function modalityShare(modality: FranchiseeModality): 26 | 18 {
-  return modality === "A" ? 26 : 18;
-}
-
-export function modalityLabel(modality: FranchiseeModality): string {
-  return modality === "A"
-    ? "Modalidad A: el Gestor opera, repone y limpia la máquina; participación del 26 % de las ventas netas"
-    : "Modalidad B: SoftLife opera, repone y limpia la máquina; participación del 18 % de las ventas netas";
-}
 
 export function renderFranchiseeContract(input: Partial<ContractPartyValues>, acceptedAt?: string): RenderedContract {
   const representativeName = value(input.representativeName, "[nombre del representante]");
@@ -57,8 +45,7 @@ export function renderFranchiseeContract(input: Partial<ContractPartyValues>, ac
   const accountHolderName = value(input.accountHolderName, "[titular de la cuenta]");
   const iban = value(input.iban, "[IBAN]");
   const bic = value(input.bicSwift, "[sin BIC indicado]");
-  const modalityChosen = input.modality === "A" || input.modality === "B";
-  const modality = input.modality === "B" ? "B" : "A";
+  const bankDetailsDeferred = input.bankDetailsDeferred === true;
   const acceptanceDate = acceptedAt
     ? new Intl.DateTimeFormat("es-ES", { dateStyle: "long", timeStyle: "long", timeZone: "Europe/Madrid" }).format(new Date(acceptedAt))
     : "[fecha y hora UTC generadas por el servidor al aceptar]";
@@ -97,14 +84,16 @@ export function renderFranchiseeContract(input: Partial<ContractPartyValues>, ac
       {
         title: "CUARTA. MODALIDAD DE OPERACIÓN, HIGIENE Y RETRIBUCIÓN",
         paragraphs: [
-          "Las partes acuerdan que la operativa diaria, la limpieza, el mantenimiento higiénico y la retribución económica se regirán obligatoriamente por una de las dos modalidades siguientes. La opción seleccionada forma parte esencial del contrato:",
-          `${modalityChosen && modality === "A" ? "[X]" : "[ ]"} MODALIDAD A - GESTIÓN TOTAL POR EL GESTOR (26 %). Operativa: el GESTOR se encarga por completo de la reposición diaria de la materia prima y consumibles y de la limpieza regular de las boquillas y elementos desmontables de la MÁQUINA. Formación: el personal asignado por el GESTOR deberá recibir obligatoriamente la formación técnica e higiénico-sanitaria impartida por SOFTLIFE y contar con el carnet de manipulador de alimentos vigente. Estándares: el GESTOR se compromete a seguir rigurosamente el protocolo de higiene del Anexo II y a cumplimentar el checklist digital obligatorio. Retribución: el GESTOR recibirá el 26 % de la facturación neta (ventas totales sin IVA) generada por la MÁQUINA.`,
-          `${modalityChosen && modality === "B" ? "[X]" : "[ ]"} MODALIDAD B - GESTIÓN DE REPOSICIÓN POR SOFTLIFE (18 %). Operativa: SOFTLIFE, o el personal técnico que designe, se encargará directamente de la reposición de insumos y consumibles y de la limpieza y desinfección integral de la MÁQUINA. Obligación del GESTOR: custodiar la MÁQUINA, facilitar el acceso inmediato al personal de SOFTLIFE y reportar incidencias. Retribución: el GESTOR recibirá el 18 % de la facturación neta (ventas totales sin IVA) generada por la MÁQUINA.`,
-          `Modalidad elegida: ${modalityChosen ? modalityLabel(modality) : "[pendiente de selección]"}.`,
-          "Facturación de la retribución del GESTOR por el destinatario. El GESTOR, como empresario o profesional que presta a SOFTLIFE los servicios de ubicación, custodia y, según la modalidad elegida, operación de la MÁQUINA, autoriza expresamente a SOFTLIFE, con carácter previo a dichas prestaciones, a expedir materialmente en nombre y por cuenta del GESTOR las facturas correspondientes exclusivamente a la retribución prevista en esta cláusula. Esta autorización se aplica a las prestaciones realizadas desde la aceptación del contrato y durante su vigencia; no comprende las ventas de helados a consumidores, que corresponden a SOFTLIFE. El GESTOR conserva la responsabilidad legal de sus obligaciones de facturación y fiscales.",
+          "Las partes acuerdan que la operativa diaria, la limpieza, el mantenimiento higiénico y la retribución económica se regirán obligatoriamente por una de las dos modalidades siguientes:",
+          "MODALIDAD A - GESTIÓN TOTAL POR EL GESTOR (26 %). Operativa: el GESTOR se encarga por completo de la reposición diaria de la materia prima y consumibles y de la limpieza regular de las boquillas y elementos desmontables de la MÁQUINA. Formación: el personal asignado por el GESTOR deberá recibir obligatoriamente la formación técnica e higiénico-sanitaria impartida por SOFTLIFE y contar con el carnet de manipulador de alimentos vigente. Estándares: el GESTOR se compromete a seguir rigurosamente el protocolo de higiene del Anexo II y a cumplimentar el checklist digital obligatorio. Retribución: el GESTOR recibirá el 26 % de la facturación neta (ventas totales sin IVA) generada por la MÁQUINA.",
+          "MODALIDAD B - GESTIÓN DE REPOSICIÓN POR SOFTLIFE (18 %). Operativa: SOFTLIFE, o el personal técnico que designe, se encargará directamente de la reposición de insumos y consumibles y de la limpieza y desinfección integral de la MÁQUINA. Obligación del GESTOR: custodiar la MÁQUINA, facilitar el acceso inmediato al personal de SOFTLIFE y reportar incidencias. Retribución: el GESTOR recibirá el 18 % de la facturación neta (ventas totales sin IVA) generada por la MÁQUINA.",
+          "La asignación de la Modalidad A o B corresponde exclusivamente a SOFTLIFE. El GESTOR no elige modalidad mediante esta aceptación. SOFTLIFE la asignará antes de la instalación y del inicio de la operación, la comunicará al GESTOR y la hará constar, junto con el porcentaje aplicable, en el acta de instalación/entrega posterior firmada por ambas partes.",
+          "Facturación de la retribución del GESTOR por el destinatario. El GESTOR, como empresario o profesional que presta a SOFTLIFE los servicios de ubicación, custodia y, según la modalidad asignada por SOFTLIFE, operación de la MÁQUINA, autoriza expresamente a SOFTLIFE, con carácter previo a dichas prestaciones, a expedir materialmente en nombre y por cuenta del GESTOR las facturas correspondientes exclusivamente a la retribución prevista en esta cláusula. Esta autorización se aplica a las prestaciones realizadas desde la aceptación del contrato y durante su vigencia; no comprende las ventas de helados a consumidores, que corresponden a SOFTLIFE. El GESTOR conserva la responsabilidad legal de sus obligaciones de facturación y fiscales.",
           "Por cada periodo mensual, SOFTLIFE calculará la base de la retribución conforme a la modalidad pactada y emitirá la factura con el GESTOR como prestador/emisor y SOFTLIFE como destinataria, identificando el periodo y la MÁQUINA o ubicación, con una serie específica, numeración correlativa y la mención «facturación por el destinatario». A la base se añadirá el IVA que legalmente corresponda a la prestación del GESTOR, si procede; el porcentaje de reparto se calcula sobre las ventas sin IVA de los helados y no incluye el IVA de esta factura. SOFTLIFE remitirá al GESTOR una copia de cada factura y el detalle de cálculo al correo electrónico designado, dejando constancia de su envío.",
           "El GESTOR dispondrá de diez (10) días hábiles desde la recepción para aceptar cada factura por escrito o comunicar por el mismo medio una objeción motivada. Acreditada la entrega y transcurrido ese plazo sin objeción, la factura se entenderá aceptada. En caso de discrepancia, las partes contrastarán los datos de venta y, cuando corresponda, SOFTLIFE emitirá la factura rectificativa o sustitutiva procedente, remitiendo también copia para su aceptación. El GESTOR facilitará y mantendrá actualizados sus datos fiscales y comunicará cualquier cambio de régimen tributario que afecte a estas facturas.",
-          `Toda remuneración por participación en ingresos que SoftLife abone al Gestor se pagará exclusivamente mediante transferencia bancaria o ingreso bancario en la cuenta designada por el Gestor, cuyo titular es ${accountHolderName}, IBAN ${iban}, BIC/SWIFT ${bic}. No se realizarán pagos en efectivo. El Gestor es responsable de mantener los datos bancarios vigentes, completos y correctos y de comunicar cualquier cambio por un canal aceptado por SoftLife.`,
+          bankDetailsDeferred
+            ? "Los datos bancarios quedan pendientes de aportación. La incorporación y aceptación del GESTOR pueden continuar, pero SOFTLIFE no podrá realizar ningún pago de participación en ingresos hasta que el GESTOR facilite datos bancarios completos y válidos por un canal aceptado por SOFTLIFE. Toda remuneración por participación en ingresos se pagará exclusivamente mediante transferencia bancaria o ingreso bancario y nunca en efectivo."
+            : `Toda remuneración por participación en ingresos que SOFTLIFE abone al GESTOR se pagará exclusivamente mediante transferencia bancaria o ingreso bancario en la cuenta designada por el GESTOR, cuyo titular es ${accountHolderName}, IBAN ${iban}, BIC/SWIFT ${bic}. No se realizarán pagos en efectivo. El GESTOR es responsable de mantener los datos bancarios vigentes, completos y correctos y de comunicar cualquier cambio por un canal aceptado por SOFTLIFE.`,
         ],
       },
       {
@@ -144,7 +133,7 @@ export function renderFranchiseeContract(input: Partial<ContractPartyValues>, ac
       {
         title: "DÉCIMA. OFERTA Y ACEPTACIÓN ELECTRÓNICA",
         paragraphs: [
-          "SOFTLIFE emite el presente contrato como oferta contractual en español. El GESTOR lo acepta electrónicamente tras visualizar su texto completo, seleccionar la modalidad, confirmar por separado la aceptación íntegra y sus facultades de representación, reconocer la generación de evidencias técnicas y escribir un nombre de firma coincidente con el del representante.",
+          "SOFTLIFE emite el presente contrato como oferta contractual en español. El GESTOR lo acepta electrónicamente tras visualizar su texto completo, confirmar por separado la aceptación íntegra y sus facultades de representación, reconocer la generación de evidencias técnicas y escribir un nombre de firma coincidente con el del representante. Esta aceptación no selecciona una modalidad.",
           "La plataforma generará una fecha y hora de servidor, un identificador único, una carga fuente canónica y un PDF exacto, con hashes SHA-256 y huella técnica de auditoría. Se facilitará acceso inmediato al PDF confirmado. Estos elementos documentan una aceptación electrónica ordinaria y no constituyen una afirmación de firma electrónica cualificada o PAdES ni una garantía absoluta de ejecutabilidad jurídica.",
           "En prueba de conformidad, SOFTLIFE emite esta oferta y el GESTOR manifiesta su aceptación electrónica a un solo efecto, en el lugar y fecha indicados al comienzo.",
         ],
@@ -155,7 +144,7 @@ export function renderFranchiseeContract(input: Partial<ContractPartyValues>, ac
           "Modelo de la MÁQUINA: pendiente de asignación.",
           "Número de serie / IMEI del sistema IoT: pendiente de asignación.",
           `Dirección exacta de la ubicación autorizada: ${installationAddress}.`,
-          "El modelo, número de serie/IMEI, fecha y estado de entrega se harán constar posteriormente en un acta de instalación/entrega firmada por ambas partes. Esa acta se incorporará al contrato y formará parte integrante de él sin sustituir esta aceptación.",
+          "El modelo, número de serie/IMEI, fecha y estado de entrega, así como la modalidad y el porcentaje asignados exclusivamente por SOFTLIFE, se harán constar posteriormente en un acta de instalación/entrega firmada por ambas partes. Esa acta se incorporará al contrato y formará parte integrante de él sin sustituir esta aceptación.",
         ],
       },
       {
@@ -187,10 +176,11 @@ const TEMPLATE_VALUES = {
   accountHolderName: "{{account_holder_name}}",
   iban: "{{iban}}",
   bicSwift: "{{bic_swift}}",
+  bankDetailsDeferred: false,
 } as const;
 
 export const FRANCHISEE_CONTRACT_TEMPLATE_SOURCE = [
-  contractPlainText(renderFranchiseeContract({ ...TEMPLATE_VALUES, modality: "A" })),
-  "--- VARIANTE MODALIDAD B ---",
-  contractPlainText(renderFranchiseeContract({ ...TEMPLATE_VALUES, modality: "B" })),
+  contractPlainText(renderFranchiseeContract(TEMPLATE_VALUES)),
+  "--- VARIANTE DATOS BANCARIOS DIFERIDOS ---",
+  contractPlainText(renderFranchiseeContract({ ...TEMPLATE_VALUES, accountHolderName: null, iban: null, bicSwift: null, bankDetailsDeferred: true })),
 ].join("\n\n");

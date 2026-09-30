@@ -11,6 +11,7 @@ export const PAY_TYPE_MAP: Record<string, string> = {
   "现金": "Cash",
   "投币": "Coin",
   "扫码支付": "QR Payment",
+  "串码支付": "Coupon",
   "免费": "Free",
 };
 

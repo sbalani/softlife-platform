@@ -23,12 +23,14 @@ export type FiscalRecipe = {
   odoo_finished_product_id: number | null;
 };
 
-export type ZeroValueVendReason = "free" | "admin_override";
+export type ZeroValueVendReason = "free" | "admin_override" | "coupon";
 
 export function zeroValueVendReason(payType: string | null): ZeroValueVendReason | null {
   const normalized = payType?.trim() || null;
   if (isAdminOverride(normalized)) return "admin_override";
-  return translatePayType(normalized) === "Free" ? "free" : null;
+  const translated = translatePayType(normalized);
+  if (translated === "Free") return "free";
+  return translated === "Coupon" ? "coupon" : null;
 }
 
 export type FiscalProductCheck = {
@@ -112,7 +114,7 @@ export function evaluateFiscalConfiguration(settings: FiscalSettings, body: Reco
   const rawProducts = Array.isArray(body.products) ? body.products : [];
 
   if (Number(body.contract_version) !== 1) findings.push({ severity: "blocker", code: "unsupported_contract", message: "Odoo must report fiscal configuration contract version 1." });
-  if (Number(capabilities.fiscal_zero_value_invoices) !== 1) findings.push({ severity: "blocker", code: "zero_value_invoice_capability_missing", message: "Odoo must advertise zero-value fiscal invoice capability version 1." });
+  if (![1, 2].includes(Number(capabilities.fiscal_zero_value_invoices))) findings.push({ severity: "blocker", code: "zero_value_invoice_capability_missing", message: "Odoo must advertise a supported zero-value fiscal invoice capability." });
   if (!checkedAt || Number.isNaN(Date.parse(checkedAt))) findings.push({ severity: "blocker", code: "invalid_checked_at", message: "Odoo configuration report has no valid checked_at timestamp." });
   else if (Date.parse(checkedAt) > Date.now() + 5 * 60_000) findings.push({ severity: "blocker", code: "future_checked_at", message: "Odoo configuration report timestamp is in the future." });
   if (text(company.country_code).toUpperCase() !== "ES") findings.push({ severity: "blocker", code: "company_not_spanish", message: "The issuing Odoo company fiscal country must be Spain." });

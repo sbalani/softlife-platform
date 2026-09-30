@@ -27,12 +27,12 @@ const item: FiscalInvoiceSourceItem = {
   zero_value_reason: null,
 };
 
-function draft(source: FiscalInvoiceSourceItem = item) {
+function draft(source: FiscalInvoiceSourceItem = item, zeroValueCapability = 2) {
   const now = Date.parse("2026-09-29T13:00:00Z");
   const configuration = {
     contract_version: 1,
     checked_at: "2026-09-29T12:00:00Z",
-    capabilities: { fiscal_invoice_draft_creation: 1, fiscal_invoice_bulk_confirmation: 1, fiscal_zero_value_invoices: 1 },
+    capabilities: { fiscal_invoice_draft_creation: 1, fiscal_invoice_bulk_confirmation: 1, fiscal_zero_value_invoices: zeroValueCapability },
     company: { odoo_id: 3, country_code: "ES", currency: "EUR" },
     journal: { code: "VEND" },
     customer: { odoo_id: 722 },
@@ -69,11 +69,23 @@ test("preserves zero-value invoice quantity and tax totals", () => {
   }]);
 });
 
+test("includes the coupon reason in the immutable zero-value payload", () => {
+  const result = draft({ ...item, gross_cents: 0, tax_base_cents: 0, vat_cents: 0, zero_value_reason: "coupon" });
+  assert.deepEqual(result.blockers, []);
+  assert.equal(result.payload?.invoices[0].zero_value_reason, "coupon");
+});
+
+test("keeps capability version 1 compatible except for coupon vends", () => {
+  assert.deepEqual(draft(item, 1).blockers, []);
+  assert.deepEqual(draft({ ...item, gross_cents: 0, tax_base_cents: 0, vat_cents: 0, zero_value_reason: "free" }, 1).blockers, []);
+  assert(draft({ ...item, gross_cents: 0, tax_base_cents: 0, vat_cents: 0, zero_value_reason: "coupon" }, 1).blockers.some((blocker) => blocker.includes("version 2 for coupon")));
+});
+
 test("preserves excluded-price Odoo tax configuration without forcing price inclusion", () => {
   const now = Date.parse("2026-09-29T13:00:00Z");
   const configuration = {
     contract_version: 1, checked_at: "2026-09-29T12:00:00Z",
-    capabilities: { fiscal_invoice_draft_creation: 1, fiscal_invoice_bulk_confirmation: 1, fiscal_zero_value_invoices: 1 },
+    capabilities: { fiscal_invoice_draft_creation: 1, fiscal_invoice_bulk_confirmation: 1, fiscal_zero_value_invoices: 2 },
     company: { odoo_id: 3, country_code: "ES", currency: "EUR" }, journal: { code: "VEND" },
     customer: { odoo_id: 722 },
     tax: { odoo_id: 41, rate: 10, country_code: "ES", type_tax_use: "sale", amount_type: "percent", price_include: false },
@@ -88,7 +100,7 @@ test("preserves excluded-price Odoo tax configuration without forcing price incl
 test("normalizes accepted report text and requires an explicit tax price mode", () => {
   const reportPayload = {
     contract_version: 1, checked_at: "2026-09-29T12:00:00Z",
-    capabilities: { fiscal_invoice_draft_creation: 1, fiscal_invoice_bulk_confirmation: 1, fiscal_zero_value_invoices: 1 },
+    capabilities: { fiscal_invoice_draft_creation: 1, fiscal_invoice_bulk_confirmation: 1, fiscal_zero_value_invoices: 2 },
     company: { odoo_id: 3, country_code: " es ", currency: " eur " },
     journal: { code: " vend " }, customer: { odoo_id: 722 },
     tax: { odoo_id: 41, rate: 10, country_code: " es ", type_tax_use: " sale ", amount_type: " percent ", price_include: true },

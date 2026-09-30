@@ -8,7 +8,7 @@ The connector uses the existing internal Odoo authentication.
 
 - `GET /api/internal/odoo/fiscal-configuration` returns the expected journal, final-consumer customer, VAT rate, currency, income account, and legacy posting state.
 - `POST /api/internal/odoo/fiscal-configuration` appends an immutable report. Reports are never updated in place.
-- Invoice execution requires `capabilities.fiscal_invoice_draft_creation = 1`, `capabilities.fiscal_invoice_bulk_confirmation = 1`, and `capabilities.fiscal_zero_value_invoices = 1`.
+- Invoice execution requires `capabilities.fiscal_invoice_draft_creation = 1`, `capabilities.fiscal_invoice_bulk_confirmation = 1`, and a supported `capabilities.fiscal_zero_value_invoices` version. Version 1 supports Free and Admin override vends; version 2 also supports coupon (`串码支付`) vends.
 - The report referenced by the ready preflight must be accepted and no more than 24 hours old when drafts are queued.
 
 Example report:
@@ -21,7 +21,7 @@ Example report:
     "fiscal_product_remediation": 1,
     "fiscal_invoice_draft_creation": 1,
     "fiscal_invoice_bulk_confirmation": 1,
-    "fiscal_zero_value_invoices": 1
+    "fiscal_zero_value_invoices": 2
   },
   "company": { "odoo_id": 3, "country_code": "ES", "vat": "ESB12345678", "currency": "EUR" },
   "income_account": { "odoo_id": 77, "code": "701000", "account_type": "income" },
@@ -58,7 +58,7 @@ An admin explicitly acknowledges the latest ready preflight. The server reloads 
 
 One eligible sale creates one `out_invoice` contract document and one durable `fiscal_invoice_documents` row. The platform UUID is the idempotency identity. Each invoice has one line containing the Odoo product, description, quantity, exact gross/base/VAT cents, and Odoo tax ID. The invoice SHA-256 is calculated over canonical JSON before `invoice_payload_sha256` is added; the outer SHA-256 covers the complete canonical payload.
 
-Completed Huaxin Free and Admin override vends remain eligible with their product quantity and immutable source evidence, but use zero gross, tax-base, and VAT cents. A zero total from any other payment type remains blocked as invalid source data.
+Completed Huaxin Free, Admin override, and coupon (`串码支付`) vends remain eligible with their product quantity and immutable source evidence, but use zero gross, tax-base, and VAT cents. A zero total from any other payment type remains blocked as invalid source data.
 
 ```json
 {

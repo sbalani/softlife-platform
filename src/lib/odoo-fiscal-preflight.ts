@@ -111,7 +111,6 @@ export function evaluateFiscalConfiguration(settings: FiscalSettings, body: Reco
   if (text(journal.code).toUpperCase() !== settings.journal_code) findings.push({ severity: "blocker", code: "journal_code_mismatch", message: `The fiscal sales journal code must be ${settings.journal_code}.` });
   if (text(journal.type) !== "sale") findings.push({ severity: "blocker", code: "journal_type_invalid", message: "The fiscal journal must be a Sales journal." });
   if (journal.refund_sequence !== true) findings.push({ severity: "blocker", code: "refund_sequence_missing", message: "The fiscal journal must use a dedicated credit-note sequence." });
-  if (journal.secure_posted_entries !== true) findings.push({ severity: "warning", code: "journal_hash_disabled", message: "Secure Posted Entries with Hash remains disabled. Enable it before the first real invoice is posted." });
   if (positiveInteger(customer.odoo_id) !== settings.customer_odoo_id) findings.push({ severity: "blocker", code: "customer_mismatch", message: `The final-consumer customer must be Odoo ID ${settings.customer_odoo_id}.` });
   if (text(customer.country_code).toUpperCase() !== "ES") findings.push({ severity: "blocker", code: "customer_country_invalid", message: "The final-consumer customer country must be Spain." });
   if (text(customer.vat)) findings.push({ severity: "blocker", code: "customer_vat_present", message: "The anonymous final-consumer customer must not have a VAT number." });

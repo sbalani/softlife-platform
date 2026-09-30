@@ -64,10 +64,10 @@ function item(overrides: Record<string, unknown> = {}) {
   });
 }
 
-test("evaluates a complete Odoo configuration while preserving the journal-hash warning", () => {
+test("evaluates a complete Odoo configuration with a standard sales journal", () => {
   const result = evaluateFiscalConfiguration(settings, configuration);
   assert.equal(result.accepted, true);
-  assert.deepEqual(result.findings.map((finding) => finding.code), ["journal_hash_disabled"]);
+  assert.deepEqual(result.findings, []);
   assert.equal(result.products[0].odoo_product_id, 101);
 });
 

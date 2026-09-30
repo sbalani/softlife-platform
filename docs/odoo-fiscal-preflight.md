@@ -24,7 +24,7 @@ Example report:
   },
   "company": { "odoo_id": 3, "country_code": "ES", "vat": "ESB12345678", "currency": "EUR" },
   "income_account": { "odoo_id": 77, "code": "701000", "account_type": "income" },
-  "journal": { "code": "VEND", "type": "sale", "refund_sequence": true, "secure_posted_entries": true },
+  "journal": { "code": "VEND", "type": "sale", "refund_sequence": true, "secure_posted_entries": false },
   "customer": { "odoo_id": 722, "country_code": "ES", "vat": null },
   "tax": { "odoo_id": 41, "type_tax_use": "sale", "rate": 10, "country_code": "ES", "price_include": true, "amount_type": "percent" },
   "products": [{

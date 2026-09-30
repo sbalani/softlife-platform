@@ -134,7 +134,7 @@ test("normalizes accepted report text and requires an explicit tax price mode", 
   assert(invalid.blockers.some((message) => message.includes("price-inclusion")));
 });
 
-test("blocks stale, incapable, refund-warning, empty, and oversized draft sources", () => {
+test("allows reviewed report age but blocks incapable, refund-warning, empty, and oversized draft sources", () => {
   const good = draft();
   assert(good.payload);
   const reportPayload = { ...good.payload, checked_at: "2026-09-27T00:00:00Z", capabilities: {} };
@@ -145,7 +145,7 @@ test("blocks stale, incapable, refund-warning, empty, and oversized draft source
     items: [{ ...item, refund_required: true }], platformInvoiceIds: ["id"],
   });
   assert.equal(blocked.payload, null);
-  assert(blocked.blockers.some((message) => message.includes("stale")));
+  assert(!blocked.blockers.some((message) => message.includes("stale")));
   assert(blocked.blockers.some((message) => message.includes("capabilities")));
   assert(blocked.blockers.some((message) => message.includes("Refund-warning")));
   const empty = buildFiscalInvoiceDraftPayload({

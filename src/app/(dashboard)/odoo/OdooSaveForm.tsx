@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, type ReactNode } from "react";
+import { useActionState, useEffect, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import type { OdooActionResult } from "./actions";
 
 export function OdooSaveForm({
@@ -10,7 +11,11 @@ export function OdooSaveForm({
   children: ReactNode;
   className?: string;
 }) {
+  const router = useRouter();
   const [result, formAction, pending] = useActionState(action, null);
+  useEffect(() => {
+    if (result?.ok && result.redirectTo) router.replace(result.redirectTo);
+  }, [result, router]);
   return (
     <form action={formAction} className={className}>
       <fieldset disabled={pending} className="contents disabled:opacity-60">{children}</fieldset>

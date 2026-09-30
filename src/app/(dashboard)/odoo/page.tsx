@@ -13,7 +13,7 @@ import { FiscalPreflightPanel } from "./FiscalPreflightPanel";
 import { getFiscalRemediationAdminData } from "@/lib/data/odoo-fiscal-remediation";
 import { FiscalRemediationPanel } from "./FiscalRemediationPanel";
 import { getSessionProfile } from "@/lib/auth/session";
-import { getFiscalInvoiceAdminData } from "@/lib/data/odoo-fiscal-invoices";
+import { getFiscalInvoiceAdminData, getFiscalInvoiceQueuePreview } from "@/lib/data/odoo-fiscal-invoices";
 import { isFiscalCalendarMonth } from "@/lib/odoo-fiscal-invoices";
 
 export const dynamic = "force-dynamic";
@@ -22,19 +22,22 @@ function isUnitStockUom(uom: string | null) {
   return uom != null && ["unit", "units", "u", "each"].includes(uom.trim().toLowerCase());
 }
 
-export default async function OdooPage({ searchParams }: { searchParams: Promise<{ fiscal_month?: string }> }) {
+export default async function OdooPage({ searchParams }: { searchParams: Promise<{ fiscal_month?: string; fiscal_run?: string }> }) {
   const actor = await getSessionProfile();
-  const { fiscal_month: fiscalMonth } = await searchParams;
+  const { fiscal_month: fiscalMonth, fiscal_run: fiscalRun } = await searchParams;
   const monthParts = new Intl.DateTimeFormat("en", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit" }).formatToParts(new Date());
   const monthValues = new Map(monthParts.map((part) => [part.type, part.value]));
   const selectedFiscalMonth = isFiscalCalendarMonth(fiscalMonth) ? fiscalMonth : `${monthValues.get("year")}-${monthValues.get("month")}`;
-  const [{ skus, source: skuSource }, { lots, source: lotSource }, production, fiscal, invoices, remediation] = await Promise.all([
+  const [{ skus, source: skuSource }, { lots, source: lotSource }, production, fiscal, remediation] = await Promise.all([
     getOdooSkus(),
     getOdooLots(),
     getProductionAdminData(),
-    getFiscalPreflightAdminData(),
-    getFiscalInvoiceAdminData(selectedFiscalMonth),
+    getFiscalPreflightAdminData(fiscalRun),
     actor?.role === "admin" ? getFiscalRemediationAdminData() : null,
+  ]);
+  const [invoices, queuePreview] = await Promise.all([
+    getFiscalInvoiceAdminData(selectedFiscalMonth),
+    fiscal.selectedRun ? getFiscalInvoiceQueuePreview(fiscal.selectedRun.id) : null,
   ]);
 
   const tz = await getDisplayTimezone();
@@ -50,7 +53,7 @@ export default async function OdooPage({ searchParams }: { searchParams: Promise
 
       <StockSnapshotPanel snapshot={production.stockSnapshot} timeZone={tz} sourceWarehouseId={production.settings?.replenishment_source_odoo_warehouse_id ?? null} />
 
-      <FiscalPreflightPanel data={fiscal} invoices={invoices} timeZone={tz} calendarMonth={selectedFiscalMonth} />
+      <FiscalPreflightPanel data={fiscal} invoices={invoices} queuePreview={queuePreview} timeZone={tz} calendarMonth={selectedFiscalMonth} />
 
       {remediation && <FiscalRemediationPanel data={remediation} timeZone={tz} />}
 

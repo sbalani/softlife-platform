@@ -49,12 +49,14 @@ The income account and taxes are the effective values after product/category def
 - Completed non-administrative sales are candidates. Each candidate resolves to one active recipe and Odoo finished product.
 - Gross, tax base, and VAT use exact integer cents. At 10% included VAT, base cents are `round(gross_cents / 1.10)` and VAT is the residual.
 - A simplified-invoice candidate above EUR 3,000 is blocked.
-- Refund evidence remains a warning for review. A warning sale cannot enter invoice execution.
+- Refund evidence remains a warning for review. Refund-review sales are omitted from draft execution and their skipped count is recorded.
 - `tax_treatment_approved` must be true. The existing `posting_enabled` database lock remains unchanged and is not the confirmation gate.
 
 ## Draft creation
 
-An admin explicitly acknowledges the latest ready preflight. The server reloads that run, every item, its exact configuration report, and current settings. It rejects blocked runs, no eligible sales, refund warnings, stale or incapable reports, missing Odoo identifiers, and batches above 500 invoices. Client-supplied accounting configuration is never trusted.
+An admin explicitly selects and acknowledges one immutable preflight. The displayed rows, CSV, execution preview, and queued source always use that same run ID. A run with sale-level blockers may execute its eligible non-refund rows; blocked, excluded, and refund-review counts are disclosed before queueing and stored in the immutable batch decision summary. The alternative is to stop, correct the source, and freeze a replacement run before creating any drafts.
+
+Global configuration blockers remain non-bypassable. The server also rejects no invoiceable sales, incompatible connector capabilities, missing or mismatched Odoo identifiers, more than 500 invoiceable sales, concurrent draft requests, duplicate source use, and overlapping invoice batches. Report age is shown as a warning at execution time because the exact accepted report identity and hash remain enforced. Client-supplied accounting configuration is never trusted.
 
 One eligible sale creates one `out_invoice` contract document and one durable `fiscal_invoice_documents` row. The platform UUID is the idempotency identity. Each invoice has one line containing the Odoo product, description, quantity, exact gross/base/VAT cents, and Odoo tax ID. The invoice SHA-256 is calculated over canonical JSON before `invoice_payload_sha256` is added; the outer SHA-256 covers the complete canonical payload.
 
@@ -103,7 +105,7 @@ Accepted confirmation results must exactly cover the request with matching ident
 
 ## Durability and connector behavior
 
-- `fiscal_invoice_batches` records source preflight/report IDs, UTC and inclusive local periods, status, queue IDs, frozen draft payload/hash, errors, and audit timestamps.
+- `fiscal_invoice_batches` records source preflight/report IDs, UTC and inclusive local periods, status, queue IDs, frozen draft payload/hash, skipped-row decisions, errors, and audit timestamps.
 - `fiscal_invoice_documents` records immutable preflight item/order identity, platform UUID, source and invoice hashes, exact cents, Odoo product/tax/date/reference, and returned Odoo move state/name.
 - One source order can appear in only one fiscal invoice document.
 - A GiST exclusion constraint prevents overlapping timestamp periods for all non-cancelled batches. Failed batches retain their source reservation.

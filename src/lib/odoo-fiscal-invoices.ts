@@ -92,7 +92,7 @@ export function buildFiscalInvoiceDraftPayload(input: {
   const checkedAt = Date.parse(input.report.checked_at);
 
   if (!input.report.accepted) blockers.push("The referenced fiscal configuration report is not accepted.");
-  if (!Number.isFinite(checkedAt) || input.now - checkedAt > 24 * 60 * 60_000 || checkedAt > input.now + 5 * 60_000) blockers.push("The referenced fiscal configuration report is stale or has an invalid timestamp.");
+  if (!Number.isFinite(checkedAt) || checkedAt > input.now + 5 * 60_000) blockers.push("The referenced fiscal configuration report has an invalid timestamp.");
   if (Number(capabilities.fiscal_invoice_draft_creation) !== 1 || Number(capabilities.fiscal_invoice_bulk_confirmation) !== 1) blockers.push("Odoo must advertise fiscal invoice draft and bulk confirmation capabilities version 1.");
   const zeroValueCapability = Number(capabilities.fiscal_zero_value_invoices);
   if (input.items.some((item) => item.zero_value_reason !== null) && ![1, 2].includes(zeroValueCapability)) blockers.push("Odoo must advertise a supported zero-value fiscal invoice capability when the batch contains zero-value invoices.");

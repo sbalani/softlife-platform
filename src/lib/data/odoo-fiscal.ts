@@ -35,11 +35,12 @@ export type FiscalPreflightAdminData = {
     summary: ReturnType<typeof summarizeFiscalPreflight>;
     created_at: string;
   }[];
-  latestReady: FiscalPreflightAdminData["runs"][number] | null;
-  latestItems: FiscalPreflightItem[];
+  selectedRun: FiscalPreflightAdminData["runs"][number] | null;
+  selectedItems: FiscalPreflightItem[];
+  selectionError: string | null;
 };
 
-const EMPTY: FiscalPreflightAdminData = { available: false, settings: null, configuration: null, runs: [], latestReady: null, latestItems: [] };
+const EMPTY: FiscalPreflightAdminData = { available: false, settings: null, configuration: null, runs: [], selectedRun: null, selectedItems: [], selectionError: null };
 
 function rows(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object") : [];
@@ -196,7 +197,7 @@ export async function createFiscalPreflight(s: SupabaseClient, input: {
     configurationEvaluation = evaluateFiscalConfiguration(settings, configuration.payload as Record<string, unknown>);
     globalFindings.push(...configurationEvaluation.findings);
     if (Date.now() - Date.parse(String(configuration.checked_at)) > 24 * 60 * 60_000) {
-      globalFindings.push({ severity: "blocker", code: "odoo_configuration_stale", message: "The latest Odoo fiscal configuration check is more than 24 hours old." });
+      globalFindings.push({ severity: "warning", code: "odoo_configuration_stale", message: "The Odoo fiscal configuration check is more than 24 hours old. Review its age before execution." });
     }
   }
   if (!settings.tax_treatment_approved) globalFindings.push({ severity: "blocker", code: "tax_treatment_not_approved", message: `An accountant must approve the ${settings.vat_rate}% vending sales tax treatment before this preflight can be ready.` });
@@ -267,24 +268,35 @@ function presentRun(run: Record<string, unknown>): FiscalPreflightAdminData["run
   };
 }
 
-export async function getFiscalPreflightAdminData(): Promise<FiscalPreflightAdminData> {
+export async function getFiscalPreflightAdminData(selectedRunId?: string): Promise<FiscalPreflightAdminData> {
   if (!isSupabaseConfigured() || !process.env.SUPABASE_SERVICE_ROLE_KEY) return EMPTY;
   try {
     const s = await createServiceClient();
     const runColumns = "id,status,period_from,period_to,time_zone,tax_rate,currency,global_findings,summary,created_at";
-    const [settings, configuration, runsResult, readyResult] = await Promise.all([
+    const selectionRequested = selectedRunId != null && selectedRunId !== "";
+    const selectionValid = selectedRunId != null && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(selectedRunId);
+    const [settings, configuration, runsResult, selectedResult] = await Promise.all([
       getSettings(s), getLatestConfiguration(s),
       s.from("fiscal_preflight_runs").select(runColumns)
-        .order("created_at", { ascending: false }).limit(20),
-      s.from("fiscal_preflight_runs").select(runColumns).eq("status", "ready")
-        .order("created_at", { ascending: false }).limit(1).maybeSingle(),
+        .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(20),
+      selectionValid
+        ? s.from("fiscal_preflight_runs").select(runColumns).eq("id", selectedRunId).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
     if (runsResult.error) throw runsResult.error;
-    if (readyResult.error) throw readyResult.error;
+    if (selectedResult.error) throw selectedResult.error;
     const runRows = (runsResult.data as Record<string, unknown>[]) ?? [];
-    const latestId = runRows[0]?.id == null ? null : String(runRows[0].id);
-    const itemsResult = latestId
-      ? await s.from("fiscal_preflight_items").select("*").eq("run_id", latestId).order("operation_at").order("order_id").limit(1000)
+    const requestedRow = selectedResult.data as Record<string, unknown> | null;
+    const selectedRow = selectionRequested ? requestedRow : runRows[0] ?? null;
+    const selectionError = selectionRequested && !selectedRow
+      ? selectionValid ? "The selected frozen run no longer exists." : "The selected frozen run ID is invalid."
+      : null;
+    const visibleRows = selectedRow && !runRows.some((run) => String(run.id) === String(selectedRow.id))
+      ? [selectedRow, ...runRows]
+      : runRows;
+    const selectedId = selectedRow?.id == null ? null : String(selectedRow.id);
+    const itemsResult = selectedId
+      ? await s.from("fiscal_preflight_items").select("*").eq("run_id", selectedId).order("operation_at").order("order_id").limit(1000)
       : { data: [], error: null };
     if (itemsResult.error) throw itemsResult.error;
     return {
@@ -294,9 +306,10 @@ export async function getFiscalPreflightAdminData(): Promise<FiscalPreflightAdmi
         id: String(configuration.id), checked_at: String(configuration.checked_at), accepted: Boolean(configuration.accepted),
         findings: rows(configuration.findings) as FiscalFinding[], payload_sha256: String(configuration.payload_sha256),
       } : null,
-      runs: runRows.map(presentRun),
-      latestReady: readyResult.data ? presentRun(readyResult.data as Record<string, unknown>) : null,
-      latestItems: ((itemsResult.data as Record<string, unknown>[]) ?? []).map(presentItem),
+      runs: visibleRows.map(presentRun),
+      selectedRun: selectedRow ? presentRun(selectedRow) : null,
+      selectedItems: ((itemsResult.data as Record<string, unknown>[]) ?? []).map(presentItem),
+      selectionError,
     };
   } catch {
     return EMPTY;

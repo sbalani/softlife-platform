@@ -37,12 +37,31 @@ export type FiscalInvoiceBatchAdmin = FiscalCalendarSpan & {
   draft_completed_at: string | null;
   completed_at: string | null;
   error: string | null;
+  execution_decisions: {
+    queued_invoiceable?: number;
+    skipped_blocked?: number;
+    skipped_excluded?: number;
+    skipped_refund_review?: number;
+    configuration_report_checked_at?: string;
+    configuration_report_stale_at_execution?: boolean;
+  };
 };
 
 export type FiscalInvoiceAdminData = {
   available: boolean;
   batches: FiscalInvoiceBatchAdmin[];
   documents: FiscalInvoiceDocumentAdmin[];
+};
+
+export type FiscalInvoiceQueuePreview = {
+  runId: string;
+  queueable: boolean;
+  blockers: string[];
+  warnings: string[];
+  invoiceCount: number;
+  skippedBlocked: number;
+  skippedExcluded: number;
+  skippedRefundReview: number;
 };
 
 const EMPTY: FiscalInvoiceAdminData = { available: false, batches: [], documents: [] };
@@ -73,23 +92,36 @@ async function loadAdminDocuments(s: SupabaseClient, batchIds: string[]) {
   return documents.sort((left, right) => String(right.invoice_date).localeCompare(String(left.invoice_date)) || String(left.id).localeCompare(String(right.id)));
 }
 
-async function loadLatestReadySource(s: SupabaseClient) {
+async function loadPreflightRows(s: SupabaseClient, runId: string) {
+  const result: Record<string, unknown>[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const pageResult = await s.from("fiscal_preflight_items")
+      .select("id,order_id,status,operation_at,operation_local_date,order_code,payment_reference,description,units,gross_cents,tax_base_cents,vat_cents,odoo_product_id,refund_required,source_sha256,source_snapshot")
+      .eq("run_id", runId).order("operation_at").order("order_id").range(offset, offset + 999);
+    if (pageResult.error) throw pageResult.error;
+    const page = records(pageResult.data);
+    result.push(...page);
+    if (page.length < 1000) return result;
+  }
+}
+
+async function loadFiscalInvoiceSource(s: SupabaseClient, preflightRunId: string) {
   const { data: run, error: runError } = await s.from("fiscal_preflight_runs")
-    .select("id,status,period_from,period_to,time_zone,currency,configuration_report_id,summary")
-    .eq("status", "ready").order("created_at", { ascending: false }).limit(1).maybeSingle();
+    .select("id,status,period_from,period_to,time_zone,currency,configuration_report_id,global_findings,summary")
+    .eq("id", preflightRunId).maybeSingle();
   if (runError) throw runError;
-  if (!run) throw new Error("No ready fiscal preflight is available.");
-  const [itemsResult, reportResult, settingsResult] = await Promise.all([
-    s.from("fiscal_preflight_items").select("id,order_id,status,operation_at,operation_local_date,order_code,payment_reference,description,units,gross_cents,tax_base_cents,vat_cents,odoo_product_id,refund_required,source_sha256,source_snapshot")
-      .eq("run_id", run.id).eq("status", "eligible").order("operation_at").order("order_id").limit(501),
+  if (!run) throw new Error("The selected fiscal preflight does not exist.");
+  const globalBlockers = records(run.global_findings).filter((finding) => finding.severity === "blocker" && finding.code !== "odoo_configuration_stale");
+  if (globalBlockers.length) throw new Error(`This run has a non-bypassable configuration blocker: ${globalBlockers.map((finding) => String(finding.message)).join(" ")}`);
+  const [preflightRows, reportResult, settingsResult] = await Promise.all([
+    loadPreflightRows(s, String(run.id)),
     s.from("odoo_fiscal_configuration_reports").select("id,checked_at,accepted,payload,payload_sha256")
       .eq("id", run.configuration_report_id).single(),
     s.from("odoo_fiscal_settings").select("journal_code,customer_odoo_id,currency,tax_treatment_approved").eq("singleton", true).single(),
   ]);
-  for (const result of [itemsResult, reportResult, settingsResult]) if (result.error) throw result.error;
-  const eligibleRows = records(itemsResult.data);
-  if (eligibleRows.length > 500) throw new Error("A fiscal invoice batch cannot contain more than 500 eligible sales.");
-  const items = eligibleRows.map((item): FiscalInvoiceSourceItem & { operation_at: string } => ({
+  for (const result of [reportResult, settingsResult]) if (result.error) throw result.error;
+  const eligibleRows = preflightRows.filter((item) => item.status === "eligible");
+  const allItems = eligibleRows.map((item): FiscalInvoiceSourceItem & { operation_at: string } => ({
     id: String(item.id), order_id: String(item.order_id), operation_at: String(item.operation_at),
     operation_local_date: String(item.operation_local_date), order_code: String(item.order_code),
     payment_reference: item.payment_reference == null ? null : String(item.payment_reference),
@@ -98,6 +130,10 @@ async function loadLatestReadySource(s: SupabaseClient) {
     odoo_product_id: Number(item.odoo_product_id), refund_required: Boolean(item.refund_required), source_sha256: String(item.source_sha256),
     zero_value_reason: zeroValueVendReason(String((item.source_snapshot as Record<string, unknown>)?.pay_type_raw ?? "") || null),
   }));
+  const skippedRefundReview = allItems.filter((item) => item.refund_required).length;
+  const items = allItems.filter((item) => !item.refund_required);
+  if (items.length > 500) throw new Error(`This run has ${items.length} invoiceable sales; the connector limit is 500. Freeze smaller non-overlapping date ranges.`);
+  if (!items.length) throw new Error("No invoiceable sales remain after blocked, excluded, and refund-review rows are skipped.");
   const report = reportResult.data as Record<string, unknown>;
   const settings = settingsResult.data as Record<string, unknown>;
   const payload = report.payload as Record<string, unknown>;
@@ -106,12 +142,12 @@ async function loadLatestReadySource(s: SupabaseClient) {
   return { run: run as Record<string, unknown>, items, report: {
     id: String(report.id), checked_at: String(report.checked_at), accepted: Boolean(report.accepted),
     payload_sha256: String(report.payload_sha256), payload,
-  }, settings };
+  }, settings, skippedBlocked: preflightRows.filter((item) => item.status === "blocked").length,
+  skippedExcluded: preflightRows.filter((item) => item.status === "excluded").length, skippedRefundReview };
 }
 
 export async function enqueueFiscalInvoiceDraftBatch(s: SupabaseClient, input: { preflightRunId: string; requestedBy: string }) {
-  const source = await loadLatestReadySource(s);
-  if (String(source.run.id) !== input.preflightRunId) throw new Error("The latest ready preflight changed. Review it before queueing invoices.");
+  const source = await loadFiscalInvoiceSource(s, input.preflightRunId);
   const platformInvoiceIds = source.items.map(() => randomUUID());
   const built = buildFiscalInvoiceDraftPayload({
     now: Date.now(), report: source.report, currency: String(source.run.currency),
@@ -130,7 +166,48 @@ export async function enqueueFiscalInvoiceDraftBatch(s: SupabaseClient, input: {
     p_payload: built.payload, p_payload_sha256: built.payloadSha256, p_documents: documents,
   });
   if (error) throwFiscalQueueError(error);
-  return data as { batch_id: string; request_id: string; document_count: number };
+  return data as { batch_id: string; request_id: string; document_count: number; skipped_blocked: number; skipped_excluded: number; skipped_refund_review: number };
+}
+
+export async function getFiscalInvoiceQueuePreview(preflightRunId: string): Promise<FiscalInvoiceQueuePreview> {
+  const fallback: FiscalInvoiceQueuePreview = {
+    runId: preflightRunId, queueable: false, blockers: [], warnings: [], invoiceCount: 0,
+    skippedBlocked: 0, skippedExcluded: 0, skippedRefundReview: 0,
+  };
+  if (!isSupabaseConfigured() || !process.env.SUPABASE_SERVICE_ROLE_KEY) return { ...fallback, blockers: ["Supabase is not configured."] };
+  try {
+    const s = await createServiceClient();
+    const source = await loadFiscalInvoiceSource(s, preflightRunId);
+    const platformInvoiceIds = source.items.map(() => randomUUID());
+    const built = buildFiscalInvoiceDraftPayload({
+      now: Date.now(), report: source.report, currency: String(source.run.currency),
+      journalCode: String(source.settings.journal_code), customerOdooId: Number(source.settings.customer_odoo_id),
+      items: source.items, platformInvoiceIds,
+    });
+    const [overlapResult, activeRequestResult] = await Promise.all([
+      s.from("fiscal_invoice_batches").select("id,status,local_date_from,local_date_to")
+        .lt("period_from", String(source.run.period_to)).gt("period_to", String(source.run.period_from))
+        .neq("status", "cancelled").limit(1).maybeSingle(),
+      s.from("odoo_sync_requests").select("id,status").eq("kind", "fiscal_invoice_draft_creation")
+        .in("status", ["pending", "processing"]).limit(1).maybeSingle(),
+    ]);
+    if (overlapResult.error) throw overlapResult.error;
+    if (activeRequestResult.error) throw activeRequestResult.error;
+    const blockers = [...built.blockers];
+    if (overlapResult.data) blockers.push(`An existing ${overlapResult.data.status} invoice batch already covers ${overlapResult.data.local_date_from} through ${overlapResult.data.local_date_to}.`);
+    if (activeRequestResult.data) blockers.push("Another Odoo invoice-draft request is already pending or processing.");
+    const reportAge = Date.now() - Date.parse(source.report.checked_at);
+    const warnings = reportAge > 24 * 60 * 60_000
+      ? ["The immutable Odoo configuration report is more than 24 hours old. Its accepted identities and hash will still be enforced."]
+      : [];
+    return {
+      runId: preflightRunId, queueable: blockers.length === 0, blockers, warnings,
+      invoiceCount: source.items.length, skippedBlocked: source.skippedBlocked,
+      skippedExcluded: source.skippedExcluded, skippedRefundReview: source.skippedRefundReview,
+    };
+  } catch (error) {
+    return { ...fallback, blockers: [error instanceof Error ? error.message : String(error)] };
+  }
 }
 
 export async function getFiscalInvoiceAdminData(month: string): Promise<FiscalInvoiceAdminData> {
@@ -139,7 +216,7 @@ export async function getFiscalInvoiceAdminData(month: string): Promise<FiscalIn
     if (!isFiscalCalendarMonth(month)) throw new Error("Invalid fiscal calendar month.");
     const { first, last } = fiscalCalendarMonth(month, []);
     const s = await createServiceClient();
-    const columns = "id,preflight_run_id,period_from,period_to,local_date_from,local_date_to,status,payload_sha256,requested_at,draft_completed_at,completed_at,error";
+    const columns = "id,preflight_run_id,period_from,period_to,local_date_from,local_date_to,status,payload_sha256,execution_decisions,requested_at,draft_completed_at,completed_at,error";
     const [calendarResult, actionableResult] = await Promise.all([
       s.from("fiscal_invoice_batches").select(columns).lte("local_date_from", last).gte("local_date_to", first)
         .order("local_date_from").limit(100),
@@ -155,6 +232,7 @@ export async function getFiscalInvoiceAdminData(month: string): Promise<FiscalIn
       id: String(batch.id), preflight_run_id: String(batch.preflight_run_id), period_from: String(batch.period_from), period_to: String(batch.period_to),
       local_date_from: String(batch.local_date_from), local_date_to: String(batch.local_date_to), status: String(batch.status),
       payload_sha256: String(batch.payload_sha256), requested_at: String(batch.requested_at),
+      execution_decisions: (batch.execution_decisions && typeof batch.execution_decisions === "object" ? batch.execution_decisions : {}) as FiscalInvoiceBatchAdmin["execution_decisions"],
       draft_completed_at: batch.draft_completed_at == null ? null : String(batch.draft_completed_at),
       completed_at: batch.completed_at == null ? null : String(batch.completed_at), error: batch.error == null ? null : String(batch.error),
     })).sort((left, right) => right.requested_at.localeCompare(left.requested_at));

@@ -12,7 +12,7 @@ import { enqueueFiscalInvoiceConfirmation, retryFiscalInvoiceDraftBatch } from "
 import { inclusiveLocalDatePeriod, localDateTimeToUtc } from "@/lib/odoo-sync-contract";
 import { parseProductionRecipeAssignments } from "@/lib/production-recipe-assignments";
 
-export type OdooActionResult = { ok: boolean; error?: string; message?: string };
+export type OdooActionResult = { ok: boolean; error?: string; message?: string; redirectTo?: string };
 
 function actionError(error: unknown): OdooActionResult {
   if (error instanceof Error) return { ok: false, error: error.message };
@@ -43,7 +43,14 @@ export async function prepareFiscalPreflight(_state: OdooActionResult | null, fd
     if (Date.parse(periodTo) - Date.parse(periodFrom) > 366 * 24 * 60 * 60_000) throw new Error("Fiscal preflight ranges cannot exceed 366 days.");
     const result = await createFiscalPreflight(await createServiceClient(), { periodFrom, periodTo, timeZone, requestedBy: actor.id });
     revalidatePath("/odoo");
-    return { ok: true, message: `Frozen preflight ${result.run_id.slice(0, 8)}: ${result.summary.eligible_invoices} eligible, ${result.summary.blocked_orders} blocked.` };
+    const fiscalMonth = String(fd.get("fiscal_month") ?? "");
+    const query = new URLSearchParams({ fiscal_run: result.run_id });
+    if (/^\d{4}-(0[1-9]|1[0-2])$/.test(fiscalMonth)) query.set("fiscal_month", fiscalMonth);
+    return {
+      ok: true,
+      message: `Frozen preflight ${result.run_id.slice(0, 8)}: ${result.summary.eligible_invoices} eligible, ${result.summary.blocked_orders} blocked.`,
+      redirectTo: `/odoo?${query.toString()}`,
+    };
   } catch (error) { return actionError(error); }
 }
 
@@ -56,10 +63,10 @@ export async function requestFiscalInvoiceDrafts(_state: OdooActionResult | null
       throw new Error("Acknowledge creation of customer invoice drafts in Odoo.");
     }
     const preflightRunId = String(fd.get("preflight_run_id") ?? "");
-    if (!/^[0-9a-f-]{36}$/i.test(preflightRunId)) throw new Error("A valid ready preflight is required.");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(preflightRunId)) throw new Error("A valid selected preflight is required.");
     const result = await enqueueFiscalInvoiceDraftBatch(s, { preflightRunId, requestedBy: actor.id });
     revalidatePath("/odoo");
-    return { ok: true, message: `Queued ${result.document_count} customer invoice draft${result.document_count === 1 ? "" : "s"}.` };
+    return { ok: true, message: `Queued ${result.document_count} customer invoice draft${result.document_count === 1 ? "" : "s"}; skipped ${result.skipped_blocked} blocked, ${result.skipped_excluded} excluded, and ${result.skipped_refund_review} refund-review sale${result.skipped_refund_review === 1 ? "" : "s"}.` };
   } catch (error) { return actionError(error); }
 }
 

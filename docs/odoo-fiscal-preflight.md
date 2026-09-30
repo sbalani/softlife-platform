@@ -8,7 +8,7 @@ The connector uses the existing internal Odoo authentication.
 
 - `GET /api/internal/odoo/fiscal-configuration` returns the expected journal, final-consumer customer, VAT rate, currency, income account, and legacy posting state.
 - `POST /api/internal/odoo/fiscal-configuration` appends an immutable report. Reports are never updated in place.
-- Invoice execution requires `capabilities.fiscal_invoice_draft_creation = 1`, `capabilities.fiscal_invoice_bulk_confirmation = 1`, and a supported `capabilities.fiscal_zero_value_invoices` version. Version 1 supports Free and Admin override vends; version 2 also supports coupon (`串码支付`) vends.
+- Invoice execution requires `capabilities.fiscal_invoice_draft_creation = 1` and `capabilities.fiscal_invoice_bulk_confirmation = 1`. Batches containing zero-value invoices also require a supported `capabilities.fiscal_zero_value_invoices` version: version 1 supports Free and Admin override vends, while version 2 also supports coupon (`串码支付`) vends.
 - The report referenced by the ready preflight must be accepted and no more than 24 hours old when drafts are queued.
 
 Example report:

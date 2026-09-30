@@ -27,12 +27,16 @@ const item: FiscalInvoiceSourceItem = {
   zero_value_reason: null,
 };
 
-function draft(source: FiscalInvoiceSourceItem = item, zeroValueCapability = 2) {
+function draft(source: FiscalInvoiceSourceItem = item, zeroValueCapability: number | null = 2) {
   const now = Date.parse("2026-09-29T13:00:00Z");
   const configuration = {
     contract_version: 1,
     checked_at: "2026-09-29T12:00:00Z",
-    capabilities: { fiscal_invoice_draft_creation: 1, fiscal_invoice_bulk_confirmation: 1, fiscal_zero_value_invoices: zeroValueCapability },
+    capabilities: {
+      fiscal_invoice_draft_creation: 1,
+      fiscal_invoice_bulk_confirmation: 1,
+      ...(zeroValueCapability === null ? {} : { fiscal_zero_value_invoices: zeroValueCapability }),
+    },
     company: { odoo_id: 3, country_code: "ES", currency: "EUR" },
     journal: { code: "VEND" },
     customer: { odoo_id: 722 },
@@ -79,6 +83,11 @@ test("keeps capability version 1 compatible except for coupon vends", () => {
   assert.deepEqual(draft(item, 1).blockers, []);
   assert.deepEqual(draft({ ...item, gross_cents: 0, tax_base_cents: 0, vat_cents: 0, zero_value_reason: "free" }, 1).blockers, []);
   assert(draft({ ...item, gross_cents: 0, tax_base_cents: 0, vat_cents: 0, zero_value_reason: "coupon" }, 1).blockers.some((blocker) => blocker.includes("version 2 for coupon")));
+});
+
+test("requires zero-value capability only when a queued item is zero-value", () => {
+  assert.deepEqual(draft(item, null).blockers, []);
+  assert(draft({ ...item, gross_cents: 0, tax_base_cents: 0, vat_cents: 0, zero_value_reason: "free" }, null).blockers.some((blocker) => blocker.includes("batch contains zero-value")));
 });
 
 test("preserves excluded-price Odoo tax configuration without forcing price inclusion", () => {

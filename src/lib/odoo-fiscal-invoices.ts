@@ -95,7 +95,7 @@ export function buildFiscalInvoiceDraftPayload(input: {
   if (!Number.isFinite(checkedAt) || input.now - checkedAt > 24 * 60 * 60_000 || checkedAt > input.now + 5 * 60_000) blockers.push("The referenced fiscal configuration report is stale or has an invalid timestamp.");
   if (Number(capabilities.fiscal_invoice_draft_creation) !== 1 || Number(capabilities.fiscal_invoice_bulk_confirmation) !== 1) blockers.push("Odoo must advertise fiscal invoice draft and bulk confirmation capabilities version 1.");
   const zeroValueCapability = Number(capabilities.fiscal_zero_value_invoices);
-  if (![1, 2].includes(zeroValueCapability)) blockers.push("Odoo must advertise a supported zero-value fiscal invoice capability.");
+  if (input.items.some((item) => item.zero_value_reason !== null) && ![1, 2].includes(zeroValueCapability)) blockers.push("Odoo must advertise a supported zero-value fiscal invoice capability when the batch contains zero-value invoices.");
   if (input.items.some((item) => item.zero_value_reason === "coupon") && zeroValueCapability !== 2) blockers.push("Odoo must advertise zero-value fiscal invoice capability version 2 for coupon vends.");
   if (!companyId || !customerId || !taxId) blockers.push("The fiscal configuration report is missing required Odoo company, customer, or tax identifiers.");
   if (typeof tax.price_include !== "boolean") blockers.push("The fiscal configuration report has no valid tax price-inclusion mode.");

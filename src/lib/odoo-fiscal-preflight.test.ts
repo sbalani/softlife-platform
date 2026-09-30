@@ -81,6 +81,15 @@ test("continues accepting the version 1 zero-value capability during rollout", (
   assert.deepEqual(result.findings, []);
 });
 
+test("accepts configuration reports without zero-value support for paid-only batches", () => {
+  const result = evaluateFiscalConfiguration(settings, {
+    ...configuration,
+    capabilities: {},
+  });
+  assert.equal(result.accepted, true);
+  assert.deepEqual(result.findings, []);
+});
+
 test("blocks an Odoo configuration with the wrong tax and income setup", () => {
   const result = evaluateFiscalConfiguration(settings, {
     ...configuration,

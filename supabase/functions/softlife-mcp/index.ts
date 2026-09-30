@@ -17,13 +17,15 @@ const PAYMENT_TYPES: Record<string, string> = {
 const MCP_PROTOCOL_VERSION = "2025-03-26";
 const ACTION_REPORT_PHOTO_BUCKET = "service-action-evidence";
 const MAX_ACTION_REPORT_PHOTO_BYTES = 4 * 1024 * 1024;
+const MAX_TEMPERATURE_ROWS = 50_000;
+const MAX_TEMPERATURE_SERIES = 20;
 const ACTION_REPORT_PHOTO_TYPES: Record<string, string> = {
   "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/heic": "heic",
 };
 const SUPPORTED_PROTOCOL_VERSIONS = new Set([MCP_PROTOCOL_VERSION]);
 const DEFAULT_ALLOWED_ORIGINS = ["https://platform.softlife.es", "https://softlife-platform.vercel.app", "https://chatgpt.com", "https://claude.ai"];
 
-type Scope = "read" | "forms" | "commands" | "sales_context" | "sales_notes";
+type Scope = "read" | "forms" | "commands" | "sales_context" | "sales_notes" | "incidents";
 export type Principal = {
   keyId: string;
   profileId: string;
@@ -63,6 +65,12 @@ const TOOLS: Tool[] = [
   { name: "get_inventory", description: "Get current positive effective Odoo lot balances for the warehouse assigned to an authorized machine at the action time.", scope: "read", inputSchema: { type: "object", properties: { machine_id: { type: "string" }, occurred_at: { type: "string", description: "Used for historical warehouse assignment and access; balances are current. Defaults to now." } }, required: ["machine_id"] } },
   { name: "get_machine_live_status", description: "Fetch current Huaxin status for an authorized machine and identify low-stock and compressor-overheat conditions.", scope: "read", inputSchema: { type: "object", properties: { machine_id: { type: "string" } }, required: ["machine_id"] } },
   { name: "get_machine_defrost_status", description: "Get the defrost schedule and recent audited cycles for an authorized machine.", scope: "read", inputSchema: { type: "object", properties: { machine_id: { type: "string" } }, required: ["machine_id"] } },
+  { name: "get_temperature_excursions", description: "Find historical days when a deployed machine's recorded temperature was strictly above a Celsius threshold. Resolve machine names with list_machines first and never guess machine UUIDs.", scope: "read", roles: ["admin"], inputSchema: { type: "object", additionalProperties: false, properties: { machine_id: { type: "string", format: "uuid" }, threshold_c: { type: "number", description: "Finite Celsius threshold; only readings strictly greater than this value count." }, date_from: { type: "string", description: "YYYY-MM-DD in Europe/Madrid. Defaults to 29 days before date_to." }, date_to: { type: "string", description: "YYYY-MM-DD in Europe/Madrid. Defaults to today." }, series_name: { type: "string", maxLength: 200, description: "Optional exact, case-sensitive series name." } }, required: ["machine_id", "threshold_c"] } },
+  { name: "list_incidents", description: "List incidents the current user may access. User-submitted means manual or public reports; system means alerts or scheduled work. Recovered alert incidents are hidden by default.", scope: "incidents", inputSchema: { type: "object", additionalProperties: false, properties: { status: { type: "string", enum: ["active", "resolved", "all"] }, source: { type: "string", enum: ["system", "user", "all"] }, machine_id: { type: "string", format: "uuid" }, include_recovered: { type: "boolean" }, offset: { type: "integer", minimum: 0, maximum: 10000 }, limit: { type: "integer", minimum: 1, maximum: 100 } } } },
+  { name: "get_incident", description: "Get one incident the current user may access. Reporter and assignee contact details are never returned.", scope: "incidents", inputSchema: { type: "object", additionalProperties: false, properties: { incident_id: { type: "string", format: "uuid" } }, required: ["incident_id"] } },
+  { name: "start_incident", description: "Move an accessible open incident to in progress. Requires explicit confirm=true.", scope: "incidents", inputSchema: { type: "object", additionalProperties: false, properties: { incident_id: { type: "string", format: "uuid" }, confirm: { type: "boolean" } }, required: ["incident_id", "confirm"] } },
+  { name: "resolve_incident", description: "Resolve an accessible incident with an audit summary. Alert-backed incidents cannot resolve while telemetry remains active. Requires explicit confirm=true.", scope: "incidents", inputSchema: { type: "object", additionalProperties: false, properties: { incident_id: { type: "string", format: "uuid" }, resolution_summary: { type: "string", minLength: 1, maxLength: 2000 }, confirm: { type: "boolean" } }, required: ["incident_id", "resolution_summary", "confirm"] } },
+  { name: "reopen_incident", description: "Reopen an accessible resolved incident with an audit reason. Requires explicit confirm=true.", scope: "incidents", inputSchema: { type: "object", additionalProperties: false, properties: { incident_id: { type: "string", format: "uuid" }, reason: { type: "string", minLength: 1, maxLength: 2000 }, confirm: { type: "boolean" } }, required: ["incident_id", "reason", "confirm"] } },
   { name: "list_sales_context_machines", description: "List only the names and IDs of machines available for sales-context analysis. Use an ID with get_sales_context.", scope: "sales_context", roles: ["admin", "franchisee"], inputSchema: { type: "object", additionalProperties: false, properties: {} } },
   { name: "get_sales_context", description: "Compare daily net sales with historical weather and dated context notes for one authorized machine over at most 92 days. Use the structured evidence to investigate why sales changed; use your own research capabilities for external events.", scope: "sales_context", roles: ["admin", "franchisee"], inputSchema: { type: "object", additionalProperties: false, properties: { machine_id: { type: "string" }, date_from: { type: "string", description: "YYYY-MM-DD" }, date_to: { type: "string", description: "YYYY-MM-DD" } }, required: ["machine_id", "date_from", "date_to"] } },
   { name: "create_sales_note", description: "Record dated evidence that may explain sales, with an optional machine and HTTPS source. Use a unique UUID idempotency_key. Never present speculation as fact; include a source URL for externally researched claims.", scope: "sales_notes", roles: ["admin", "franchisee"], inputSchema: salesNoteSchema() },
@@ -261,6 +269,107 @@ function nextDay(day: string) {
 
 function shiftMcpDay(day: string, amount: number) {
   return new Date(Date.parse(`${day}T00:00:00Z`) + amount * 86_400_000).toISOString().slice(0, 10);
+}
+
+export function temperatureExcursionInput(args: Record<string, unknown>, today = madridDay(new Date().toISOString())) {
+  rejectUnknownArguments(args, ["machine_id", "threshold_c", "date_from", "date_to", "series_name"]);
+  if (typeof args.machine_id !== "string" || !UUID.test(args.machine_id)) throw new ToolError("Invalid machine_id");
+  if (typeof args.threshold_c !== "number" || !Number.isFinite(args.threshold_c)) throw new ToolError("threshold_c must be a finite number");
+  if (args.date_from !== undefined && typeof args.date_from !== "string") throw new ToolError("date_from must be YYYY-MM-DD");
+  if (args.date_to !== undefined && typeof args.date_to !== "string") throw new ToolError("date_to must be YYYY-MM-DD");
+  if (args.series_name !== undefined && (typeof args.series_name !== "string" || args.series_name.length > 200)) throw new ToolError("series_name must be at most 200 characters");
+  const to = args.date_to === undefined ? today : args.date_to;
+  if (typeof to !== "string" || !validDay(to)) throw new ToolError("date_to must be YYYY-MM-DD");
+  const from = args.date_from === undefined ? shiftMcpDay(to, -29) : args.date_from;
+  if (typeof from !== "string" || !validDay(from) || from > to || to > today
+    || Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`) > 91 * 86_400_000) {
+    throw new ToolError("Temperature excursions support at most 92 past or current Madrid-local days");
+  }
+  return { machineId: args.machine_id, thresholdC: args.threshold_c, seriesName: args.series_name as string | undefined, range: { from, to } };
+}
+
+type TemperatureReading = { id?: string; reading_time: string; series_name: string | null; value: number };
+
+export function summarizeTemperatureExcursions(rows: TemperatureReading[], thresholdC: number) {
+  const grouped = new Map<string, Map<string, { time: number; value: number }[]>>();
+  for (const row of rows) {
+    const time = Date.parse(row.reading_time);
+    if (!Number.isFinite(time) || !Number.isFinite(row.value)) continue;
+    const day = madridDay(row.reading_time);
+    const seriesName = row.series_name ?? "temperature";
+    if (seriesName.length > 200) throw new ToolError("Temperature data contains a series name longer than 200 characters");
+    const days = grouped.get(seriesName) ?? new Map();
+    const readings = days.get(day) ?? [];
+    readings.push({ time, value: row.value });
+    days.set(day, readings);
+    grouped.set(seriesName, days);
+  }
+  if (grouped.size > MAX_TEMPERATURE_SERIES) throw new ToolError("Temperature data contains more than 20 series; request one exact series_name");
+  return [...grouped].sort(([left], [right]) => left.localeCompare(right)).map(([seriesName, days]) => {
+    let samplesTotal = 0;
+    let samplesAbove = 0;
+    const excursionDays = [...days].sort(([left], [right]) => left.localeCompare(right)).flatMap(([day, readings]) => {
+      const sorted = readings.sort((left, right) => left.time - right.time);
+      const above = sorted.filter((reading) => reading.value > thresholdC);
+      samplesTotal += sorted.length;
+      samplesAbove += above.length;
+      if (!above.length) return [];
+      const runs: { first_above_at: string; last_above_at: string; observed_span_minutes: number }[] = [];
+      let runStart: number | null = null;
+      let runEnd: number | null = null;
+      for (const reading of sorted) {
+        if (reading.value > thresholdC) {
+          runStart ??= reading.time;
+          runEnd = reading.time;
+        } else if (runStart !== null && runEnd !== null) {
+          runs.push({ first_above_at: new Date(runStart).toISOString(), last_above_at: new Date(runEnd).toISOString(), observed_span_minutes: (runEnd - runStart) / 60_000 });
+          runStart = null;
+          runEnd = null;
+        }
+      }
+      if (runStart !== null && runEnd !== null) runs.push({ first_above_at: new Date(runStart).toISOString(), last_above_at: new Date(runEnd).toISOString(), observed_span_minutes: (runEnd - runStart) / 60_000 });
+      let largestGap = 0;
+      for (let index = 1; index < sorted.length; index++) largestGap = Math.max(largestGap, sorted[index].time - sorted[index - 1].time);
+      return [{
+        day,
+        maximum_c: Math.max(...sorted.map((reading) => reading.value)),
+        samples_total: sorted.length,
+        samples_above: above.length,
+        first_above_at: new Date(above[0].time).toISOString(),
+        last_above_at: new Date(above.at(-1)!.time).toISOString(),
+        observed_span_minutes: runs.reduce((sum, run) => sum + run.observed_span_minutes, 0),
+        largest_gap_minutes: largestGap / 60_000,
+        above_threshold_run_count: runs.length,
+        duration_is_estimate: true,
+      }];
+    });
+    return { series_name: seriesName, samples_total: samplesTotal, samples_above: samplesAbove, excursion_days: excursionDays.length, days: excursionDays };
+  });
+}
+
+async function temperatureReadings(s: SupabaseClient, machineId: string, range: { from: string; to: string }, seriesName?: string) {
+  const rows: TemperatureReading[] = [];
+  const start = madridMidnightUtc(range.from);
+  const end = madridMidnightUtc(nextDay(range.to));
+  let cursor: { readingTime: string; id: string } | null = null;
+  while (rows.length <= MAX_TEMPERATURE_ROWS) {
+    const pageSize = Math.min(1000, MAX_TEMPERATURE_ROWS + 1 - rows.length);
+    let query = s.from("huaxin_temperatures").select("id,reading_time,series_name,value")
+      .eq("machine_id", machineId).gte("reading_time", start).lt("reading_time", end)
+      .not("value", "is", null).order("reading_time").order("id").limit(pageSize);
+    if (seriesName !== undefined) query = query.eq("series_name", seriesName);
+    if (cursor) query = query.or(`reading_time.gt.${cursor.readingTime},and(reading_time.eq.${cursor.readingTime},id.gt.${cursor.id})`);
+    const { data, error } = await query;
+    if (error) throw error;
+    const page = (data ?? []) as unknown as TemperatureReading[];
+    rows.push(...page);
+    if (rows.length > MAX_TEMPERATURE_ROWS) throw new ToolError("Temperature range exceeds 50,000 readings; request a shorter range");
+    if (page.length < pageSize) return rows;
+    const last = page.at(-1);
+    if (!last?.id) throw new ToolError("Temperature pagination returned an invalid cursor", -32603);
+    cursor = { readingTime: last.reading_time, id: last.id };
+  }
+  throw new ToolError("Temperature range exceeds 50,000 readings; request a shorter range");
 }
 
 async function scopedOrderQuery(s: SupabaseClient, principal: Principal, args: Record<string, unknown>, fields: string, maxRows = 100_000) {
@@ -762,6 +871,79 @@ async function handleTool(name: string, args: Record<string, unknown>, principal
       if (scheduleError || runsError) throw scheduleError ?? runsError;
       return { machine_id: machine.id, schedule, runs: runs ?? [] };
     }
+    case "get_temperature_excursions": {
+      const input = temperatureExcursionInput(args);
+      const machine = await authorizedMachine(s, principal, input.machineId, true);
+      const rows = await temperatureReadings(s, machine.id, input.range, input.seriesName);
+      return {
+        machine: { id: machine.id, name: machine.display_name ?? machine.name },
+        range: { ...input.range, timezone: "Europe/Madrid" },
+        threshold_c: input.thresholdC,
+        operator: ">",
+        samples_total: rows.length,
+        series: summarizeTemperatureExcursions(rows, input.thresholdC),
+        warning: "Observed spans are estimates from sampled readings, not exact durations; gaps between readings may hide threshold crossings.",
+      };
+    }
+    case "list_incidents": {
+      rejectUnknownArguments(args, ["status", "source", "machine_id", "include_recovered", "offset", "limit"]);
+      const status = args.status === undefined ? "active" : args.status;
+      const source = args.source === undefined ? "all" : args.source;
+      const machineId = args.machine_id === undefined ? null : args.machine_id;
+      if (!["active", "resolved", "all"].includes(String(status))) throw new ToolError("Invalid incident status filter");
+      if (!["system", "user", "all"].includes(String(source))) throw new ToolError("Invalid incident source filter");
+      if (machineId !== null && (typeof machineId !== "string" || !UUID.test(machineId))) throw new ToolError("Invalid machine_id");
+      if (args.include_recovered !== undefined && typeof args.include_recovered !== "boolean") throw new ToolError("include_recovered must be a boolean");
+      const offset = args.offset === undefined ? 0 : args.offset;
+      if (!Number.isInteger(offset) || Number(offset) < 0 || Number(offset) > 10000) throw new ToolError("offset must be an integer from 0 to 10000");
+      const { data, error } = await s.rpc("mcp_read_incidents", {
+        p_actor_id: principal.profileId, p_incident_id: null, p_status: status,
+        p_source: source, p_machine_id: machineId, p_include_recovered: args.include_recovered === true,
+        p_offset: offset, p_limit: positiveLimit(args.limit),
+      });
+      if (error) throw error;
+      return data ?? [];
+    }
+    case "get_incident": {
+      rejectUnknownArguments(args, ["incident_id"]);
+      if (typeof args.incident_id !== "string" || !UUID.test(args.incident_id)) throw new ToolError("Invalid incident_id");
+      const { data, error } = await s.rpc("mcp_read_incidents", {
+        p_actor_id: principal.profileId, p_incident_id: args.incident_id, p_status: "all",
+        p_source: "all", p_machine_id: null, p_include_recovered: true, p_offset: 0, p_limit: 1,
+      });
+      if (error) throw error;
+      const incident = Array.isArray(data) ? data[0] : null;
+      if (!incident) throw new ToolError("Incident not found", -32004);
+      return incident;
+    }
+    case "start_incident": {
+      rejectUnknownArguments(args, ["incident_id", "confirm"]);
+      if (args.confirm !== true) throw new ToolError("Explicit confirm=true is required");
+      if (typeof args.incident_id !== "string" || !UUID.test(args.incident_id)) throw new ToolError("Invalid incident_id");
+      const { error } = await s.rpc("start_incident", { p_incident_id: args.incident_id, p_actor_id: principal.profileId });
+      if (error) throw new ToolError(error.message);
+      return { incident_id: args.incident_id, status: "in_progress" };
+    }
+    case "resolve_incident": {
+      rejectUnknownArguments(args, ["incident_id", "resolution_summary", "confirm"]);
+      if (args.confirm !== true) throw new ToolError("Explicit confirm=true is required");
+      const summary = typeof args.resolution_summary === "string" ? args.resolution_summary.trim() : "";
+      if (typeof args.incident_id !== "string" || !UUID.test(args.incident_id)) throw new ToolError("Invalid incident_id");
+      if (!summary || summary.length > 2000) throw new ToolError("resolution_summary must contain 1 to 2000 characters");
+      const { error } = await s.rpc("resolve_incident", { p_incident_id: args.incident_id, p_resolution_summary: summary, p_actor_id: principal.profileId });
+      if (error) throw new ToolError(error.message);
+      return { incident_id: args.incident_id, status: "resolved" };
+    }
+    case "reopen_incident": {
+      rejectUnknownArguments(args, ["incident_id", "reason", "confirm"]);
+      if (args.confirm !== true) throw new ToolError("Explicit confirm=true is required");
+      const reason = typeof args.reason === "string" ? args.reason.trim() : "";
+      if (typeof args.incident_id !== "string" || !UUID.test(args.incident_id)) throw new ToolError("Invalid incident_id");
+      if (!reason || reason.length > 2000) throw new ToolError("reason must contain 1 to 2000 characters");
+      const { error } = await s.rpc("reopen_incident", { p_incident_id: args.incident_id, p_reason: reason, p_actor_id: principal.profileId });
+      if (error) throw new ToolError(error.message);
+      return { incident_id: args.incident_id, status: "open" };
+    }
     case "list_sales_context_machines": {
       rejectUnknownArguments(args, []);
       const ids = await machineIdsAt(s, principal);
@@ -929,7 +1111,7 @@ export async function dispatchMessage(message: unknown, principal: Principal, s:
       return errorPayload(id, -32602, "Invalid initialize parameters");
     }
     const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.has(initialize.protocolVersion) ? initialize.protocolVersion : MCP_PROTOCOL_VERSION;
-    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.4.0" } });
+    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.6.0" } });
   }
   if (request.method === "tools/list") return resultPayload(id, { tools: availableTools(principal) });
   if (request.method !== "tools/call") return errorPayload(id, -32601, `Method not found: ${request.method}`);

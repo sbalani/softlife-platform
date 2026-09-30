@@ -11,7 +11,7 @@ async function sha256(text: string): Promise<string> {
   return createHash("sha256").update(text).digest("hex");
 }
 
-const MCP_SCOPES = new Set(["read", "forms", "commands", "sales_context", "sales_notes"]);
+const MCP_SCOPES = new Set(["read", "forms", "commands", "sales_context", "sales_notes", "incidents"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function generateApiKey(name: string, requestedScopes: string[]): Promise<ApiKeyResult> {

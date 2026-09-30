@@ -122,7 +122,12 @@ function presentIncident(row: Record<string, unknown>, events: IncidentEvent[], 
   };
 }
 
-export async function getIncidents(session: SessionProfile, options: { machineIds?: string[]; status?: "open" | "resolved" | "closed" } = {}): Promise<Incident[]> {
+export async function getIncidents(session: SessionProfile, options: {
+  machineIds?: string[];
+  status?: "open" | "resolved" | "closed";
+  sourceKinds?: Incident["sourceKind"][];
+  includeRecoveredAlerts?: boolean;
+} = {}): Promise<Incident[]> {
   if (!isSupabaseConfigured() || options.machineIds?.length === 0) return [];
   if (session.role === "franchisee" && !session.tenant_id) return [];
   const s = await createServiceClient();
@@ -135,6 +140,8 @@ export async function getIncidents(session: SessionProfile, options: { machineId
     if (options.status === "open") query = query.in("status", incidentStatusesForView("active"));
     if (options.status === "resolved" || options.status === "closed") query = query.in("status", incidentStatusesForView("resolved"));
     if (options.machineIds) query = query.in("machine_id", options.machineIds);
+    if (options.sourceKinds?.length) query = query.in("source_kind", options.sourceKinds);
+    if (options.status === "open" && options.includeRecoveredAlerts === false) query = query.is("source_alert_resolved_at", null);
     const accessFilter = incidentAccessFilter(session);
     if (accessFilter) query = query.or(accessFilter);
     const { data, error } = await query;

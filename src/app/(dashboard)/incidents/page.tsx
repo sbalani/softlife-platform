@@ -36,12 +36,26 @@ function PublicReportDetails({ incident }: { incident: Incident }) {
   return <div className="mt-3 rounded-xl border border-terracotta/20 bg-white/80 p-3 text-xs text-cocoa"><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-terracotta px-2.5 py-1 font-bold uppercase tracking-wide text-white">Public report</span><strong>{report.reporterName}</strong><span className="text-sage">Contact consent recorded</span></div><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">{report.phone && <a className="font-semibold text-terracotta" href={`tel:${report.phone}`}>{report.phone}</a>}{report.email && <a className="font-semibold text-terracotta" href={`mailto:${report.email}`}>{report.email}</a>}</div>{report.attachments.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{report.attachments.map((attachment) => <a key={attachment.id} href={`/api/public-incident-attachments/${attachment.id}`} target="_blank" rel="noreferrer" className="rounded-full border border-line bg-white px-3 py-1 font-semibold text-cocoa">{attachment.kind}: {attachment.name}</a>)}</div>}</div>;
 }
 
-export default async function IncidentsPage() {
+type IncidentSourceFilter = "all" | "system" | "user";
+
+function filterHref(source: IncidentSourceFilter, includeRecovered: boolean) {
+  const params = new URLSearchParams();
+  if (source !== "all") params.set("source", source);
+  if (includeRecovered) params.set("recovered", "1");
+  const query = params.toString();
+  return query ? `/incidents?${query}` : "/incidents";
+}
+
+export default async function IncidentsPage({ searchParams }: { searchParams: Promise<{ source?: string; recovered?: string }> }) {
   const session = await getSessionProfile();
   if (!session) redirect("/login?next=/incidents");
+  const params = await searchParams;
+  const source: IncidentSourceFilter = params.source === "system" || params.source === "user" ? params.source : "all";
+  const includeRecovered = params.recovered === "1";
+  const sourceKinds: Incident["sourceKind"][] | undefined = source === "system" ? ["alert", "schedule"] : source === "user" ? ["manual", "public"] : undefined;
   const [active, resolved, policies, options, tz] = await Promise.all([
-    getIncidents(session, { status: "open" }),
-    getIncidents(session, { status: "resolved" }),
+    getIncidents(session, { status: "open", sourceKinds, includeRecoveredAlerts: includeRecovered }),
+    getIncidents(session, { status: "resolved", sourceKinds }),
     getIncidentPolicies(),
     getIncidentWorkspaceOptions(session),
     getDisplayTimezone(),
@@ -56,7 +70,13 @@ export default async function IncidentsPage() {
       {session.role !== "operator" && <IncidentCreateForm options={options} policies={policies} isAdmin={session.role === "admin"} />}
 
       <section>
-        <div className="mb-3 flex items-center justify-between"><h2 className="font-display text-xl font-bold text-cocoa">Active work</h2><span className="text-xs text-taupe">Ordered by latest report</span></div>
+        <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-line bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap gap-2">
+            {(["all", "system", "user"] as const).map((value) => <Link key={value} href={filterHref(value, includeRecovered)} className={`rounded-full px-3 py-1.5 text-xs font-bold ${source === value ? "bg-cocoa text-white" : "bg-cream text-cocoa"}`}>{value === "all" ? "All sources" : value === "system" ? "System detected" : "User submitted"}</Link>)}
+          </div>
+          <Link href={filterHref(source, !includeRecovered)} className={`text-xs font-semibold ${includeRecovered ? "text-terracotta" : "text-taupe"}`}>{includeRecovered ? "Hide recovered alerts" : "Show recovered alerts"}</Link>
+        </div>
+        <div className="mb-3 flex items-center justify-between"><h2 className="font-display text-xl font-bold text-cocoa">Active work</h2><span className="text-xs text-taupe">Recovered system alerts are hidden by default</span></div>
         <div className="grid gap-4 xl:grid-cols-2">
           {active.map((incident) => {
             const isOverdue = incident.overdue;

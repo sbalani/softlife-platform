@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertThrows } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { actionReportImageInput, apiKeyFromRequest, availableTools, completeWeatherSeries, dispatchMessage, isLowStock, isOverheated, madridMidnightUtc, parseOpenMeteoDaily, reportPayload, salesNoteInput, type Principal } from "./index.ts";
+import { actionReportImageInput, apiKeyFromRequest, availableTools, completeWeatherSeries, dispatchMessage, isLowStock, isOverheated, madridMidnightUtc, parseOpenMeteoDaily, reportPayload, salesNoteInput, summarizeTemperatureExcursions, temperatureExcursionInput, type Principal } from "./index.ts";
 
-function principal(role: "admin" | "operator" | "franchisee", scopes: ("read" | "forms" | "commands" | "sales_context" | "sales_notes")[]): Principal {
+function principal(role: "admin" | "operator" | "franchisee", scopes: ("read" | "forms" | "commands" | "sales_context" | "sales_notes" | "incidents")[]): Principal {
   return {
     keyId: crypto.randomUUID(),
     profileId: crypto.randomUUID(),
@@ -31,6 +31,176 @@ Deno.test("sales context scopes expose only bounded context and note tools", () 
   assertEquals(availableTools(principal("franchisee", ["sales_context"])).map((tool) => tool.name), ["list_sales_context_machines", "get_sales_context"]);
   assertEquals(availableTools(principal("franchisee", ["sales_notes"])).map((tool) => tool.name), ["create_sales_note", "delete_sales_note"]);
   assertEquals(availableTools(principal("operator", ["sales_context", "sales_notes"])), []);
+});
+
+Deno.test("temperature excursions are visible only to read-scoped admins", () => {
+  const tool = availableTools(principal("admin", ["read"])).find((item) => item.name === "get_temperature_excursions");
+  assert(tool);
+  assert(tool.description.includes("list_machines"));
+  assert(tool.description.includes("never guess"));
+  assertEquals((tool.inputSchema as { additionalProperties?: boolean }).additionalProperties, false);
+  assert(!availableTools(principal("admin", ["forms"])).some((item) => item.name === "get_temperature_excursions"));
+  assert(!availableTools(principal("operator", ["read"])).some((item) => item.name === "get_temperature_excursions"));
+  assert(!availableTools(principal("franchisee", ["read"])).some((item) => item.name === "get_temperature_excursions"));
+});
+
+Deno.test("incident tools separate read access from confirmed lifecycle mutations", async () => {
+  const readTools = availableTools(principal("operator", ["read"])).map((tool) => tool.name);
+  assert(!readTools.includes("list_incidents"));
+  assert(!readTools.includes("get_incident"));
+  assert(!readTools.includes("resolve_incident"));
+  const formTools = availableTools(principal("operator", ["forms"])).map((tool) => tool.name);
+  assert(!formTools.includes("start_incident"));
+  assert(!formTools.includes("resolve_incident"));
+  assert(!formTools.includes("reopen_incident"));
+  assert(!formTools.includes("list_incidents"));
+  const incidentTools = availableTools(principal("operator", ["incidents"])).map((tool) => tool.name);
+  assertEquals(incidentTools, ["list_incidents", "get_incident", "start_incident", "resolve_incident", "reopen_incident"]);
+
+  const incidentId = crypto.randomUUID();
+  const actor = principal("admin", ["incidents"]);
+  for (const [name, arguments_] of [
+    ["start_incident", { incident_id: incidentId, confirm: false }],
+    ["resolve_incident", { incident_id: incidentId, resolution_summary: "Fixed", confirm: false }],
+    ["reopen_incident", { incident_id: incidentId, reason: "Recurrence", confirm: false }],
+  ] as const) {
+    const response = await dispatchMessage({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: arguments_ } }, actor, null as never);
+    assertEquals((response?.error as { message?: string }).message, "Explicit confirm=true is required");
+  }
+
+  const calls: { name: string; args: Record<string, unknown> }[] = [];
+  const database = {
+    rpc(name: string, args: Record<string, unknown>) {
+      calls.push({ name, args });
+      if (name === "mcp_read_incidents") return Promise.resolve({ data: [{ id: incidentId, status: "open", title: "Test incident" }], error: null });
+      return Promise.resolve({ data: null, error: null });
+    },
+  };
+  const list = await dispatchMessage({ jsonrpc: "2.0", id: 2, method: "tools/call", params: {
+    name: "list_incidents", arguments: { source: "user", offset: 20, limit: 10 },
+  } }, actor, database as never);
+  assertEquals((list?.result as { structuredContent?: unknown }).structuredContent, [{ id: incidentId, status: "open", title: "Test incident" }]);
+  assertEquals(calls[0], { name: "mcp_read_incidents", args: {
+    p_actor_id: actor.profileId, p_incident_id: null, p_status: "active", p_source: "user",
+    p_machine_id: null, p_include_recovered: false, p_offset: 20, p_limit: 10,
+  } });
+  const started = await dispatchMessage({ jsonrpc: "2.0", id: 3, method: "tools/call", params: {
+    name: "start_incident", arguments: { incident_id: incidentId, confirm: true },
+  } }, actor, database as never);
+  assertEquals((started?.result as { structuredContent?: unknown }).structuredContent, { incident_id: incidentId, status: "in_progress" });
+  assertEquals(calls[1], { name: "start_incident", args: { p_incident_id: incidentId, p_actor_id: actor.profileId } });
+  const fetched = await dispatchMessage({ jsonrpc: "2.0", id: 4, method: "tools/call", params: {
+    name: "get_incident", arguments: { incident_id: incidentId },
+  } }, actor, database as never);
+  assertEquals((fetched?.result as { structuredContent?: unknown }).structuredContent, { id: incidentId, status: "open", title: "Test incident" });
+  assertEquals(calls[2], { name: "mcp_read_incidents", args: {
+    p_actor_id: actor.profileId, p_incident_id: incidentId, p_status: "all", p_source: "all",
+    p_machine_id: null, p_include_recovered: true, p_offset: 0, p_limit: 1,
+  } });
+  await dispatchMessage({ jsonrpc: "2.0", id: 5, method: "tools/call", params: {
+    name: "resolve_incident", arguments: { incident_id: incidentId, resolution_summary: " Fixed safely ", confirm: true },
+  } }, actor, database as never);
+  assertEquals(calls[3], { name: "resolve_incident", args: {
+    p_incident_id: incidentId, p_resolution_summary: "Fixed safely", p_actor_id: actor.profileId,
+  } });
+  await dispatchMessage({ jsonrpc: "2.0", id: 6, method: "tools/call", params: {
+    name: "reopen_incident", arguments: { incident_id: incidentId, reason: " Recurrence ", confirm: true },
+  } }, actor, database as never);
+  assertEquals(calls[4], { name: "reopen_incident", args: {
+    p_incident_id: incidentId, p_reason: "Recurrence", p_actor_id: actor.profileId,
+  } });
+});
+
+Deno.test("temperature excursion input is strict and defaults to 30 Madrid-local days", () => {
+  const machineId = crypto.randomUUID();
+  assertEquals(temperatureExcursionInput({ machine_id: machineId, threshold_c: 8 }, "2026-09-10"), {
+    machineId, thresholdC: 8, seriesName: undefined, range: { from: "2026-08-12", to: "2026-09-10" },
+  });
+  assertEquals(temperatureExcursionInput({ machine_id: machineId, threshold_c: -2, date_to: "2026-08-01", series_name: "Cabinet" }, "2026-09-10").range, { from: "2026-07-03", to: "2026-08-01" });
+  assertThrows(() => temperatureExcursionInput({ machine_id: machineId, threshold_c: 8, unknown: true }, "2026-09-10"), Error, "Unknown tool argument");
+  assertThrows(() => temperatureExcursionInput({ machine_id: "machine one", threshold_c: 8 }, "2026-09-10"), Error, "machine_id");
+  assertThrows(() => temperatureExcursionInput({ machine_id: machineId, threshold_c: Infinity }, "2026-09-10"), Error, "finite");
+  assertThrows(() => temperatureExcursionInput({ machine_id: machineId, threshold_c: 8, date_to: "2026-99-01" }, "2026-09-10"), Error, "YYYY-MM-DD");
+  assertThrows(() => temperatureExcursionInput({ machine_id: machineId, threshold_c: 8, date_from: "2026-06-10", date_to: "2026-09-10" }, "2026-09-10"), Error, "92");
+  assertThrows(() => temperatureExcursionInput({ machine_id: machineId, threshold_c: 8, date_to: "2026-09-11" }, "2026-09-10"), Error, "92");
+  assertThrows(() => temperatureExcursionInput({ machine_id: machineId, threshold_c: 8, series_name: "x".repeat(201) }, "2026-09-10"), Error, "200");
+});
+
+Deno.test("temperature excursions use strict thresholds and Madrid-local days per exact series", () => {
+  const series = summarizeTemperatureExcursions([
+    { reading_time: "2026-03-28T22:50:00.000Z", series_name: "Cabinet", value: 10 },
+    { reading_time: "2026-03-28T23:10:00.000Z", series_name: "Cabinet", value: 10.1 },
+    { reading_time: "2026-03-28T23:40:00.000Z", series_name: "Cabinet", value: 12 },
+    { reading_time: "2026-03-28T23:50:00.000Z", series_name: "Cabinet", value: 5 },
+    { reading_time: "2026-03-29T00:40:00.000Z", series_name: "Cabinet", value: 11 },
+    { reading_time: "2026-03-29T00:15:00.000Z", series_name: "Mix", value: 13 },
+    { reading_time: "2026-03-29T22:30:00.000Z", series_name: "Cabinet", value: 15 },
+  ], 10);
+  assertEquals(series, [
+    {
+      series_name: "Cabinet", samples_total: 6, samples_above: 4, excursion_days: 2,
+      days: [
+        { day: "2026-03-29", maximum_c: 12, samples_total: 4, samples_above: 3, first_above_at: "2026-03-28T23:10:00.000Z", last_above_at: "2026-03-29T00:40:00.000Z", observed_span_minutes: 30, largest_gap_minutes: 50, above_threshold_run_count: 2, duration_is_estimate: true },
+        { day: "2026-03-30", maximum_c: 15, samples_total: 1, samples_above: 1, first_above_at: "2026-03-29T22:30:00.000Z", last_above_at: "2026-03-29T22:30:00.000Z", observed_span_minutes: 0, largest_gap_minutes: 0, above_threshold_run_count: 1, duration_is_estimate: true },
+      ],
+    },
+    {
+      series_name: "Mix", samples_total: 1, samples_above: 1, excursion_days: 1,
+      days: [{ day: "2026-03-29", maximum_c: 13, samples_total: 1, samples_above: 1, first_above_at: "2026-03-29T00:15:00.000Z", last_above_at: "2026-03-29T00:15:00.000Z", observed_span_minutes: 0, largest_gap_minutes: 0, above_threshold_run_count: 1, duration_is_estimate: true }],
+    },
+  ]);
+  assertThrows(() => summarizeTemperatureExcursions(Array.from({ length: 21 }, (_, index) => ({
+    reading_time: "2026-03-29T00:00:00.000Z", series_name: `Series ${index}`, value: 11,
+  })), 10), Error, "more than 20 series");
+});
+
+Deno.test("temperature excursion tool returns the documented structured response", async () => {
+  const machineId = crypto.randomUUID();
+  const operations: string[] = [];
+  const database = {
+    from(table: string) {
+      const query = {
+        select() { return query; },
+        eq(column: string, value: unknown) { operations.push(`${table}:eq:${column}:${value}`); return query; },
+        gte(column: string, value: unknown) { operations.push(`${table}:gte:${column}:${value}`); return query; },
+        lt(column: string, value: unknown) { operations.push(`${table}:lt:${column}:${value}`); return query; },
+        not() { return query; },
+        order(column: string) { operations.push(`${table}:order:${column}`); return query; },
+        limit(value: number) { operations.push(`${table}:limit:${value}`); return query; },
+        or(value: string) { operations.push(`${table}:or:${value}`); return query; },
+        maybeSingle() { return Promise.resolve({ data: { id: machineId, name: "Machine", display_name: "Plaza", deployed: true }, error: null }); },
+        then(resolve: (result: unknown) => void) {
+          resolve({ data: [
+            { id: crypto.randomUUID(), reading_time: "2026-09-01T10:00:00.000Z", series_name: "Cabinet", value: 9 },
+            { id: crypto.randomUUID(), reading_time: "2026-09-01T10:30:00.000Z", series_name: "Cabinet", value: 11 },
+          ], error: null });
+        },
+      };
+      return query;
+    },
+  };
+  const response = await dispatchMessage({
+    jsonrpc: "2.0", id: 1, method: "tools/call",
+    params: { name: "get_temperature_excursions", arguments: { machine_id: machineId, threshold_c: 10, date_from: "2026-09-01", date_to: "2026-09-01", series_name: "Cabinet" } },
+  }, principal("admin", ["read"]), database as never);
+  const result = response?.result as { structuredContent: Record<string, unknown> };
+  assertEquals(result.structuredContent, {
+    machine: { id: machineId, name: "Plaza" },
+    range: { from: "2026-09-01", to: "2026-09-01", timezone: "Europe/Madrid" },
+    threshold_c: 10,
+    operator: ">",
+    samples_total: 2,
+    series: [{
+      series_name: "Cabinet", samples_total: 2, samples_above: 1, excursion_days: 1,
+      days: [{ day: "2026-09-01", maximum_c: 11, samples_total: 2, samples_above: 1, first_above_at: "2026-09-01T10:30:00.000Z", last_above_at: "2026-09-01T10:30:00.000Z", observed_span_minutes: 0, largest_gap_minutes: 30, above_threshold_run_count: 1, duration_is_estimate: true }],
+    }],
+    warning: "Observed spans are estimates from sampled readings, not exact durations; gaps between readings may hide threshold crossings.",
+  });
+  assert(operations.includes("machines:eq:deployed:true"));
+  assert(operations.includes("huaxin_temperatures:eq:series_name:Cabinet"));
+  assert(operations.includes("huaxin_temperatures:order:reading_time"));
+  assert(operations.includes("huaxin_temperatures:order:id"));
+  assert(operations.includes("huaxin_temperatures:limit:1000"));
 });
 
 Deno.test("sales notes require valid dated evidence and HTTPS sources", () => {
@@ -157,6 +327,7 @@ Deno.test("initialize validates parameters and negotiates supported versions", a
   assertEquals((invalid?.error as { code?: number }).code, -32602);
   const valid = await dispatchMessage({ jsonrpc: "2.0", id: 2, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } } }, actor, null as never);
   assertEquals((valid?.result as { protocolVersion?: string }).protocolVersion, "2025-03-26");
+  assertEquals((valid?.result as { serverInfo?: { version?: string } }).serverInfo?.version, "3.6.0");
   const unknown = await dispatchMessage({ jsonrpc: "2.0", id: 3, method: "initialize", params: { protocolVersion: "2099-01-01", capabilities: {}, clientInfo: { name: "test", version: "1" } } }, actor, null as never);
   assertEquals((unknown?.result as { protocolVersion?: string }).protocolVersion, "2025-03-26");
 });

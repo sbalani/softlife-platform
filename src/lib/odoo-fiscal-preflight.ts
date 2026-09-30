@@ -1,4 +1,4 @@
-import { isAdminOverride } from "./i18n/huaxin.ts";
+import { isAdminOverride, translatePayType } from "./i18n/huaxin.ts";
 import { canonicalJson, sha256 } from "./odoo-sync-contract.ts";
 
 export type FiscalFinding = {
@@ -22,6 +22,14 @@ export type FiscalRecipe = {
   name: string;
   odoo_finished_product_id: number | null;
 };
+
+export type ZeroValueVendReason = "free" | "admin_override";
+
+export function zeroValueVendReason(payType: string | null): ZeroValueVendReason | null {
+  const normalized = payType?.trim() || null;
+  if (isAdminOverride(normalized)) return "admin_override";
+  return translatePayType(normalized) === "Free" ? "free" : null;
+}
 
 export type FiscalProductCheck = {
   odoo_product_id: number;
@@ -100,9 +108,11 @@ export function evaluateFiscalConfiguration(settings: FiscalSettings, body: Reco
   const journal = record(body.journal);
   const customer = record(body.customer);
   const tax = record(body.tax);
+  const capabilities = record(body.capabilities);
   const rawProducts = Array.isArray(body.products) ? body.products : [];
 
   if (Number(body.contract_version) !== 1) findings.push({ severity: "blocker", code: "unsupported_contract", message: "Odoo must report fiscal configuration contract version 1." });
+  if (Number(capabilities.fiscal_zero_value_invoices) !== 1) findings.push({ severity: "blocker", code: "zero_value_invoice_capability_missing", message: "Odoo must advertise zero-value fiscal invoice capability version 1." });
   if (!checkedAt || Number.isNaN(Date.parse(checkedAt))) findings.push({ severity: "blocker", code: "invalid_checked_at", message: "Odoo configuration report has no valid checked_at timestamp." });
   else if (Date.parse(checkedAt) > Date.now() + 5 * 60_000) findings.push({ severity: "blocker", code: "future_checked_at", message: "Odoo configuration report timestamp is in the future." });
   if (text(company.country_code).toUpperCase() !== "ES") findings.push({ severity: "blocker", code: "company_not_spanish", message: "The issuing Odoo company fiscal country must be Spain." });
@@ -217,18 +227,20 @@ export function buildFiscalPreflightItem(input: {
   const operationAt = text(order.order_time) || null;
   const localDate = operationLocalDate(operationAt, timeZone);
   const units = Number(order.nums);
-  const breakdown = fiscalGrossBreakdown(order.price, settings.vat_rate);
+  const payType = text(order.pay_type_raw) || null;
+  const zeroValueReason = zeroValueVendReason(payType);
+  const breakdown = zeroValueReason ? { grossCents: 0, baseCents: 0, vatCents: 0 } : fiscalGrossBreakdown(order.price, settings.vat_rate);
   const refundRequired = refunded(order);
 
   if (!completed(order)) findings.push({ severity: "info", code: "not_completed", message: "Order is not completed and is excluded from invoicing." });
-  if (isAdminOverride(text(order.pay_type_raw) || null)) findings.push({ severity: "info", code: "admin_override", message: "Administrative machine operation is excluded from invoicing." });
-  const excluded = findings.some((finding) => finding.code === "not_completed" || finding.code === "admin_override");
+  const excluded = findings.some((finding) => finding.code === "not_completed");
 
   let recipe: FiscalRecipe | null = null;
   if (!excluded) {
+    if (zeroValueReason) findings.push({ severity: "info", code: "zero_value_vend", message: "Recognized zero-value vend; creating a EUR 0 invoice while preserving product quantity." });
     if (!orderId || !orderCode) findings.push({ severity: "blocker", code: "missing_order_identity", message: "The sale has no stable platform/order identity." });
     if (!operationAt || !localDate) findings.push({ severity: "blocker", code: "missing_operation_time", message: "The sale has no valid operation timestamp." });
-    if (!breakdown) findings.push({ severity: "blocker", code: "invalid_gross_total", message: "The sale total must be a positive monetary amount." });
+    if (!breakdown) findings.push({ severity: "blocker", code: "invalid_gross_total", message: "A paid sale total must be a positive monetary amount." });
     else if (breakdown.grossCents > 300_000) findings.push({ severity: "blocker", code: "simplified_invoice_limit_exceeded", message: "The sale exceeds the EUR 3,000 simplified-invoice limit used for vending retail controls." });
     if (!Number.isInteger(units) || units <= 0) findings.push({ severity: "blocker", code: "invalid_units", message: "The sold quantity must be a positive whole number." });
     if (text(order.currency).toUpperCase() !== settings.currency) findings.push({ severity: "blocker", code: "currency_mismatch", message: `The sale currency must be ${settings.currency}.` });

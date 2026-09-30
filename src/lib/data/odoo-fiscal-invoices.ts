@@ -8,6 +8,7 @@ import {
   type FiscalCalendarSpan,
   type FiscalInvoiceSourceItem,
 } from "../odoo-fiscal-invoices.ts";
+import { zeroValueVendReason } from "../odoo-fiscal-preflight.ts";
 import { sha256 } from "../odoo-sync-contract.ts";
 
 export type FiscalInvoiceDocumentAdmin = {
@@ -79,7 +80,7 @@ async function loadLatestReadySource(s: SupabaseClient) {
   if (runError) throw runError;
   if (!run) throw new Error("No ready fiscal preflight is available.");
   const [itemsResult, reportResult, settingsResult] = await Promise.all([
-    s.from("fiscal_preflight_items").select("id,order_id,status,operation_at,operation_local_date,order_code,payment_reference,description,units,gross_cents,tax_base_cents,vat_cents,odoo_product_id,refund_required,source_sha256")
+    s.from("fiscal_preflight_items").select("id,order_id,status,operation_at,operation_local_date,order_code,payment_reference,description,units,gross_cents,tax_base_cents,vat_cents,odoo_product_id,refund_required,source_sha256,source_snapshot")
       .eq("run_id", run.id).eq("status", "eligible").order("operation_at").order("order_id").limit(501),
     s.from("odoo_fiscal_configuration_reports").select("id,checked_at,accepted,payload,payload_sha256")
       .eq("id", run.configuration_report_id).single(),
@@ -95,6 +96,7 @@ async function loadLatestReadySource(s: SupabaseClient) {
     description: String(item.description), units: Number(item.units), gross_cents: Number(item.gross_cents),
     tax_base_cents: Number(item.tax_base_cents), vat_cents: Number(item.vat_cents),
     odoo_product_id: Number(item.odoo_product_id), refund_required: Boolean(item.refund_required), source_sha256: String(item.source_sha256),
+    zero_value_reason: zeroValueVendReason(String((item.source_snapshot as Record<string, unknown>)?.pay_type_raw ?? "") || null),
   }));
   const report = reportResult.data as Record<string, unknown>;
   const settings = settingsResult.data as Record<string, unknown>;

@@ -1,4 +1,5 @@
 import { canonicalJson, sha256 } from "./odoo-sync-contract.ts";
+import type { ZeroValueVendReason } from "./odoo-fiscal-preflight.ts";
 
 export type FiscalInvoiceSourceItem = {
   id: string;
@@ -14,6 +15,7 @@ export type FiscalInvoiceSourceItem = {
   odoo_product_id: number;
   refund_required: boolean;
   source_sha256: string;
+  zero_value_reason: ZeroValueVendReason | null;
 };
 
 export type FiscalInvoice = {
@@ -24,6 +26,7 @@ export type FiscalInvoice = {
   currency: string;
   reference: string;
   expected_total_cents: number;
+  zero_value_reason: ZeroValueVendReason | null;
   lines: {
     odoo_product_id: number;
     description: string;
@@ -91,6 +94,7 @@ export function buildFiscalInvoiceDraftPayload(input: {
   if (!input.report.accepted) blockers.push("The referenced fiscal configuration report is not accepted.");
   if (!Number.isFinite(checkedAt) || input.now - checkedAt > 24 * 60 * 60_000 || checkedAt > input.now + 5 * 60_000) blockers.push("The referenced fiscal configuration report is stale or has an invalid timestamp.");
   if (Number(capabilities.fiscal_invoice_draft_creation) !== 1 || Number(capabilities.fiscal_invoice_bulk_confirmation) !== 1) blockers.push("Odoo must advertise fiscal invoice draft and bulk confirmation capabilities version 1.");
+  if (Number(capabilities.fiscal_zero_value_invoices) !== 1) blockers.push("Odoo must advertise zero-value fiscal invoice capability version 1.");
   if (!companyId || !customerId || !taxId) blockers.push("The fiscal configuration report is missing required Odoo company, customer, or tax identifiers.");
   if (typeof tax.price_include !== "boolean") blockers.push("The fiscal configuration report has no valid tax price-inclusion mode.");
   if (customerId !== input.customerOdooId || requiredText(journal.code)?.toUpperCase() !== input.journalCode) blockers.push("The fiscal configuration report does not match the frozen customer or journal settings.");
@@ -108,6 +112,7 @@ export function buildFiscalInvoiceDraftPayload(input: {
       currency: input.currency,
       reference: item.payment_reference || item.order_code,
       expected_total_cents: item.gross_cents,
+      zero_value_reason: item.zero_value_reason,
       lines: [{
         odoo_product_id: item.odoo_product_id,
         description: item.description,

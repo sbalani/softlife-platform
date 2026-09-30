@@ -25,6 +25,7 @@ const settings: FiscalSettings = {
 const configuration = {
   contract_version: 1,
   checked_at: "2026-09-29T12:00:00Z",
+  capabilities: { fiscal_zero_value_invoices: 1 },
   company: { country_code: "ES", vat: "ESB12345678", currency: "EUR" },
   journal: { code: "VEND", type: "sale", refund_sequence: true, secure_posted_entries: false },
   customer: { odoo_id: 722, country_code: "ES", vat: null },
@@ -153,8 +154,22 @@ test("builds an eligible immutable source item", () => {
   assert.match(result.source_sha256, /^[0-9a-f]{64}$/);
 });
 
-test("excludes administrative operations and blocks unresolved sale lines", () => {
-  assert.equal(item({ pay_type_raw: "自动制作" }).status, "excluded");
+test("invoices free and administrative vends at zero while blocking invalid paid totals", () => {
+  for (const payType of ["免费", "Free", " Free ", "自动制作", "Admin override"]) {
+    const result = item({ pay_type_raw: payType, price: payType === "免费" ? 0 : 3.8 });
+    assert.equal(result.status, "eligible");
+    assert.equal(result.gross_cents, 0);
+    assert.equal(result.tax_base_cents, 0);
+    assert.equal(result.vat_cents, 0);
+    assert.equal(result.source_snapshot.price, payType === "免费" ? 0 : 3.8);
+    assert(result.findings.some((finding) => finding.code === "zero_value_vend"));
+  }
+  const paidZero = item({ pay_type_raw: "刷卡", price: 0 });
+  assert.equal(paidZero.status, "blocked");
+  assert(paidZero.findings.some((finding) => finding.code === "invalid_gross_total"));
+});
+
+test("blocks unresolved sale lines", () => {
   const unresolved = buildFiscalPreflightItem({
     order: baseOrder,
     resolutions: [{ line_index: 0, raw_name: "Frozen yogurt", raw_position: null, resolution_status: "pending", recipe_id: null }],
@@ -199,7 +214,7 @@ test("builds a sorted remediation payload from the same effective product checks
   const reportPayload = {
     ...configuration,
     checked_at: new Date(now - 60_000).toISOString(),
-    capabilities: { fiscal_product_remediation: 1 },
+    capabilities: { fiscal_product_remediation: 1, fiscal_zero_value_invoices: 1 },
     company: { ...configuration.company, odoo_id: 3 },
     income_account: { odoo_id: 77, code: "701000", account_type: "income" },
     products: [
@@ -231,7 +246,7 @@ test("shows missing reported recipe products and blocks remediation", () => {
   const payload = {
     ...configuration,
     checked_at: new Date(now - 60_000).toISOString(),
-    capabilities: { fiscal_product_remediation: 1 },
+    capabilities: { fiscal_product_remediation: 1, fiscal_zero_value_invoices: 1 },
     company: { ...configuration.company, odoo_id: 3 },
     income_account: { odoo_id: 77, code: "701000", account_type: "income" },
     products: [{ ...configuration.products[0], income_account_code: "700000" }],

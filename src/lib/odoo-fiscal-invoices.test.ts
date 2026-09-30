@@ -24,14 +24,15 @@ const item: FiscalInvoiceSourceItem = {
   odoo_product_id: 101,
   refund_required: false,
   source_sha256: "a".repeat(64),
+  zero_value_reason: null,
 };
 
-function draft() {
+function draft(source: FiscalInvoiceSourceItem = item) {
   const now = Date.parse("2026-09-29T13:00:00Z");
   const configuration = {
     contract_version: 1,
     checked_at: "2026-09-29T12:00:00Z",
-    capabilities: { fiscal_invoice_draft_creation: 1, fiscal_invoice_bulk_confirmation: 1 },
+    capabilities: { fiscal_invoice_draft_creation: 1, fiscal_invoice_bulk_confirmation: 1, fiscal_zero_value_invoices: 1 },
     company: { odoo_id: 3, country_code: "ES", currency: "EUR" },
     journal: { code: "VEND" },
     customer: { odoo_id: 722 },
@@ -40,7 +41,7 @@ function draft() {
   return buildFiscalInvoiceDraftPayload({
     now,
     report: { id: "33333333-3333-4333-8333-333333333333", checked_at: configuration.checked_at, accepted: true, payload_sha256: sha256(configuration), payload: configuration },
-    currency: "EUR", journalCode: "VEND", customerOdooId: 722, items: [item],
+    currency: "EUR", journalCode: "VEND", customerOdooId: 722, items: [source],
     platformInvoiceIds: ["44444444-4444-4444-8444-444444444444"],
   });
 }
@@ -57,11 +58,22 @@ test("builds canonical draft and per-invoice hashes without hashing the hash fie
   assert.deepEqual(invoice.lines, [{ odoo_product_id: 101, description: "Frozen yogurt", quantity: 1, gross_cents: 380, tax_base_cents: 345, vat_cents: 35, odoo_tax_id: 41 }]);
 });
 
+test("preserves zero-value invoice quantity and tax totals", () => {
+  const result = draft({ ...item, units: 2, gross_cents: 0, tax_base_cents: 0, vat_cents: 0, zero_value_reason: "free" });
+  assert.deepEqual(result.blockers, []);
+  assert.equal(result.payload?.invoices[0].expected_total_cents, 0);
+  assert.equal(result.payload?.invoices[0].zero_value_reason, "free");
+  assert.deepEqual(result.payload?.invoices[0].lines, [{
+    odoo_product_id: 101, description: "Frozen yogurt", quantity: 2,
+    gross_cents: 0, tax_base_cents: 0, vat_cents: 0, odoo_tax_id: 41,
+  }]);
+});
+
 test("preserves excluded-price Odoo tax configuration without forcing price inclusion", () => {
   const now = Date.parse("2026-09-29T13:00:00Z");
   const configuration = {
     contract_version: 1, checked_at: "2026-09-29T12:00:00Z",
-    capabilities: { fiscal_invoice_draft_creation: 1, fiscal_invoice_bulk_confirmation: 1 },
+    capabilities: { fiscal_invoice_draft_creation: 1, fiscal_invoice_bulk_confirmation: 1, fiscal_zero_value_invoices: 1 },
     company: { odoo_id: 3, country_code: "ES", currency: "EUR" }, journal: { code: "VEND" },
     customer: { odoo_id: 722 },
     tax: { odoo_id: 41, rate: 10, country_code: "ES", type_tax_use: "sale", amount_type: "percent", price_include: false },
@@ -76,7 +88,7 @@ test("preserves excluded-price Odoo tax configuration without forcing price incl
 test("normalizes accepted report text and requires an explicit tax price mode", () => {
   const reportPayload = {
     contract_version: 1, checked_at: "2026-09-29T12:00:00Z",
-    capabilities: { fiscal_invoice_draft_creation: 1, fiscal_invoice_bulk_confirmation: 1 },
+    capabilities: { fiscal_invoice_draft_creation: 1, fiscal_invoice_bulk_confirmation: 1, fiscal_zero_value_invoices: 1 },
     company: { odoo_id: 3, country_code: " es ", currency: " eur " },
     journal: { code: " vend " }, customer: { odoo_id: 722 },
     tax: { odoo_id: 41, rate: 10, country_code: " es ", type_tax_use: " sale ", amount_type: " percent ", price_include: true },

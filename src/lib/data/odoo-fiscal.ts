@@ -88,6 +88,7 @@ export async function getFiscalConfigurationRequest(s: SupabaseClient) {
     required_capabilities: {
       fiscal_invoice_draft_creation: 1,
       fiscal_invoice_bulk_confirmation: 1,
+      fiscal_zero_value_invoices: 1,
     },
     required_product_fields: ["odoo_product_id", "sale_ok", "income_account_code", "sale_taxes"],
   };

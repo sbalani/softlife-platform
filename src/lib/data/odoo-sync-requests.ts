@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { canonicalJson } from "../odoo-sync-contract.ts";
 import { validateFiscalInvoiceResult } from "../odoo-fiscal-invoices.ts";
 import { OdooContractError } from "./odoo-production.ts";
+import { validateFiscalSaleLinkResult, type FiscalSaleLinkPayload } from "../odoo-fiscal-sale-links.ts";
 
 export async function claimOdooSyncRequest(s: SupabaseClient) {
   const { data, error } = await s.rpc("claim_odoo_sync_request");
@@ -20,8 +21,9 @@ export async function completeOdooSyncRequest(s: SupabaseClient, requestId: stri
   const { data: source, error: sourceError } = await s.from("odoo_sync_requests").select("kind,payload").eq("id", requestId).single();
   if (sourceError) throw sourceError;
   const fiscalInvoiceKind = ["fiscal_invoice_draft_creation", "fiscal_invoice_bulk_confirmation"].includes(source.kind);
-  if (canonicalJson(body).length > (fiscalInvoiceKind ? 250_000 : 20_000)) throw new OdooContractError("Sync result is too large", 413, "payload_too_large");
-  if (body.accepted && !fiscalInvoiceKind && (typeof body.summary !== "string" || !body.summary.trim())) {
+  const fiscalSaleLinkKind = source.kind === "fiscal_invoice_sale_link";
+  if (canonicalJson(body).length > (fiscalInvoiceKind || fiscalSaleLinkKind ? 250_000 : 20_000)) throw new OdooContractError("Sync result is too large", 413, "payload_too_large");
+  if (body.accepted && !fiscalInvoiceKind && !fiscalSaleLinkKind && (typeof body.summary !== "string" || !body.summary.trim())) {
     throw new OdooContractError("Successful sync results require a summary");
   }
   if (fiscalInvoiceKind) {
@@ -31,7 +33,15 @@ export async function completeOdooSyncRequest(s: SupabaseClient, requestId: stri
       throw new OdooContractError(error instanceof Error ? error.message : "Invalid fiscal invoice result");
     }
   }
-  const { data, error } = await s.rpc("complete_odoo_sync_request", { p_request_id: requestId, p_claim_token: claimToken, p_result: body });
+  if (fiscalSaleLinkKind) {
+    try {
+      validateFiscalSaleLinkResult(source.payload as FiscalSaleLinkPayload, body);
+    } catch (error) {
+      throw new OdooContractError(error instanceof Error ? error.message : "Invalid fiscal sale-link result");
+    }
+  }
+  const rpcName = fiscalSaleLinkKind ? "complete_fiscal_invoice_sale_link_request" : "complete_odoo_sync_request";
+  const { data, error } = await s.rpc(rpcName, { p_request_id: requestId, p_claim_token: claimToken, p_result: body });
   if (error) {
     if (error.code === "P0001") throw new OdooContractError(error.message, 409, "invalid_status");
     throw error;

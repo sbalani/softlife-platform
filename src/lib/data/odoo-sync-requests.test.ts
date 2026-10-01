@@ -50,3 +50,23 @@ test("remediation queue adapter writes only the constrained kind and frozen payl
   assert.equal(queued.requestId, "queued-id");
   assert.deepEqual(inserted, [{ kind: "fiscal_product_remediation", requested_by: "actor-id", payload, payload_sha256: "a".repeat(64) }]);
 });
+
+test("sale-link completion validates exact identities and records the result", async () => {
+  const rpcCalls: string[] = [];
+  const link = {
+    platform_invoice_id: "11111111-1111-4111-8111-111111111111", invoice_payload_sha256: "a".repeat(64),
+    odoo_move_id: 9, source_order_id: "22222222-2222-4222-8222-222222222222",
+    export_id: "33333333-3333-4333-8333-333333333333", odoo_warehouse_id: 4,
+    recipe_version_id: "44444444-4444-4444-8444-444444444444",
+    odoo_sale_order_id: 10, odoo_product_id: 20, quantity: 1,
+  };
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: { kind: "fiscal_invoice_sale_link", payload: { contract_version: 1, local_month: "2026-07", links: [link] } }, error: null }) }) }) }),
+    rpc: async (name: string) => { rpcCalls.push(name); return { data: { status: "completed" }, error: null }; },
+  } as unknown as SupabaseClient;
+  await completeOdooSyncRequest(client, "d58e68dd-21a6-4a55-8cf4-d7a26bba1264", {
+    accepted: true, claim_token: "7cbd854e-3f88-4ca3-b86b-a4853adffbd3",
+    links: [{ platform_invoice_id: link.platform_invoice_id, invoice_payload_sha256: link.invoice_payload_sha256, odoo_move_id: 9, odoo_sale_order_id: 10, odoo_sale_order_line_id: 30, linked: true, already_linked: false, sale_order_status: "invoiced" }],
+  });
+  assert.deepEqual(rpcCalls, ["complete_fiscal_invoice_sale_link_request"]);
+});

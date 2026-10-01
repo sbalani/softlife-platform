@@ -16,6 +16,8 @@ import { getSessionProfile } from "@/lib/auth/session";
 import { getFiscalInvoiceAdminData, getFiscalInvoiceQueuePreview } from "@/lib/data/odoo-fiscal-invoices";
 import { isFiscalCalendarMonth } from "@/lib/odoo-fiscal-invoices";
 import { OdooAccordion } from "./OdooAccordion";
+import { getFiscalSaleLinkAdminData } from "@/lib/data/odoo-fiscal-sale-links";
+import { FiscalSaleLinkPanel } from "./FiscalSaleLinkPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -36,9 +38,10 @@ export default async function OdooPage({ searchParams }: { searchParams: Promise
     getFiscalPreflightAdminData(fiscalRun),
     actor?.role === "admin" ? getFiscalRemediationAdminData() : null,
   ]);
-  const [invoices, queuePreview] = await Promise.all([
+  const [invoices, queuePreview, saleLinks] = await Promise.all([
     getFiscalInvoiceAdminData(selectedFiscalMonth),
     fiscal.selectedRun ? getFiscalInvoiceQueuePreview(fiscal.selectedRun.id) : null,
+    actor?.role === "admin" ? getFiscalSaleLinkAdminData(selectedFiscalMonth) : null,
   ]);
 
   const tz = await getDisplayTimezone();
@@ -55,6 +58,8 @@ export default async function OdooPage({ searchParams }: { searchParams: Promise
       <StockSnapshotPanel snapshot={production.stockSnapshot} timeZone={tz} sourceWarehouseId={production.settings?.replenishment_source_odoo_warehouse_id ?? null} />
 
       <FiscalPreflightPanel data={fiscal} invoices={invoices} queuePreview={queuePreview} timeZone={tz} calendarMonth={selectedFiscalMonth} />
+
+      {saleLinks && <FiscalSaleLinkPanel data={saleLinks} timeZone={tz} />}
 
       {remediation && <FiscalRemediationPanel data={remediation} timeZone={tz} />}
 

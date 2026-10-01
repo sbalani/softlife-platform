@@ -11,6 +11,8 @@ import { enqueueFiscalInvoiceDraftBatch } from "@/lib/data/odoo-fiscal-invoices"
 import { enqueueFiscalInvoiceConfirmation, retryFiscalInvoiceDraftBatch } from "@/lib/data/odoo-fiscal-invoice-requests";
 import { inclusiveLocalDatePeriod, localDateTimeToUtc } from "@/lib/odoo-sync-contract";
 import { parseProductionRecipeAssignments } from "@/lib/production-recipe-assignments";
+import { enqueueFiscalSaleLinks } from "@/lib/data/odoo-fiscal-sale-links";
+import { isFiscalCalendarMonth } from "@/lib/odoo-fiscal-invoices";
 
 export type OdooActionResult = { ok: boolean; error?: string; message?: string; redirectTo?: string };
 
@@ -100,6 +102,23 @@ export async function retryFiscalInvoiceDrafts(_state: OdooActionResult | null, 
     const result = await retryFiscalInvoiceDraftBatch(s, { batchId, requestedBy: actor.id });
     revalidatePath("/odoo");
     return { ok: true, message: `Retried the frozen payload for ${result.document_count} invoice draft${result.document_count === 1 ? "" : "s"}.` };
+  } catch (error) { return actionError(error); }
+}
+
+export async function requestFiscalSaleLinks(_state: OdooActionResult | null, fd: FormData): Promise<OdooActionResult> {
+  try {
+    const s = await productionAdminClient();
+    const actor = await getSessionProfile();
+    if (!actor || actor.role !== "admin") throw new Error("Admin access required.");
+    if (String(fd.get("sale_link_acknowledgement") ?? "") !== "link_existing_fiscal_invoices") {
+      throw new Error("Acknowledge the existing invoice-to-sales-order link operation.");
+    }
+    const month = String(fd.get("fiscal_month") ?? "");
+    const expectedHash = String(fd.get("payload_sha256") ?? "");
+    if (!isFiscalCalendarMonth(month) || !/^[0-9a-f]{64}$/.test(expectedHash)) throw new Error("A valid reviewed reconciliation preview is required.");
+    const result = await enqueueFiscalSaleLinks(s, { month, requestedBy: actor.id, expectedPayloadSha256: expectedHash });
+    revalidatePath("/odoo");
+    return { ok: true, message: `Queued ${result.document_count} existing fiscal invoice link${result.document_count === 1 ? "" : "s"}.` };
   } catch (error) { return actionError(error); }
 }
 

@@ -114,9 +114,8 @@ export async function requestFiscalSaleLinks(_state: OdooActionResult | null, fd
       throw new Error("Acknowledge the existing invoice-to-sales-order link operation.");
     }
     const month = String(fd.get("fiscal_month") ?? "");
-    const expectedHash = String(fd.get("payload_sha256") ?? "");
-    if (!isFiscalCalendarMonth(month) || !/^[0-9a-f]{64}$/.test(expectedHash)) throw new Error("A valid reviewed reconciliation preview is required.");
-    const result = await enqueueFiscalSaleLinks(s, { month, requestedBy: actor.id, expectedPayloadSha256: expectedHash });
+    if (!isFiscalCalendarMonth(month)) throw new Error("A valid reviewed reconciliation preview is required.");
+    const result = await enqueueFiscalSaleLinks(s, { month, requestedBy: actor.id });
     revalidatePath("/odoo");
     return { ok: true, message: `Queued ${result.document_count} existing fiscal invoice link${result.document_count === 1 ? "" : "s"}.` };
   } catch (error) { return actionError(error); }

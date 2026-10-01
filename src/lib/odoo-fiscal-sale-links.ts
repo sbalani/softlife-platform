@@ -2,7 +2,6 @@ import { canonicalJson } from "./odoo-sync-contract.ts";
 
 export type FiscalSaleLink = {
   platform_invoice_id: string;
-  invoice_payload_sha256: string;
   odoo_move_id: number;
   source_order_id: string;
   export_id: string;
@@ -30,7 +29,6 @@ export function validateFiscalSaleLinkResult(payload: FiscalSaleLinkPayload, res
     const id = String(row.platform_invoice_id ?? "");
     const source = expected.get(id);
     if (!source || seen.has(id)
-      || row.invoice_payload_sha256 !== source.invoice_payload_sha256
       || row.odoo_move_id !== source.odoo_move_id
       || row.odoo_sale_order_id !== source.odoo_sale_order_id
       || row.linked !== true

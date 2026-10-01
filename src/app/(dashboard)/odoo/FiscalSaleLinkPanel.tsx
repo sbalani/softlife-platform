@@ -13,7 +13,7 @@ function statusStyle(status: string) {
 export function FiscalSaleLinkPanel({ data, timeZone }: { data: FiscalSaleLinkAdminData; timeZone: string }) {
   const request = data.latestRequest;
   const summary = request?.result?.summary == null ? null : String(request.result.summary);
-  const ready = Boolean(data.payload && data.payloadSha256);
+  const ready = Boolean(data.payload);
   return (
     <OdooAccordion
       title="Invoice to sales-order reconciliation"
@@ -31,13 +31,14 @@ export function FiscalSaleLinkPanel({ data, timeZone }: { data: FiscalSaleLinkAd
         {data.deferredCount > 0 && <p className="rounded-xl bg-warning/10 px-4 py-3 text-xs text-warning">{data.deferredCount} additional invoice link{data.deferredCount === 1 ? "" : "s"} will be available in the next deterministic batch after this request completes.</p>}
 
         {data.blockers.map((blocker) => <p key={blocker} className="rounded-xl bg-danger/5 px-4 py-3 text-xs font-semibold text-danger">{blocker}</p>)}
-        {data.unmapped.length > 0 && <details className="rounded-xl border border-warning/30 bg-warning/5 p-3"><summary className="cursor-pointer text-xs font-bold text-warning">{data.unmapped.length} invoice{data.unmapped.length === 1 ? "" : "s"} require review</summary><ul className="mt-2 space-y-1 text-xs text-taupe">{data.unmapped.slice(0, 50).map((issue) => <li key={issue}>{issue}</li>)}</ul></details>}
+        {data.readyLinks.length > 0 && <details className="rounded-xl border border-sage/30 bg-sage/5 p-3"><summary className="cursor-pointer text-xs font-bold text-sage">Review {data.readyLinks.length} proposed invoice-to-order link{data.readyLinks.length === 1 ? "" : "s"}</summary><div className="mt-3 overflow-x-auto"><table className="w-full min-w-[620px] text-left text-xs"><thead className="text-taupe"><tr><th className="pb-2">Source order</th><th>Odoo invoice</th><th>Odoo sales order</th><th>Product</th><th className="text-right">Quantity</th></tr></thead><tbody className="divide-y divide-line">{data.readyLinks.map((link) => <tr key={`${link.orderCode}:${link.odooMoveId}`}><td className="py-2 font-semibold text-cocoa">{link.orderCode}</td><td>#{link.odooMoveId}</td><td>#{link.odooSaleOrderId}</td><td>#{link.odooProductId}</td><td className="text-right">{link.quantity}</td></tr>)}</tbody></table></div></details>}
+        {data.issueSummary.length > 0 && <div className="rounded-xl border border-warning/30 bg-warning/5 p-3"><p className="text-xs font-bold text-warning">Why {data.unmapped.length} invoices are not ready</p><ul className="mt-2 space-y-1 text-xs text-taupe">{data.issueSummary.map((issue) => <li key={issue.reason}><strong className="text-cocoa">{issue.count}</strong> · {issue.reason}</li>)}</ul></div>}
+        {data.unmapped.length > 0 && <details className="rounded-xl border border-warning/30 p-3"><summary className="cursor-pointer text-xs font-bold text-warning">Show individual invoices requiring review</summary><ul className="mt-2 space-y-1 text-xs text-taupe">{data.unmapped.slice(0, 100).map((issue) => <li key={issue}>{issue}</li>)}</ul>{data.unmapped.length > 100 && <p className="mt-2 text-xs text-taupe">Showing the first 100 of {data.unmapped.length}.</p>}</details>}
 
         {request && <div className="rounded-xl border border-line p-3 text-xs"><div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-cocoa">Latest reconciliation request</strong><span className={`rounded-full px-2 py-1 font-bold ${statusStyle(request.status)}`}>{request.status}</span></div><p className="mt-1 text-taupe">Requested {formatDateTime(request.requested_at, timeZone)} · attempts {request.attempts}{request.completed_at ? ` · completed ${formatDateTime(request.completed_at, timeZone)}` : ""}</p>{summary && <p className="mt-1 text-sage">{summary}</p>}{request.error && <p className="mt-1 text-danger">{request.error}</p>}</div>}
 
         <OdooSaveForm action={requestFiscalSaleLinks} className="rounded-xl border border-line bg-cream/40 p-4">
           <input type="hidden" name="fiscal_month" value={data.month} />
-          <input type="hidden" name="payload_sha256" value={data.payloadSha256 ?? ""} />
           <label className="flex items-start gap-2 text-xs text-cocoa"><input type="checkbox" required name="sale_link_acknowledgement" value="link_existing_fiscal_invoices" className="mt-0.5" /><span>I authorize linking only the reviewed existing posted invoices to their verified SoftLife sales-order lines. No invoice, posting, or accounting amount will be created or changed.</span></label>
           <button disabled={!ready} className="mt-3 rounded-lg bg-cocoa px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">Queue {data.candidateCount} verified link{data.candidateCount === 1 ? "" : "s"}</button>
         </OdooSaveForm>

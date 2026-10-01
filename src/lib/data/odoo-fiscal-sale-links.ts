@@ -1,7 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceClient, isSupabaseConfigured } from "../supabase/server";
 import { fiscalCalendarMonth, isFiscalCalendarMonth } from "../odoo-fiscal-invoices.ts";
-import { sha256 } from "../odoo-sync-contract.ts";
 import type { FiscalSaleLink, FiscalSaleLinkPayload } from "../odoo-fiscal-sale-links.ts";
 
 type SyncRequest = {
@@ -22,18 +21,19 @@ export type FiscalSaleLinkAdminData = {
   linkedCount: number;
   candidateCount: number;
   deferredCount: number;
+  readyLinks: { orderCode: string; odooMoveId: number; odooSaleOrderId: number; odooProductId: number; quantity: number }[];
+  issueSummary: { reason: string; count: number }[];
   unmapped: string[];
   blockers: string[];
   payload: FiscalSaleLinkPayload | null;
-  payloadSha256: string | null;
   latestRequest: SyncRequest | null;
 };
 
 const EMPTY = (month: string): FiscalSaleLinkAdminData => ({
   available: false, month, postedCount: 0, linkedCount: 0, candidateCount: 0,
-  deferredCount: 0,
+  deferredCount: 0, readyLinks: [], issueSummary: [],
   unmapped: [], blockers: ["Apply the fiscal invoice sale-link migration before using this control."],
-  payload: null, payloadSha256: null, latestRequest: null,
+  payload: null, latestRequest: null,
 });
 
 function records(value: unknown): Record<string, unknown>[] {
@@ -54,7 +54,7 @@ async function loadMonthDocuments(s: SupabaseClient, first: string, last: string
   const rows: Record<string, unknown>[] = [];
   for (let offset = 0; ; offset += 1000) {
     const result = await s.from("fiscal_invoice_documents")
-      .select("id,source_order_id,invoice_payload,invoice_payload_sha256,odoo_move_id,odoo_product_id,order_code,status,sale_link_status")
+      .select("id,source_order_id,invoice_payload,odoo_move_id,odoo_product_id,order_code,status,sale_link_status")
       .gte("invoice_date", first).lte("invoice_date", last).eq("status", "posted")
       .order("invoice_date").order("id").range(offset, offset + 999);
     if (result.error) throw result.error;
@@ -126,12 +126,18 @@ async function buildFiscalSaleLinkData(s: SupabaseClient, month: string): Promis
 
   const links: FiscalSaleLink[] = [];
   const unmapped: string[] = [];
+  const issueCounts = new Map<string, number>();
+  const orderCodeByInvoice = new Map<string, string>();
+  const flag = (label: string, reason: string, detail = reason) => {
+    unmapped.push(`${label}: ${detail}`);
+    issueCounts.set(reason, (issueCounts.get(reason) ?? 0) + 1);
+  };
   for (const document of sourceDocuments) {
     const orderId = String(document.source_order_id);
     const label = String(document.order_code);
     const orderMemberships = membershipsByOrder.get(orderId) ?? [];
     if (orderMemberships.length !== 1) {
-      unmapped.push(`${label}: expected one completed production export, found ${orderMemberships.length}.`);
+      flag(label, `Expected exactly one completed production export, but found ${orderMemberships.length}.`);
       continue;
     }
     const exportId = String(orderMemberships[0].export_id);
@@ -147,19 +153,26 @@ async function buildFiscalSaleLinkData(s: SupabaseClient, month: string): Promis
     const exportRecipes = records(exportWarehouse?.recipes);
     const recipeVersionId = recipeVersions.length === 1 ? recipeVersions[0] : null;
     const exportRecipe = exportRecipes.find((recipe) => String(recipe.recipe_version_id) === recipeVersionId);
-    if (!Number.isInteger(warehouseId) || warehouseId! <= 0 || !Number.isInteger(saleOrderId) || saleOrderId <= 0
-      || !recipeVersionId || Number(exportRecipe?.odoo_finished_product_id) !== Number(document.odoo_product_id)
-      || invoiceLines.length !== 1 || !Number.isInteger(quantity) || quantity <= 0 || document.odoo_move_id == null) {
-      unmapped.push(`${label}: immutable invoice or production result is incomplete.`);
-      continue;
-    }
+    if (!Number.isInteger(warehouseId) || warehouseId! <= 0) { flag(label, "The source order has no valid Odoo warehouse captured at the time of sale."); continue; }
+    if (!warehouse) { flag(label, "The completed production export has no Odoo result for the source warehouse.", `Completed export ${exportId.slice(0, 8)} has no Odoo result for warehouse ${warehouseId}.`); continue; }
+    if (!Number.isInteger(saleOrderId) || saleOrderId <= 0) { flag(label, "The completed production export did not record an Odoo sales order.", `Completed export ${exportId.slice(0, 8)} did not record a sales order for warehouse ${warehouseId}.`); continue; }
+    if (recipeVersions.length > 1) { flag(label, `The source order has ${recipeVersions.length} conflicting frozen production recipe versions.`); continue; }
+    if (!recipeVersionId) { flag(label, "The source order has no frozen production recipe version."); continue; }
+    if (!exportWarehouse) { flag(label, "The completed production export has no frozen payload for the source warehouse.", `Completed export ${exportId.slice(0, 8)} has no frozen payload for warehouse ${warehouseId}.`); continue; }
+    if (!exportRecipe) { flag(label, "The order's frozen recipe version is missing from its completed production export.", `Frozen recipe version ${recipeVersionId!.slice(0, 8)} is missing from completed export ${exportId.slice(0, 8)}.`); continue; }
+    if (!Number.isInteger(Number(document.odoo_product_id)) || Number(document.odoo_product_id) <= 0) { flag(label, "The posted invoice has no valid Odoo product ID."); continue; }
+    if (Number(exportRecipe.odoo_finished_product_id) !== Number(document.odoo_product_id)) { flag(label, "The invoice product does not match the frozen production product.", `Invoice product ${document.odoo_product_id} does not match production product ${exportRecipe.odoo_finished_product_id}.`); continue; }
+    if (invoiceLines.length !== 1) { flag(label, `The recorded invoice contains ${invoiceLines.length} product lines instead of exactly one.`); continue; }
+    if (!Number.isInteger(quantity) || quantity <= 0) { flag(label, "The recorded invoice quantity is not a positive whole number."); continue; }
+    if (!Number.isInteger(Number(document.odoo_move_id)) || Number(document.odoo_move_id) <= 0) { flag(label, "The posted invoice has no valid Odoo invoice ID."); continue; }
     links.push({
-      platform_invoice_id: String(document.id), invoice_payload_sha256: String(document.invoice_payload_sha256),
+      platform_invoice_id: String(document.id),
       odoo_move_id: Number(document.odoo_move_id), source_order_id: orderId, export_id: exportId,
       recipe_version_id: recipeVersionId,
       odoo_warehouse_id: warehouseId!, odoo_sale_order_id: saleOrderId,
       odoo_product_id: Number(document.odoo_product_id), quantity,
     });
+    orderCodeByInvoice.set(String(document.id), label);
   }
   links.sort((left, right) => left.platform_invoice_id.localeCompare(right.platform_invoice_id));
   const totalCandidates = links.length;
@@ -174,7 +187,13 @@ async function buildFiscalSaleLinkData(s: SupabaseClient, month: string): Promis
   return {
     available: true, month, postedCount: documents.length, linkedCount, candidateCount: selectedLinks.length,
     deferredCount: Math.max(0, totalCandidates - selectedLinks.length),
-    unmapped, blockers, payload, payloadSha256: payload ? sha256(payload) : null,
+    readyLinks: selectedLinks.map((link) => ({
+      orderCode: orderCodeByInvoice.get(link.platform_invoice_id) ?? link.platform_invoice_id,
+      odooMoveId: link.odoo_move_id, odooSaleOrderId: link.odoo_sale_order_id,
+      odooProductId: link.odoo_product_id, quantity: link.quantity,
+    })),
+    issueSummary: [...issueCounts].map(([reason, count]) => ({ reason, count })).sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason)),
+    unmapped, blockers, payload,
     latestRequest: requestFromRow(requestResult.data as Record<string, unknown> | null),
   };
 }
@@ -188,14 +207,12 @@ export async function getFiscalSaleLinkAdminData(month: string): Promise<FiscalS
   }
 }
 
-export async function enqueueFiscalSaleLinks(s: SupabaseClient, input: { month: string; requestedBy: string; expectedPayloadSha256: string }) {
+export async function enqueueFiscalSaleLinks(s: SupabaseClient, input: { month: string; requestedBy: string }) {
   const preview = await buildFiscalSaleLinkData(s, input.month);
-  if (!preview.payload || !preview.payloadSha256) throw new Error(preview.blockers[0] ?? "No fiscal invoice sales links are ready.");
-  if (preview.payloadSha256 !== input.expectedPayloadSha256) throw new Error("The reconciliation preview changed. Review it again before queueing.");
+  if (!preview.payload) throw new Error(preview.blockers[0] ?? "No fiscal invoice sales links are ready.");
   const { data, error } = await s.rpc("queue_fiscal_invoice_sale_links", {
     p_requested_by: input.requestedBy,
     p_payload: preview.payload,
-    p_payload_sha256: preview.payloadSha256,
   });
   if (error) throw error;
   return data as { request_id: string; document_count: number };

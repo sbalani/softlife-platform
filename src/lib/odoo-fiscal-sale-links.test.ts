@@ -7,7 +7,6 @@ const payload: FiscalSaleLinkPayload = {
   local_month: "2026-07",
   links: [{
     platform_invoice_id: "11111111-1111-4111-8111-111111111111",
-    invoice_payload_sha256: "a".repeat(64),
     odoo_move_id: 10,
     source_order_id: "22222222-2222-4222-8222-222222222222",
     export_id: "33333333-3333-4333-8333-333333333333",
@@ -19,12 +18,11 @@ const payload: FiscalSaleLinkPayload = {
   }],
 };
 
-test("fiscal sale-link result requires exact immutable identities", () => {
+test("fiscal sale-link result requires exact Odoo identities", () => {
   assert.doesNotThrow(() => validateFiscalSaleLinkResult(payload, {
     accepted: true,
     links: [{
       platform_invoice_id: payload.links[0].platform_invoice_id,
-      invoice_payload_sha256: "a".repeat(64),
       odoo_move_id: 10,
       odoo_sale_order_id: 20,
       odoo_sale_order_line_id: 40,
@@ -35,7 +33,7 @@ test("fiscal sale-link result requires exact immutable identities", () => {
   }));
   assert.throws(() => validateFiscalSaleLinkResult(payload, {
     accepted: true,
-    links: [{ platform_invoice_id: payload.links[0].platform_invoice_id, invoice_payload_sha256: "b".repeat(64), odoo_move_id: 10, odoo_sale_order_id: 20, odoo_sale_order_line_id: 40, linked: true, sale_order_status: "invoiced" }],
+    links: [{ platform_invoice_id: payload.links[0].platform_invoice_id, odoo_move_id: 11, odoo_sale_order_id: 20, odoo_sale_order_line_id: 40, linked: true, sale_order_status: "invoiced" }],
   }), /identity/);
 });
 

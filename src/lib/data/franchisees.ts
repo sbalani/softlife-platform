@@ -18,6 +18,9 @@ export type Tenant = {
   city: string | null;
   province: string | null;
   country: string | null;
+  source_intake_submission_id: string | null;
+  onboarding_modality: "A" | "B" | null;
+  onboarding_share_percent: number | null;
   tenant_contacts: TenantContact[];
 };
 
@@ -62,6 +65,14 @@ export type FranchiseeIntakeSubmission = {
   contract_version: string | null;
   modality: "A" | "B" | null;
   share_percent: number | null;
+  representative_title: string | null;
+  registered_address: string | null;
+  installation_address: string | null;
+  processed_at: string | null;
+  assigned_tenant_id: string | null;
+  assigned_modality: "A" | "B" | null;
+  assigned_share_percent: number | null;
+  assigned_at: string | null;
 };
 
 export type FranchiseeSignupRequest = {
@@ -84,7 +95,7 @@ export async function getTenants(): Promise<Tenant[]> {
     const s = await createServiceClient();
     const { data } = await s
       .from("tenants")
-      .select("id,name,kind,remote_commands,created_at,company_name,tax_id,contact_email,contact_phone,website,address_line_1,address_line_2,postal_code,city,province,country,tenant_contacts(id,full_name,job_title,email,phone,is_primary)")
+      .select("id,name,kind,remote_commands,created_at,company_name,tax_id,contact_email,contact_phone,website,address_line_1,address_line_2,postal_code,city,province,country,source_intake_submission_id,onboarding_modality,onboarding_share_percent,tenant_contacts(id,full_name,job_title,email,phone,is_primary)")
       .order("name");
     return ((data as Tenant[]) ?? []).map((tenant) => ({
       ...tenant,
@@ -118,7 +129,7 @@ export async function getTenantSummaries(): Promise<TenantSummary[]> {
 export async function getTenantById(tenantId: string): Promise<Tenant | null> {
   if (!isSupabaseConfigured()) return null;
   const { data, error } = await (await createServiceClient()).from("tenants")
-    .select("id,name,kind,remote_commands,created_at,company_name,tax_id,contact_email,contact_phone,website,address_line_1,address_line_2,postal_code,city,province,country,tenant_contacts(id,full_name,job_title,email,phone,is_primary)")
+    .select("id,name,kind,remote_commands,created_at,company_name,tax_id,contact_email,contact_phone,website,address_line_1,address_line_2,postal_code,city,province,country,source_intake_submission_id,onboarding_modality,onboarding_share_percent,tenant_contacts(id,full_name,job_title,email,phone,is_primary)")
     .eq("id", tenantId).maybeSingle();
   if (error) throw error;
   if (!data) return null;
@@ -168,10 +179,19 @@ export async function getFranchiseeIntakeSubmissions(): Promise<FranchiseeIntake
   if (!isSupabaseConfigured()) return [];
   try {
     const s = await createServiceClient();
-    const { data, error } = await s.from("franchisee_intake_submissions").select("id,trade_name,company_name,contact_name,contact_email,contact_phone,tax_id,account_holder_name,iban,bic_swift,bank_details_deferred,status,created_at,accepted_at,contract_version,modality,share_percent").eq("status", "pending").order("created_at", { ascending: false });
+    const { data, error } = await s.from("franchisee_intake_submissions").select("id,trade_name,company_name,contact_name,contact_email,contact_phone,tax_id,account_holder_name,iban,bic_swift,bank_details_deferred,status,created_at,accepted_at,contract_version,modality,share_percent,representative_title,registered_address,installation_address,processed_at,assigned_tenant_id,assigned_modality,assigned_share_percent,assigned_at").eq("status", "pending").order("created_at", { ascending: false });
     if (error) throw error;
     return (data as FranchiseeIntakeSubmission[]) ?? [];
   } catch {
     return [];
   }
+}
+
+export async function getFranchiseeIntakeSubmission(submissionId: string): Promise<FranchiseeIntakeSubmission | null> {
+  if (!isSupabaseConfigured()) return null;
+  const { data, error } = await (await createServiceClient()).from("franchisee_intake_submissions")
+    .select("id,trade_name,company_name,contact_name,contact_email,contact_phone,tax_id,account_holder_name,iban,bic_swift,bank_details_deferred,status,created_at,accepted_at,contract_version,modality,share_percent,representative_title,registered_address,installation_address,processed_at,assigned_tenant_id,assigned_modality,assigned_share_percent,assigned_at")
+    .eq("id", submissionId).maybeSingle();
+  if (error) throw error;
+  return data as FranchiseeIntakeSubmission | null;
 }

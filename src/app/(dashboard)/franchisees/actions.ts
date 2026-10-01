@@ -7,7 +7,7 @@ import { passwordSetupUrl } from "@/lib/auth/password-redirect";
 import { FRANCHISEE_CONFIGURABLE_COMMANDS } from "@/lib/huaxin/remote-commands";
 import { bankDetailsFromForm } from "@/lib/bank-details";
 
-export type TenantResult = { ok: boolean; error?: string };
+export type TenantResult = { ok: boolean; error?: string; tenantId?: string };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -64,6 +64,32 @@ export async function createTenant(
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+export async function convertFranchiseeIntake(
+  _previous: TenantResult | null,
+  fd: FormData,
+): Promise<TenantResult> {
+  const session = await requireAdmin();
+  if (!session) return { ok: false, error: "Admin access required." };
+  const submissionId = String(fd.get("submission_id") ?? "");
+  const modality = String(fd.get("modality") ?? "");
+  if (fd.get("confirmation") !== "on") return { ok: false, error: "Confirm that you reviewed the intake before creating the account." };
+  if (!UUID.test(submissionId) || !new Set(["A", "B"]).has(modality)) {
+    return { ok: false, error: "Select a valid intake and operating modality." };
+  }
+  const { data, error } = await (await createServiceClient()).rpc("convert_franchisee_intake_submission", {
+    p_submission_id: submissionId,
+    p_modality: modality,
+    p_actor_id: session.id,
+  });
+  if (error) return { ok: false, error: error.message };
+  const tenantId = String((data as { tenant_id?: unknown } | null)?.tenant_id ?? "");
+  if (!UUID.test(tenantId)) return { ok: false, error: "The franchisee account was created without a valid identifier." };
+  revalidatePath("/franchisees");
+  revalidatePath(`/franchisees/intake/${submissionId}`);
+  revalidatePath(`/franchisees/${tenantId}`);
+  return { ok: true, tenantId };
 }
 
 export async function setFranchiseeRemoteCommands(tenantId: string, commands: string[]): Promise<TenantResult> {

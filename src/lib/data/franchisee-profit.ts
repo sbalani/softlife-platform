@@ -105,7 +105,7 @@ export async function getTenantPayoutReport(tenantId: string, from: string, to: 
   return { tenantName: String(tenant.name), rows: calculatePayoutRows(orderResult.orders, assignments, vatRates, { from, to }) };
 }
 
-export async function getPayoutReports(from: string, to: string, requestedTenantIds?: string[]): Promise<PayoutReport[]> {
+export async function getPayoutReports(from: string, to: string, requestedTenantIds?: string[], options: { includeZero?: boolean } = {}): Promise<PayoutReport[]> {
   if (!isSupabaseConfigured()) throw new Error("Supabase is not configured.");
   const service = await createServiceClient();
   let tenantQuery = service.from("tenants").select("id,name").eq("kind", "franchisee").order("name");
@@ -129,14 +129,15 @@ export async function getPayoutReports(from: string, to: string, requestedTenant
       tenant_name: tenantName, machine_name: machine?.name ?? "Machine", device_imei: machine?.device_imei ?? null,
     }];
   });
-  if (!assignments.length) return [];
   const machineIds = [...new Set(assignments.map((assignment) => assignment.machine_id))];
-  const orderResult = await getOrders({ dateFrom: from, dateTo: to, timeZone: "Europe/Madrid", machineIds }, service);
+  const orderResult = assignments.length
+    ? await getOrders({ dateFrom: from, dateTo: to, timeZone: "Europe/Madrid", machineIds }, service)
+    : { orders: [], sync: null };
   if (orderResult.readError) throw new Error(orderResult.readError);
   const rows = calculatePayoutRows(orderResult.orders, assignments, vatRates, { from, to });
   return [...tenantNames].flatMap(([tenantId, tenantName]): PayoutReport[] => {
     const tenantRows = rows.filter((row) => row.tenantId === tenantId);
     const total = tenantRows.reduce((sum, row) => sum + row.payout, 0);
-    return total > 0 ? [{ tenantId, tenantName, rows: tenantRows, total }] : [];
+    return total > 0 || options.includeZero ? [{ tenantId, tenantName, rows: tenantRows, total }] : [];
   });
 }

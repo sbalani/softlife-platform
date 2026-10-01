@@ -16,6 +16,7 @@ const NAV: { label: string; href?: string; soon?: boolean; adminOnly?: boolean; 
   { label: "Action Report", href: "/refills", icon: <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.8"><path d="M12 2v13M8 6l4-4 4 4"/><path d="M4 14a8 8 0 0016 0"/></svg> },
   { label: "Orders", href: "/orders", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 6h15l-1.5 9h-12z"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/></svg> },
   { label: "Analytics", href: "/analytics", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg> },
+  { label: "Payouts", href: "/payouts", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h4"/></svg> },
   { label: "Alerts", href: "/alerts", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 3l9 16H3z"/><path d="M12 10v4"/></svg> },
   { label: "Incidents", href: "/incidents", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg> },
   { label: "Temperatures", href: "/temperatures", icon: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M14 14V5a2 2 0 10-4 0v9a4 4 0 104 0z"/></svg> },
@@ -39,7 +40,7 @@ const NAV: { label: string; href?: string; soon?: boolean; adminOnly?: boolean; 
 type Profile = { role: Role; email: string | null; fullName: string | null };
 
 const SPANISH: Record<string, string> = {
-  Dashboard: "Resumen", Machines: "Máquinas", "Action Report": "Informe de acción", Orders: "Pedidos", Analytics: "Analítica", Alerts: "Alertas", Incidents: "Incidencias", Temperatures: "Temperaturas", "Remote control": "Control remoto", Ingredients: "Ingredientes", Allergens: "Alérgenos", Inventory: "Inventario", "Lot Audit": "Auditoría de lotes", "Change Log": "Registro de cambios", Transfers: "Transferencias", Franchisees: "Franquiciados", "Company & payouts": "Empresa y pagos", Promotions: "Promociones", "App download": "Descargar app", Advertising: "Publicidad", Users: "Usuarios", Settings: "Configuración",
+  Dashboard: "Resumen", Machines: "Máquinas", "Action Report": "Informe de acción", Orders: "Pedidos", Analytics: "Analítica", Payouts: "Pagos", Alerts: "Alertas", Incidents: "Incidencias", Temperatures: "Temperaturas", "Remote control": "Control remoto", Ingredients: "Ingredientes", Allergens: "Alérgenos", Inventory: "Inventario", "Lot Audit": "Auditoría de lotes", "Change Log": "Registro de cambios", Transfers: "Transferencias", Franchisees: "Franquiciados", "Company & payouts": "Empresa y pagos", Promotions: "Promociones", "App download": "Descargar app", Advertising: "Publicidad", Users: "Usuarios", Settings: "Configuración",
 };
 
 function translated(value: string, locale: Locale) {

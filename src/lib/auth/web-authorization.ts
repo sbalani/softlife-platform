@@ -1,6 +1,6 @@
 import type { SessionProfile } from "./session.ts";
 
-const FRANCHISEE_PATHS = ["/dashboard", "/analytics", "/orders", "/alerts", "/incidents", "/refills", "/remote-control", "/coupons", "/account"];
+const FRANCHISEE_PATHS = ["/dashboard", "/analytics", "/payouts", "/orders", "/alerts", "/incidents", "/refills", "/remote-control", "/coupons", "/account"];
 const PUBLIC_PATHS = new Set(["/login", "/set-password", "/franchisee-intake", "/franchisee-signup", "/report-incident"]);
 
 export function isPublicWebPath(path: string): boolean {

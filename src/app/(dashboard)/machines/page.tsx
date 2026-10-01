@@ -11,22 +11,33 @@ import { shiftDay } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = { q?: string; status?: string; page?: string };
+type SearchParams = { q?: string; status?: string; page?: string; period?: string };
 
-function chipHref(status: string, q: string) {
+function chipHref(status: string, q: string, period: string) {
   const params = new URLSearchParams();
   if (status !== "all") params.set("status", status);
   if (q) params.set("q", q);
+  if (period === "today") params.set("period", period);
   const s = params.toString();
   return s ? `/machines?${s}` : "/machines";
 }
 
-function pageHref(page: number, q: string, status: string) {
+function pageHref(page: number, q: string, status: string, period: string) {
   const params = new URLSearchParams();
   if (q) params.set("q", q);
   if (status !== "all") params.set("status", status);
+  if (period === "today") params.set("period", period);
   params.set("page", String(page));
   return `/machines?${params.toString()}`;
+}
+
+function periodHref(period: "last-30-days" | "today", q: string, status: string) {
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  if (status !== "all") params.set("status", status);
+  if (period === "today") params.set("period", period);
+  const query = params.toString();
+  return query ? `/machines?${query}` : "/machines";
 }
 
 export default async function MachinesPage({
@@ -37,15 +48,17 @@ export default async function MachinesPage({
   const sp = await searchParams;
   const q = (sp.q ?? "").trim().toLowerCase();
   const status = sp.status ?? "all";
+  const period = sp.period === "today" ? "today" : "last-30-days";
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
   const pageSize = 10;
   const tz = await getDisplayTimezone();
 
   const today = ymd(new Date(), tz);
-  const thirtyDaysAgo = shiftDay(today, -29);
+  const periodDays = period === "today" ? 1 : 30;
+  const periodFrom = shiftDay(today, 1 - periodDays);
   const [{ machines, lastSyncedAt, staleMachines, readError }, { orders }] = await Promise.all([
     getMachines(),
-    getOrders({ dateFrom: thirtyDaysAgo, dateTo: today, timeZone: tz }),
+    getOrders({ dateFrom: periodFrom, dateTo: today, timeZone: tz }),
   ]);
   const salesByImei = new Map<string, number>();
   for (const order of orders) {
@@ -86,6 +99,7 @@ export default async function MachinesPage({
         </div>
         <form className="flex items-center gap-2">
           <input type="hidden" name="status" value={status === "all" ? "" : status} />
+          <input type="hidden" name="period" value={period === "today" ? period : ""} />
           <input
             type="text"
             name="q"
@@ -108,7 +122,7 @@ export default async function MachinesPage({
 
       <div className="mb-4 flex items-center gap-2">
         {(["all", "deployed", "undeployed"] as const).map((value) => (
-          <Link key={value} href={chipHref(value, sp.q ?? "")} className={`rounded-full px-3 py-1.5 text-sm font-semibold capitalize transition ${status === value ? "bg-terracotta text-white" : "bg-white text-cocoa hover:bg-cream"}`}>
+          <Link key={value} href={chipHref(value, sp.q ?? "", period)} className={`rounded-full px-3 py-1.5 text-sm font-semibold capitalize transition ${status === value ? "bg-terracotta text-white" : "bg-white text-cocoa hover:bg-cream"}`}>
             {value} ({counts[value]})
           </Link>
         ))}
@@ -120,6 +134,8 @@ export default async function MachinesPage({
         </div>
       </div>
 
+      <div className="mb-4 flex flex-wrap items-center gap-2"><span className="mr-1 text-xs font-bold uppercase tracking-wide text-taupe">Sales period</span>{(["last-30-days", "today"] as const).map((value) => <Link key={value} href={periodHref(value, sp.q ?? "", status)} className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${period === value ? "bg-cocoa text-white" : "bg-white text-cocoa hover:bg-cream"}`}>{value === "last-30-days" ? "Last 30 days" : "Today"}</Link>)}</div>
+
       <div className="overflow-x-auto rounded-2xl border border-line bg-white">
         <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-sand/60 text-left text-[11px] uppercase tracking-wide text-taupe">
@@ -128,7 +144,7 @@ export default async function MachinesPage({
               <th className="px-4 py-3 font-bold">IMEI</th>
               <th className="px-4 py-3 font-bold">Location</th>
               <th className="px-4 py-3 font-bold">Status</th>
-              <th className="px-4 py-3 text-right font-bold">Avg daily sales (30d)</th>
+              <th className="px-4 py-3 text-right font-bold">{period === "today" ? "Sales today" : "Avg daily sales (30d)"}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -150,7 +166,7 @@ export default async function MachinesPage({
                       {m.deployed && !m.net_online && <span className="basis-full text-[11px] text-taupe">{m.offline_since ? `Offline since ${formatDateTime(m.offline_since, tz)}` : "Offline time unknown"}{m.last_online_at ? ` · Last online ${formatDateTime(m.last_online_at, tz)}` : ""}</span>}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-right font-semibold text-cocoa">€{((salesByImei.get(m.device_imei ?? "") ?? 0) / 30).toFixed(2)}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-cocoa">€{((salesByImei.get(m.device_imei ?? "") ?? 0) / periodDays).toFixed(2)}</td>
                 </tr>
               );
             })}
@@ -171,7 +187,7 @@ export default async function MachinesPage({
           <div className="flex items-center gap-2">
             {safePage > 1 ? (
               <Link
-                href={pageHref(safePage - 1, sp.q ?? "", status)}
+                href={pageHref(safePage - 1, sp.q ?? "", status, period)}
                 className="rounded-lg border border-line bg-white px-3 py-1.5 hover:bg-cream"
               >
                 ◀ Prev
@@ -181,7 +197,7 @@ export default async function MachinesPage({
             )}
             {safePage < totalPages ? (
               <Link
-                href={pageHref(safePage + 1, sp.q ?? "", status)}
+                href={pageHref(safePage + 1, sp.q ?? "", status, period)}
                 className="rounded-lg border border-line bg-white px-3 py-1.5 hover:bg-cream"
               >
                 Next ▶

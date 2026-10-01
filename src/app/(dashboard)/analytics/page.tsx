@@ -255,7 +255,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         <button className="rounded-lg bg-cocoa px-4 py-2 text-sm font-bold text-white">Apply</button>
         <Link href="/analytics" className="text-sm font-semibold text-terracotta">Clear</Link>
         <div className="basis-full border-t border-line pt-3"><span className={`${label} mb-2`}>Payout period shortcuts</span><div className="flex flex-wrap gap-2">{([
-          ["last-month", "Last month"], ["this-month", "This month"], ["this-week", "This week"],
+          ["last-30-days", "Last 30 days"], ["last-month", "Last month"], ["this-month", "This month"], ["this-week", "This week"],
           ["last-week", "Last week"], ["yesterday", "Yesterday"], ["today", "Today"],
         ] as [AnalyticsPeriodPreset, string][]).map(([preset, text]) => <Link key={preset} href={presetUrl(preset)} className="rounded-full border border-line px-3 py-1.5 text-xs font-bold text-cocoa hover:border-terracotta">{text}</Link>)}</div></div>
       </form>

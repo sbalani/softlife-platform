@@ -128,6 +128,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   const previousRevenue = previousSales.reduce((sum, order) => sum + order.price, 0);
   const dailyRevenue = revenue / range.days;
   const units = sales.reduce((sum, order) => sum + order.nums, 0);
+  const dailyUnits = units / range.days;
   const previousUnits = previousSales.reduce((sum, order) => sum + order.nums, 0);
   const averageOrder = sales.length ? revenue / sales.length : 0;
   const previousAverage = previousSales.length ? previousRevenue / previousSales.length : 0;
@@ -187,6 +188,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     machineStats.set(key, row);
   }
   const machineRows = [...machineStats.values()].sort((a, b) => b.revenue - a.revenue);
+  const dailyUnitsPerMachine = machineRows.length ? dailyUnits / machineRows.length : 0;
   const machineBars = machineRows.slice(0, 8).map((row) => ({ label: row.name, value: Number(row.revenue.toFixed(2)), href: session?.role === "admin" && row.imei ? `/machines/${row.imei}` : undefined }));
 
   const productStats = new Map<string, { revenue: number; units: number; orders: number }>();
@@ -260,11 +262,13 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
 
       <div className="mb-5"><OrderDataNote sync={sync} readError={readError} requestedTo={range.to} timeZone={tz} /></div>
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-7">
         <KpiCard label="Net sales" value={`€${revenue.toFixed(2)}`} hint={percentChange(revenue, previousRevenue)} accent="#d47e54" />
         <KpiCard label="Daily net sales" value={`€${dailyRevenue.toFixed(2)}`} hint={`${range.days} calendar day${range.days === 1 ? "" : "s"}`} accent="#6fa98c" />
         <KpiCard label="Completed orders" value={`${sales.length}`} hint={percentChange(sales.length, previousSales.length)} accent="#6fa98c" />
         <KpiCard label="Units sold" value={`${units}`} hint={percentChange(units, previousUnits)} accent="#d47e54" />
+        <KpiCard label="Daily average units sold" value={dailyUnits.toFixed(1)} hint={`${units} units ÷ ${range.days} calendar day${range.days === 1 ? "" : "s"}`} accent="#6fa98c" />
+        <KpiCard label="Daily average units / machine" value={dailyUnitsPerMachine.toFixed(2)} hint={`${machineRows.length} selling machine${machineRows.length === 1 ? "" : "s"}`} accent="#d47e54" />
         <KpiCard label="Average order" value={`€${averageOrder.toFixed(2)}`} hint={percentChange(averageOrder, previousAverage)} accent="#6fa98c" />
       </div>
 

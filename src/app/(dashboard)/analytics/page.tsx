@@ -126,6 +126,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   const previousSales = netSales(previousOrders);
   const revenue = sales.reduce((sum, order) => sum + order.price, 0);
   const previousRevenue = previousSales.reduce((sum, order) => sum + order.price, 0);
+  const dailyRevenue = revenue / range.days;
   const units = sales.reduce((sum, order) => sum + order.nums, 0);
   const previousUnits = previousSales.reduce((sum, order) => sum + order.nums, 0);
   const averageOrder = sales.length ? revenue / sales.length : 0;
@@ -259,8 +260,9 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
 
       <div className="mb-5"><OrderDataNote sync={sync} readError={readError} requestedTo={range.to} timeZone={tz} /></div>
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <KpiCard label="Net sales" value={`€${revenue.toFixed(2)}`} hint={percentChange(revenue, previousRevenue)} accent="#d47e54" />
+        <KpiCard label="Daily net sales" value={`€${dailyRevenue.toFixed(2)}`} hint={`${range.days} calendar day${range.days === 1 ? "" : "s"}`} accent="#6fa98c" />
         <KpiCard label="Completed orders" value={`${sales.length}`} hint={percentChange(sales.length, previousSales.length)} accent="#6fa98c" />
         <KpiCard label="Units sold" value={`${units}`} hint={percentChange(units, previousUnits)} accent="#d47e54" />
         <KpiCard label="Average order" value={`€${averageOrder.toFixed(2)}`} hint={percentChange(averageOrder, previousAverage)} accent="#6fa98c" />

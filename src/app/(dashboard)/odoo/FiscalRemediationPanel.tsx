@@ -2,6 +2,7 @@ import { formatDateTime } from "@/lib/dates";
 import type { FiscalRemediationPreview } from "@/lib/odoo-fiscal-remediation";
 import { requestFiscalProductRemediation } from "./actions";
 import { OdooSaveForm } from "./OdooSaveForm";
+import { OdooAccordion } from "./OdooAccordion";
 
 function taxLabel(taxes: FiscalRemediationPreview["products"][number]["observed_sale_taxes"]) {
   if (!taxes.length) return "No effective customer taxes";
@@ -11,16 +12,11 @@ function taxLabel(taxes: FiscalRemediationPreview["products"][number]["observed_
 export function FiscalRemediationPanel({ data, timeZone }: { data: FiscalRemediationPreview; timeZone: string }) {
   const request = data.latestRequest;
   const resultSummary = request?.result?.summary == null ? null : String(request.result.summary);
-  return <section className="mb-8 rounded-2xl border border-line bg-white p-5">
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <h2 className="font-display text-xl font-bold text-cocoa">Fiscal product remediation</h2>
-        <p className="mt-1 max-w-3xl text-xs text-taupe">Preview a frozen, connector-executed correction for active recipe products whose effective income account or customer tax does not match fiscal preflight.</p>
-      </div>
-      <span className={`rounded-full px-3 py-1 text-xs font-bold ${data.payload ? "bg-warning/15 text-warning" : data.blockers.length ? "bg-danger/10 text-danger" : "bg-sage/15 text-sage"}`}>
+  return <OdooAccordion title="Fiscal product remediation" description="Preview a frozen, connector-executed correction for active recipe products whose effective income account or customer tax does not match fiscal preflight." defaultOpen={Boolean(data.payload || data.blockers.length)} badge={
+    <span className={`rounded-full px-3 py-1 text-xs font-bold ${data.payload ? "bg-warning/15 text-warning" : data.blockers.length ? "bg-danger/10 text-danger" : "bg-sage/15 text-sage"}`}>
         {data.payload ? `${data.products.length} ready to remediate` : data.blockers.length ? "Blocked" : "No changes"}
-      </span>
-    </div>
+    </span>
+  }>
 
     {!data.available ? <p className="mt-4 rounded-xl bg-warning/10 px-4 py-3 text-sm text-warning">Apply the fiscal product remediation queue migration before using this control.</p> : <div className="mt-4 space-y-4">
       <div className="grid gap-3 lg:grid-cols-2">
@@ -74,5 +70,5 @@ export function FiscalRemediationPanel({ data, timeZone }: { data: FiscalRemedia
         <button disabled={!data.payload} className="mt-3 rounded-lg bg-danger px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">Queue frozen Odoo product remediation</button>
       </OdooSaveForm>
     </div>}
-  </section>;
+  </OdooAccordion>;
 }

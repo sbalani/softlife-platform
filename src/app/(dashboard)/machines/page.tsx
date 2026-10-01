@@ -7,6 +7,7 @@ import { getDisplayTimezone } from "@/lib/timezone";
 import { getOrders } from "@/lib/data/orders";
 import { refillAge } from "@/lib/refill-aging";
 import { createRefillIncident } from "@/app/actions/incidents";
+import { shiftDay } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -41,9 +42,10 @@ export default async function MachinesPage({
   const tz = await getDisplayTimezone();
 
   const today = ymd(new Date(), tz);
+  const thirtyDaysAgo = shiftDay(today, -29);
   const [{ machines, lastSyncedAt, staleMachines, readError }, { orders }] = await Promise.all([
     getMachines(),
-    getOrders({ dateFrom: today, dateTo: today, timeZone: tz }),
+    getOrders({ dateFrom: thirtyDaysAgo, dateTo: today, timeZone: tz }),
   ]);
   const salesByImei = new Map<string, number>();
   for (const order of orders) {
@@ -126,7 +128,7 @@ export default async function MachinesPage({
               <th className="px-4 py-3 font-bold">IMEI</th>
               <th className="px-4 py-3 font-bold">Location</th>
               <th className="px-4 py-3 font-bold">Status</th>
-              <th className="px-4 py-3 text-right font-bold">Sales today</th>
+              <th className="px-4 py-3 text-right font-bold">Avg daily sales (30d)</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -148,7 +150,7 @@ export default async function MachinesPage({
                       {m.deployed && !m.net_online && <span className="basis-full text-[11px] text-taupe">{m.offline_since ? `Offline since ${formatDateTime(m.offline_since, tz)}` : "Offline time unknown"}{m.last_online_at ? ` · Last online ${formatDateTime(m.last_online_at, tz)}` : ""}</span>}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-right font-semibold text-cocoa">€{(salesByImei.get(m.device_imei ?? "") ?? 0).toFixed(2)}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-cocoa">€{((salesByImei.get(m.device_imei ?? "") ?? 0) / 30).toFixed(2)}</td>
                 </tr>
               );
             })}

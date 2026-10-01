@@ -15,6 +15,7 @@ import { FiscalRemediationPanel } from "./FiscalRemediationPanel";
 import { getSessionProfile } from "@/lib/auth/session";
 import { getFiscalInvoiceAdminData, getFiscalInvoiceQueuePreview } from "@/lib/data/odoo-fiscal-invoices";
 import { isFiscalCalendarMonth } from "@/lib/odoo-fiscal-invoices";
+import { OdooAccordion } from "./OdooAccordion";
 
 export const dynamic = "force-dynamic";
 
@@ -57,11 +58,7 @@ export default async function OdooPage({ searchParams }: { searchParams: Promise
 
       {remediation && <FiscalRemediationPanel data={remediation} timeZone={tz} />}
 
-      <section className="mb-8 rounded-2xl border border-line bg-white p-5">
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div><h2 className="font-display text-xl font-bold text-cocoa">Production contract</h2><p className="mt-1 text-xs text-taupe">Configure deterministic consumption, resolve unmatched sales, and freeze shared manufacturing runs.</p></div>
-          <span className={`rounded-full px-3 py-1 text-xs font-bold ${production.available ? "bg-sage/15 text-sage" : "bg-warning/15 text-warning"}`}>{production.available ? "Contract ready" : "Migration pending"}</span>
-        </div>
+      <OdooAccordion title="Production contract" description="Configure deterministic consumption, resolve unmatched sales, and freeze shared manufacturing runs." badge={<span className={`rounded-full px-3 py-1 text-xs font-bold ${production.available ? "bg-sage/15 text-sage" : "bg-warning/15 text-warning"}`}>{production.available ? "Contract ready" : "Migration pending"}</span>}>
         {!production.available ? <p className="rounded-xl bg-warning/10 px-4 py-3 text-sm text-warning">Apply the Odoo manufacturing contract migration before configuring production.</p> : (
           <div className="space-y-6">
             <div className="grid gap-4 lg:grid-cols-2">
@@ -108,10 +105,9 @@ export default async function OdooPage({ searchParams }: { searchParams: Promise
             </div>
           </div>
         )}
-      </section>
+      </OdooAccordion>
 
-      <section className="mb-8">
-        <h2 className="mb-3 font-display text-lg font-bold text-cocoa">SKUs ({skus.length})</h2>
+      <OdooAccordion title={`SKUs (${skus.length})`} defaultOpen={false}>
         <div className="overflow-x-auto rounded-2xl border border-line bg-white">
           <table className="w-full min-w-[640px] text-sm">
             <thead>
@@ -154,10 +150,9 @@ export default async function OdooPage({ searchParams }: { searchParams: Promise
           </table>
         </div>
         <DataSourceNote source={skuSource} />
-      </section>
+      </OdooAccordion>
 
-      <section>
-        <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Lots ({lots.length})</h2>
+      <OdooAccordion title={`Lots (${lots.length})`} defaultOpen={false} className="mb-0">
         <div className="overflow-x-auto rounded-2xl border border-line bg-white">
           <table className="w-full min-w-[640px] text-sm">
             <thead>
@@ -192,7 +187,7 @@ export default async function OdooPage({ searchParams }: { searchParams: Promise
           </table>
         </div>
         <DataSourceNote source={lotSource} />
-      </section>
+      </OdooAccordion>
     </div>
   );
 }

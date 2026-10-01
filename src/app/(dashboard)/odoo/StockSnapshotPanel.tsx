@@ -2,6 +2,7 @@ import { formatDateTime } from "@/lib/dates";
 import type { ProductionAdminData } from "@/lib/data/odoo-production-admin";
 import { requestOdooStockSync } from "./actions";
 import { OdooSaveForm } from "./OdooSaveForm";
+import { OdooAccordion } from "./OdooAccordion";
 
 type Snapshot = NonNullable<ProductionAdminData["stockSnapshot"]>;
 const EPOCH = "1970-01-01T00:00:00.000Z";
@@ -25,16 +26,11 @@ export function StockSnapshotPanel({ snapshot, timeZone, sourceWarehouseId }: {
     && sourceWarehouseId && sourceWarehouse?.stock_location_id && sourceWarehouse.product_rows > 0);
   const request = snapshot?.latestRequest;
   const requestSummary = request?.result?.summary == null ? null : String(request.result.summary);
-  return <section className="mb-8 rounded-2xl border border-line bg-white p-5">
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <h2 className="font-display text-xl font-bold text-cocoa">Warehouse stock snapshot</h2>
-        <p className="mt-1 text-xs text-taupe">Manufacturing uses this warehouse-level available stock and these lot balances, not the global SKU quantity.</p>
-      </div>
-      <span className={`rounded-full px-3 py-1 text-xs font-bold ${ready ? "bg-sage/15 text-sage" : "bg-warning/15 text-warning"}`}>
+  return <OdooAccordion title="Warehouse stock snapshot" description="Manufacturing uses this warehouse-level available stock and these lot balances, not the global SKU quantity." badge={
+    <span className={`rounded-full px-3 py-1 text-xs font-bold ${ready ? "bg-sage/15 text-sage" : "bg-warning/15 text-warning"}`}>
         {ready ? "Fresh and ready" : !sourceWarehouseId ? "Source not configured" : observedAt ? "Stale or incomplete" : "Missing"}
-      </span>
-    </div>
+    </span>
+  }>
 
     <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <div className="rounded-xl bg-cream/60 p-3"><p className="text-[10px] font-bold uppercase text-taupe">Availability observed</p><p className="mt-1 font-semibold text-cocoa">{observedAt ? formatDateTime(observedAt, timeZone) : "Never"}</p><p className="text-[10px] text-taupe">{ageLabel(observedAt, snapshot?.checkedAt ?? EPOCH)}; maximum age is 2 hours</p></div>
@@ -71,5 +67,5 @@ export function StockSnapshotPanel({ snapshot, timeZone, sourceWarehouseId }: {
         <button className="rounded-lg bg-terracotta px-4 py-2 text-xs font-bold text-white">Request full Odoo stock sync</button>
       </OdooSaveForm>
     </div>
-  </section>;
+  </OdooAccordion>;
 }

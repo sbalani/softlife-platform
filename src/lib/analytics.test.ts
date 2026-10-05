@@ -120,6 +120,8 @@ test("analytics payout presets use inclusive Madrid calendar periods", () => {
   const now = new Date("2026-08-21T12:00:00Z");
   assert.deepEqual(analyticsPresetRange("today", "Europe/Madrid", now), { from: "2026-08-21", to: "2026-08-21" });
   assert.deepEqual(analyticsPresetRange("last-30-days", "Europe/Madrid", now), { from: "2026-07-23", to: "2026-08-21" });
+  assert.deepEqual(analyticsPresetRange("last-10-days", "Europe/Madrid", now), { from: "2026-08-12", to: "2026-08-21" });
+  assert.deepEqual(analyticsPresetRange("last-7-days", "Europe/Madrid", now), { from: "2026-08-15", to: "2026-08-21" });
   assert.deepEqual(analyticsPresetRange("yesterday", "Europe/Madrid", now), { from: "2026-08-20", to: "2026-08-20" });
   assert.deepEqual(analyticsPresetRange("this-week", "Europe/Madrid", now), { from: "2026-08-17", to: "2026-08-21" });
   assert.deepEqual(analyticsPresetRange("last-week", "Europe/Madrid", now), { from: "2026-08-10", to: "2026-08-16" });

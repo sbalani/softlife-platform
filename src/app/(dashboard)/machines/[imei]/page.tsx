@@ -45,6 +45,16 @@ import { DismissAlertButton } from "@/components/DismissAlertButton";
 
 export const dynamic = "force-dynamic";
 
+function alertAge(createdAt: string, now: Date) {
+  const elapsedMinutes = Math.max(0, Math.floor((now.getTime() - new Date(createdAt).getTime()) / 60_000));
+  if (elapsedMinutes < 1) return "just now";
+  if (elapsedMinutes < 60) return `${elapsedMinutes} minute${elapsedMinutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(elapsedMinutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
 export default async function MachineDetailPage({
   params,
   searchParams,
@@ -93,6 +103,7 @@ export default async function MachineDetailPage({
     ])
     : [null, [], [], [], [], [], { alerts: [] }];
   const machineAlerts = machineAlertResult.alerts;
+  const blockingAlerts = machineAlerts.filter((alert) => alert.type !== "defrost_automation_failed");
   const draftByMenuKey = new Map((pendingDraft?.items ?? []).filter((item) => item.menuKind).map((item) => [`${item.menuKind}:${item.position}`, item]));
   const legacyDraftByPosition = new Map((pendingDraft?.items ?? []).filter((item) => !item.menuKind).map((item) => [item.position, item]));
   const draftItem = (menuKind: "diy" | "unify", position: string) => draftByMenuKey.get(`${menuKind}:${position}`) ?? legacyDraftByPosition.get(position) ?? null;
@@ -201,7 +212,7 @@ export default async function MachineDetailPage({
         </div>
       </section>
 
-      {(cupRecoveryActive || machineAlerts.length > 0) && (
+      {(cupRecoveryActive || blockingAlerts.length > 0) && (
         <section className="mb-6 rounded-2xl border border-danger/40 bg-white p-5" aria-label="Machine recovery center">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="max-w-2xl">
@@ -214,7 +225,7 @@ export default async function MachineDetailPage({
           </div>
           <div className="mt-4 border-t border-line pt-3">
             <p className="text-[10px] font-bold uppercase tracking-wide text-taupe">Current blockers</p>
-            {machineAlerts.filter((alert) => alert.type !== "defrost_automation_failed").length > 0 ? <div className="mt-2 space-y-2">{machineAlerts.filter((alert) => alert.type !== "defrost_automation_failed").map((alert) => <div key={alert.id} className={`rounded-lg border px-3 py-2 ${alert.severity === "critical" ? "border-danger/30 bg-danger/5" : "border-warning/30 bg-warning/5"}`}><p className="text-xs font-bold text-cocoa">{alert.title}</p><p className="mt-0.5 text-xs text-taupe">{alert.message}</p><div className="mt-2"><DismissAlertButton alertId={alert.id} /></div></div>)}</div> : <p className="mt-1 text-xs font-semibold text-taupe">No unresolved hardware alert is listed. Check the live status above; safety recovery continues to use telemetry even when an alert is dismissed.</p>}
+            {blockingAlerts.length > 0 ? <div className="mt-2 space-y-2">{blockingAlerts.map((alert) => <div key={alert.id} className={`rounded-lg border px-3 py-2 ${alert.severity === "critical" ? "border-danger/30 bg-danger/5" : "border-warning/30 bg-warning/5"}`}><div className="flex flex-wrap items-start justify-between gap-1"><p className="text-xs font-bold text-cocoa">{alert.title}</p><time dateTime={alert.created_at} className="text-[10px] font-semibold text-taupe">Triggered {formatDateTime(alert.created_at, tz)} · {alertAge(alert.created_at, today)}</time></div><p className="mt-0.5 text-xs text-taupe">{alert.message}</p><div className="mt-2"><DismissAlertButton alertId={alert.id} /></div></div>)}</div> : <p className="mt-1 text-xs font-semibold text-taupe">No unresolved hardware alert is listed. Check the live status above; safety recovery continues to use telemetry even when an alert is dismissed.</p>}
           </div>
         </section>
       )}

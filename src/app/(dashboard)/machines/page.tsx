@@ -7,35 +7,44 @@ import { getDisplayTimezone } from "@/lib/timezone";
 import { getOrders } from "@/lib/data/orders";
 import { refillAge } from "@/lib/refill-aging";
 import { createRefillIncident } from "@/app/actions/incidents";
-import { shiftDay } from "@/lib/analytics";
+import { analyticsPresetRange, analyticsRange } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = { q?: string; status?: string; page?: string; period?: string };
+type MachinePeriod = "last-30-days" | "last-10-days" | "last-7-days" | "today" | "custom";
+type SearchParams = { q?: string; status?: string; page?: string; period?: string; dateFrom?: string; dateTo?: string };
 
-function chipHref(status: string, q: string, period: string) {
+function addPeriodParams(params: URLSearchParams, period: MachinePeriod, dateFrom: string, dateTo: string) {
+  if (period !== "last-30-days") params.set("period", period);
+  if (period === "custom") {
+    params.set("dateFrom", dateFrom);
+    params.set("dateTo", dateTo);
+  }
+}
+
+function chipHref(status: string, q: string, period: MachinePeriod, dateFrom: string, dateTo: string) {
   const params = new URLSearchParams();
   if (status !== "all") params.set("status", status);
   if (q) params.set("q", q);
-  if (period === "today") params.set("period", period);
+  addPeriodParams(params, period, dateFrom, dateTo);
   const s = params.toString();
   return s ? `/machines?${s}` : "/machines";
 }
 
-function pageHref(page: number, q: string, status: string, period: string) {
+function pageHref(page: number, q: string, status: string, period: MachinePeriod, dateFrom: string, dateTo: string) {
   const params = new URLSearchParams();
   if (q) params.set("q", q);
   if (status !== "all") params.set("status", status);
-  if (period === "today") params.set("period", period);
+  addPeriodParams(params, period, dateFrom, dateTo);
   params.set("page", String(page));
   return `/machines?${params.toString()}`;
 }
 
-function periodHref(period: "last-30-days" | "today", q: string, status: string) {
+function periodHref(period: Exclude<MachinePeriod, "custom">, q: string, status: string) {
   const params = new URLSearchParams();
   if (q) params.set("q", q);
   if (status !== "all") params.set("status", status);
-  if (period === "today") params.set("period", period);
+  if (period !== "last-30-days") params.set("period", period);
   const query = params.toString();
   return query ? `/machines?${query}` : "/machines";
 }
@@ -48,22 +57,36 @@ export default async function MachinesPage({
   const sp = await searchParams;
   const q = (sp.q ?? "").trim().toLowerCase();
   const status = sp.status ?? "all";
-  const period = sp.period === "today" ? "today" : "last-30-days";
+  const period: MachinePeriod = ["last-10-days", "last-7-days", "today", "custom"].includes(sp.period ?? "") ? sp.period as MachinePeriod : "last-30-days";
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
   const pageSize = 10;
   const tz = await getDisplayTimezone();
 
   const today = ymd(new Date(), tz);
-  const periodDays = period === "today" ? 1 : 30;
-  const periodFrom = shiftDay(today, 1 - periodDays);
+  const customRange = analyticsRange({ dateFrom: sp.dateFrom, dateTo: sp.dateTo }, tz);
+  const selectedRange = period === "custom"
+    ? customRange
+    : period === "today"
+      ? { ...analyticsPresetRange("today", tz), days: 1 }
+      : period === "last-10-days"
+        ? { ...analyticsPresetRange("last-10-days", tz), days: 10 }
+        : period === "last-7-days"
+          ? { ...analyticsPresetRange("last-7-days", tz), days: 7 }
+          : { ...analyticsPresetRange("last-30-days", tz), days: 30 };
+  const periodDays = selectedRange.days;
+  const periodFrom = selectedRange.from;
+  const periodTo = selectedRange.to;
   const [{ machines, lastSyncedAt, staleMachines, readError }, { orders }] = await Promise.all([
     getMachines(),
-    getOrders({ dateFrom: periodFrom, dateTo: today, timeZone: tz }),
+    getOrders({ dateFrom: periodFrom, dateTo: periodTo, timeZone: tz }),
   ]);
-  const salesByImei = new Map<string, number>();
+  const salesByMachine = new Map<string, { revenue: number; units: number }>();
   for (const order of orders) {
-    if (!order.device_imei || order.order_state !== "COMPLETE" || order.is_admin_override || order.refund_status === "Refunded") continue;
-    salesByImei.set(order.device_imei, (salesByImei.get(order.device_imei) ?? 0) + order.price);
+    if (!order.machine_id || order.order_state !== "COMPLETE" || order.is_admin_override || order.refund_status === "Refunded") continue;
+    const sales = salesByMachine.get(order.machine_id) ?? { revenue: 0, units: 0 };
+    sales.revenue += order.price;
+    sales.units += order.nums;
+    salesByMachine.set(order.machine_id, sales);
   }
   const mapMarkers = machines
     .filter((m) => m.deployed && m.latitude != null && m.longitude != null)
@@ -99,7 +122,8 @@ export default async function MachinesPage({
         </div>
         <form className="flex items-center gap-2">
           <input type="hidden" name="status" value={status === "all" ? "" : status} />
-          <input type="hidden" name="period" value={period === "today" ? period : ""} />
+          <input type="hidden" name="period" value={period === "last-30-days" ? "" : period} />
+          {period === "custom" && <><input type="hidden" name="dateFrom" value={periodFrom} /><input type="hidden" name="dateTo" value={periodTo} /></>}
           <input
             type="text"
             name="q"
@@ -122,7 +146,7 @@ export default async function MachinesPage({
 
       <div className="mb-4 flex items-center gap-2">
         {(["all", "deployed", "undeployed"] as const).map((value) => (
-          <Link key={value} href={chipHref(value, sp.q ?? "", period)} className={`rounded-full px-3 py-1.5 text-sm font-semibold capitalize transition ${status === value ? "bg-terracotta text-white" : "bg-white text-cocoa hover:bg-cream"}`}>
+          <Link key={value} href={chipHref(value, sp.q ?? "", period, periodFrom, periodTo)} className={`rounded-full px-3 py-1.5 text-sm font-semibold capitalize transition ${status === value ? "bg-terracotta text-white" : "bg-white text-cocoa hover:bg-cream"}`}>
             {value} ({counts[value]})
           </Link>
         ))}
@@ -134,22 +158,35 @@ export default async function MachinesPage({
         </div>
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-2"><span className="mr-1 text-xs font-bold uppercase tracking-wide text-taupe">Sales period</span>{(["last-30-days", "today"] as const).map((value) => <Link key={value} href={periodHref(value, sp.q ?? "", status)} className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${period === value ? "bg-cocoa text-white" : "bg-white text-cocoa hover:bg-cream"}`}>{value === "last-30-days" ? "Last 30 days" : "Today"}</Link>)}</div>
+      <div className="mb-4 flex flex-wrap items-end gap-2">
+        <span className="mr-1 self-center text-xs font-bold uppercase tracking-wide text-taupe">Sales period</span>
+        {(["last-30-days", "last-10-days", "last-7-days", "today"] as const).map((value) => <Link key={value} href={periodHref(value, sp.q ?? "", status)} className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${period === value ? "bg-cocoa text-white" : "bg-white text-cocoa hover:bg-cream"}`}>{value === "today" ? "Today" : value.replace("last-", "Last ").replace("-days", " days")}</Link>)}
+        <form className="ml-1 flex flex-wrap items-end gap-2">
+          <input type="hidden" name="period" value="custom" />
+          {q && <input type="hidden" name="q" value={sp.q ?? ""} />}
+          {status !== "all" && <input type="hidden" name="status" value={status} />}
+          <label><span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-taupe">From</span><input type="date" name="dateFrom" defaultValue={periodFrom} max={today} className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs text-cocoa focus:border-terracotta focus:outline-none" /></label>
+          <label><span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-taupe">To</span><input type="date" name="dateTo" defaultValue={periodTo} max={today} className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-xs text-cocoa focus:border-terracotta focus:outline-none" /></label>
+          <button className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${period === "custom" ? "border-cocoa bg-cocoa text-white" : "border-line bg-white text-cocoa hover:bg-cream"}`}>Custom</button>
+        </form>
+      </div>
 
       <div className="overflow-x-auto rounded-2xl border border-line bg-white">
-        <table className="w-full min-w-[640px] text-sm">
+        <table className="w-full min-w-[860px] text-sm">
           <thead className="bg-sand/60 text-left text-[11px] uppercase tracking-wide text-taupe">
             <tr>
               <th className="px-4 py-3 font-bold">Machine</th>
               <th className="px-4 py-3 font-bold">IMEI</th>
               <th className="px-4 py-3 font-bold">Location</th>
               <th className="px-4 py-3 font-bold">Status</th>
-              <th className="px-4 py-3 text-right font-bold">{period === "today" ? "Sales today" : "Avg daily sales (30d)"}</th>
+              <th className="px-4 py-3 text-right font-bold">{period === "today" ? "Revenue today" : "Avg daily revenue"}</th>
+              <th className="px-4 py-3 text-right font-bold">{period === "today" ? "Units today" : "Avg daily units"}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
             {rows.map((m) => {
               const refill = refillAge(m.last_refill_at);
+              const sales = salesByMachine.get(m.id) ?? { revenue: 0, units: 0 };
               return (
                 <tr key={m.id} className="hover:bg-cream/50">
                   <td className="px-4 py-3 font-semibold text-cocoa">{m.device_imei ? <Link href={`/machines/${m.device_imei}`} className="hover:text-terracotta hover:underline">{m.display_name || m.name}</Link> : m.display_name || m.name}</td>
@@ -166,13 +203,14 @@ export default async function MachinesPage({
                       {m.deployed && !m.net_online && <span className="basis-full text-[11px] text-taupe">{m.offline_since ? `Offline since ${formatDateTime(m.offline_since, tz)}` : "Offline time unknown"}{m.last_online_at ? ` · Last online ${formatDateTime(m.last_online_at, tz)}` : ""}</span>}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-right font-semibold text-cocoa">€{((salesByImei.get(m.device_imei ?? "") ?? 0) / periodDays).toFixed(2)}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-cocoa">€{(sales.revenue / periodDays).toFixed(2)}</td>
+                  <td className="px-4 py-3 text-right"><span className="font-display text-lg font-bold text-terracotta">{(sales.units / periodDays).toFixed(period === "today" ? 0 : 2)}</span><span className="ml-1 text-[10px] font-bold uppercase tracking-wide text-taupe">{period === "today" ? "units" : "/ day"}</span></td>
                 </tr>
               );
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-10 text-center text-taupe">
+                <td colSpan={6} className="px-4 py-10 text-center text-taupe">
                   No machines match your search.
                 </td>
               </tr>
@@ -187,7 +225,7 @@ export default async function MachinesPage({
           <div className="flex items-center gap-2">
             {safePage > 1 ? (
               <Link
-                href={pageHref(safePage - 1, sp.q ?? "", status, period)}
+                href={pageHref(safePage - 1, sp.q ?? "", status, period, periodFrom, periodTo)}
                 className="rounded-lg border border-line bg-white px-3 py-1.5 hover:bg-cream"
               >
                 ◀ Prev
@@ -197,7 +235,7 @@ export default async function MachinesPage({
             )}
             {safePage < totalPages ? (
               <Link
-                href={pageHref(safePage + 1, sp.q ?? "", status, period)}
+                href={pageHref(safePage + 1, sp.q ?? "", status, period, periodFrom, periodTo)}
                 className="rounded-lg border border-line bg-white px-3 py-1.5 hover:bg-cream"
               >
                 Next ▶

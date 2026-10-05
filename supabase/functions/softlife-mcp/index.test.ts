@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertThrows } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { actionReportImageInput, apiKeyFromRequest, availableTools, completeWeatherSeries, dispatchMessage, isLowStock, isOverheated, madridMidnightUtc, parseOpenMeteoDaily, reportPayload, salesNoteInput, summarizeTemperatureExcursions, temperatureExcursionInput, type Principal } from "./index.ts";
+import { actionReportImageInput, apiKeyFromRequest, availableTools, completeWeatherSeries, dispatchMessage, isLowStock, isMcpNetSale, isOverheated, madridMidnightUtc, normalizedMcpOrderState, parseOpenMeteoDaily, reportPayload, salesNoteInput, structuredToolContent, summarizeTemperatureExcursions, temperatureExcursionInput, type Principal } from "./index.ts";
 
 function principal(role: "admin" | "operator" | "franchisee", scopes: ("read" | "forms" | "commands" | "sales_context" | "sales_notes" | "incidents")[]): Principal {
   return {
@@ -79,7 +79,7 @@ Deno.test("incident tools separate read access from confirmed lifecycle mutation
   const list = await dispatchMessage({ jsonrpc: "2.0", id: 2, method: "tools/call", params: {
     name: "list_incidents", arguments: { source: "user", offset: 20, limit: 10 },
   } }, actor, database as never);
-  assertEquals((list?.result as { structuredContent?: unknown }).structuredContent, [{ id: incidentId, status: "open", title: "Test incident" }]);
+  assertEquals((list?.result as { structuredContent?: unknown }).structuredContent, { items: [{ id: incidentId, status: "open", title: "Test incident" }] });
   assertEquals(calls[0], { name: "mcp_read_incidents", args: {
     p_actor_id: actor.profileId, p_incident_id: null, p_status: "active", p_source: "user",
     p_machine_id: null, p_include_recovered: false, p_offset: 20, p_limit: 10,
@@ -241,6 +241,19 @@ Deno.test("MCP keys support bearer headers and the Codex URL fallback", () => {
   assertEquals(apiKeyFromRequest(new Request(endpoint, { headers: { authorization: "OAuth value" } })), null);
 });
 
+Deno.test("structured tool content always uses the MCP object shape", () => {
+  assertEquals(structuredToolContent([{ id: "one" }]), { items: [{ id: "one" }] });
+  assertEquals(structuredToolContent({ count: 1 }), { count: 1 });
+  assertEquals(structuredToolContent(null), { value: null });
+});
+
+Deno.test("MCP sales normalize stored Huaxin status and refund codes", () => {
+  assertEquals(normalizedMcpOrderState({ order_state: "3", status_code: "3" }), "COMPLETE");
+  assert(isMcpNetSale({ order_state: "3", status_code: "3", refund_status: "0", pay_type_raw: "刷卡" }));
+  assert(!isMcpNetSale({ order_state: "3", status_code: "3", refund_status: "1", pay_type_raw: "刷卡" }));
+  assert(!isMcpNetSale({ order_state: "COMPLETE", status_code: "3", refund_status: "0", pay_type_raw: "自动制作" }));
+});
+
 Deno.test("Huaxin safety states detect low stock and compressor overheat", () => {
   assert(!isLowStock([{ code: "status_0_lackmaterial", value: "正常" }]));
   assert(isLowStock([{ code: "status_0_lackmaterial", value: "lack" }]));
@@ -327,7 +340,7 @@ Deno.test("initialize validates parameters and negotiates supported versions", a
   assertEquals((invalid?.error as { code?: number }).code, -32602);
   const valid = await dispatchMessage({ jsonrpc: "2.0", id: 2, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } } }, actor, null as never);
   assertEquals((valid?.result as { protocolVersion?: string }).protocolVersion, "2025-03-26");
-  assertEquals((valid?.result as { serverInfo?: { version?: string } }).serverInfo?.version, "3.6.0");
+  assertEquals((valid?.result as { serverInfo?: { version?: string } }).serverInfo?.version, "3.6.2");
   const unknown = await dispatchMessage({ jsonrpc: "2.0", id: 3, method: "initialize", params: { protocolVersion: "2099-01-01", capabilities: {}, clientInfo: { name: "test", version: "1" } } }, actor, null as never);
   assertEquals((unknown?.result as { protocolVersion?: string }).protocolVersion, "2025-03-26");
 });

@@ -40,6 +40,7 @@ type OrderRow = {
   order_time?: string;
   order_code?: string;
   order_state?: string;
+  status_code?: string;
   price?: number | string;
   product_name?: string;
   products?: unknown;
@@ -205,6 +206,21 @@ function positiveLimit(value: unknown, fallback = 50) {
 function paymentCategory(value: string | null | undefined) {
   if (!value) return null;
   return PAYMENT_TYPES[value] ?? (Object.values(PAYMENT_TYPES).includes(value) ? value : "Other");
+}
+
+export function normalizedMcpOrderState(row: { order_state?: unknown; status_code?: unknown }) {
+  const status = String(row.status_code ?? row.order_state ?? "");
+  if (status === "3") return "COMPLETE";
+  if (status === "2") return "MAKING";
+  if (status === "1") return "PAID";
+  if (status === "0") return "PENDING";
+  return String(row.order_state ?? status).toUpperCase();
+}
+
+export function isMcpNetSale(row: { order_state?: unknown; status_code?: unknown; refund_status?: unknown; pay_type_raw?: unknown }) {
+  const refunded = row.refund_status === "Refunded" || String(row.refund_status ?? "") === "1";
+  return normalizedMcpOrderState(row) === "COMPLETE" && !refunded
+    && !(typeof row.pay_type_raw === "string" && ADMIN_OVERRIDE_PAY_TYPES.has(row.pay_type_raw));
 }
 
 function dateRange(args: Record<string, unknown>) {
@@ -796,12 +812,12 @@ async function handleTool(name: string, args: Record<string, unknown>, principal
     case "get_machine": return authorizedMachine(s, principal, args.machine_id);
     case "list_orders": {
       const limit = positiveLimit(args.limit);
-      const { data, range } = await scopedOrderQuery(s, principal, args, "id,order_time,order_code,order_state,price,product_name,products,nums,pay_type_raw,refund_status,machine_id,machine_name,tenant_id", limit);
-      return { range, orders: data.map((row) => ({ id: row.id, order_time: row.order_time, order_code: row.order_code, state: row.order_state, price: row.price, product_name: row.product_name, products: row.products, units: row.nums, payment_type: paymentCategory(row.pay_type_raw), refunded: row.refund_status === "Refunded", machine_id: row.machine_id, machine_name: row.machine_name })) };
+      const { data, range } = await scopedOrderQuery(s, principal, args, "id,order_time,order_code,order_state,status_code,price,product_name,products,nums,pay_type_raw,refund_status,machine_id,machine_name,tenant_id", limit);
+      return { range, orders: data.map((row) => ({ id: row.id, order_time: row.order_time, order_code: row.order_code, state: normalizedMcpOrderState(row), price: row.price, product_name: row.product_name, products: row.products, units: row.nums, payment_type: paymentCategory(row.pay_type_raw), refunded: row.refund_status === "Refunded" || String(row.refund_status ?? "") === "1", machine_id: row.machine_id, machine_name: row.machine_name })) };
     }
     case "get_analytics": {
-      const { data, range } = await scopedOrderQuery(s, principal, args, "id,order_time,order_state,price,product_name,products,nums,pay_type_raw,refund_status,machine_id");
-      const sales = data.filter((row) => row.order_state === "COMPLETE" && row.refund_status !== "Refunded" && !(typeof row.pay_type_raw === "string" && ADMIN_OVERRIDE_PAY_TYPES.has(row.pay_type_raw)));
+      const { data, range } = await scopedOrderQuery(s, principal, args, "id,order_time,order_state,status_code,price,product_name,products,nums,pay_type_raw,refund_status,machine_id");
+      const sales = data.filter(isMcpNetSale);
       const combinations = new Map<string, number>();
       for (const row of sales) {
         const products = Array.isArray(row.products) ? row.products as { goodsName?: string }[] : [];
@@ -959,7 +975,7 @@ async function handleTool(name: string, args: Record<string, unknown>, principal
       const range = salesContextRange(args);
       const machine = await authorizedMachine(s, principal, args.machine_id, true);
       const [{ data: orders }, coordinates, notes, assignments] = await Promise.all([
-        scopedOrderQuery(s, principal, { ...args, machine_id: machine.id }, "id,order_time,order_state,price,nums,pay_type_raw,refund_status,machine_id"),
+        scopedOrderQuery(s, principal, { ...args, machine_id: machine.id }, "id,order_time,order_state,status_code,price,nums,pay_type_raw,refund_status,machine_id"),
         s.from("machines").select("latitude,longitude").eq("id", machine.id).single(),
         s.rpc("read_sales_context_notes", { p_actor_id: principal.profileId, p_from: range.from, p_to: range.to, p_machine_id: machine.id }),
         s.from("machine_franchisee_assignments").select("tenant_id,start_date,end_date").eq("machine_id", machine.id).order("start_date", { ascending: false }),
@@ -973,7 +989,7 @@ async function handleTool(name: string, args: Record<string, unknown>, principal
       }
       const salesByDay = new Map<string, { net_sales: number; orders: number; units: number }>();
       for (const row of orders) {
-        if (row.order_state !== "COMPLETE" || row.refund_status === "Refunded" || (typeof row.pay_type_raw === "string" && ADMIN_OVERRIDE_PAY_TYPES.has(row.pay_type_raw))) continue;
+        if (!isMcpNetSale(row)) continue;
         const day = madridDay(String(row.order_time));
         const daily = salesByDay.get(day) ?? { net_sales: 0, orders: 0, units: 0 };
         daily.net_sales += Number(row.price ?? 0); daily.orders++; daily.units += Number(row.nums ?? 1); salesByDay.set(day, daily);
@@ -1090,6 +1106,12 @@ function errorPayload(id: unknown, code: number, message: string) {
   return { jsonrpc: "2.0", id: id ?? null, error: { code, message } };
 }
 
+export function structuredToolContent(data: unknown): Record<string, unknown> {
+  if (Array.isArray(data)) return { items: data };
+  if (data && typeof data === "object") return data as Record<string, unknown>;
+  return { value: data };
+}
+
 export async function dispatchMessage(message: unknown, principal: Principal, s: SupabaseClient, inBatch = false): Promise<Record<string, unknown> | null> {
   if (!message || typeof message !== "object" || Array.isArray(message)) return errorPayload(null, -32600, "Invalid JSON-RPC request");
   const request = message as Record<string, unknown>;
@@ -1111,7 +1133,7 @@ export async function dispatchMessage(message: unknown, principal: Principal, s:
       return errorPayload(id, -32602, "Invalid initialize parameters");
     }
     const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.has(initialize.protocolVersion) ? initialize.protocolVersion : MCP_PROTOCOL_VERSION;
-    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.6.0" } });
+    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.6.2" } });
   }
   if (request.method === "tools/list") return resultPayload(id, { tools: availableTools(principal) });
   if (request.method !== "tools/call") return errorPayload(id, -32601, `Method not found: ${request.method}`);
@@ -1123,7 +1145,7 @@ export async function dispatchMessage(message: unknown, principal: Principal, s:
   if (!args || typeof args !== "object" || Array.isArray(args)) return errorPayload(id, -32602, "Invalid tool arguments");
   try {
     const data = await handleTool(name, args as Record<string, unknown>, principal, s);
-    return resultPayload(id, { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], structuredContent: data });
+    return resultPayload(id, { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], structuredContent: structuredToolContent(data) });
   } catch (error) {
     const code = error instanceof ToolError ? error.code : -32603;
     const message = error instanceof ToolError ? error.message : "SoftLife tool failed";

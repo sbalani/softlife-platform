@@ -5,7 +5,7 @@ import { VBarChart } from "@/components/charts";
 
 type MachineDatum = { label: string; value: number; units: number; href?: string };
 
-export function MachineChartClient({ data }: { data: MachineDatum[] }) {
+export function MachineChartClient({ data, periodLabel }: { data: MachineDatum[]; periodLabel: string }) {
   const [mode, setMode] = useState<"euro" | "units">("euro");
 
   const chartData = mode === "euro"
@@ -17,7 +17,7 @@ export function MachineChartClient({ data }: { data: MachineDatum[] }) {
       <div className="mb-3 flex items-center justify-between">
         <div>
           <h2 className="font-display text-lg font-bold text-cocoa">Top machines by sales</h2>
-          <p className="text-xs text-taupe">Completed orders (30 days)</p>
+          <p className="text-xs text-taupe">Net completed orders · {periodLabel}</p>
         </div>
         <div className="flex rounded-lg border border-line bg-cream/50 p-0.5">
           <button

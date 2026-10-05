@@ -26,7 +26,7 @@ export function shiftDay(value: string, days: number): string {
   return new Date(Date.parse(`${value}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 }
 
-export type AnalyticsPeriodPreset = "last-30-days" | "last-month" | "this-month" | "this-week" | "last-week" | "yesterday" | "today";
+export type AnalyticsPeriodPreset = "last-30-days" | "last-10-days" | "last-7-days" | "last-month" | "this-month" | "this-week" | "last-week" | "yesterday" | "today";
 
 export const ANALYTICS_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
@@ -40,6 +40,8 @@ export function analyticsPresetRange(preset: AnalyticsPeriodPreset, timeZone: st
   const today = ymd(now, timeZone);
   if (preset === "today") return { from: today, to: today };
   if (preset === "last-30-days") return { from: shiftDay(today, -29), to: today };
+  if (preset === "last-10-days") return { from: shiftDay(today, -9), to: today };
+  if (preset === "last-7-days") return { from: shiftDay(today, -6), to: today };
   if (preset === "yesterday") {
     const yesterday = shiftDay(today, -1);
     return { from: yesterday, to: yesterday };

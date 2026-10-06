@@ -153,6 +153,7 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
 
     revalidatePath(`/machines/${imei}`);
     revalidatePath("/machines");
+    revalidatePath("/report-incident");
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };

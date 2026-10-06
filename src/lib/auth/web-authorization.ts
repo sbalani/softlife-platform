@@ -4,7 +4,7 @@ const FRANCHISEE_PATHS = ["/dashboard", "/analytics", "/payouts", "/orders", "/a
 const PUBLIC_PATHS = new Set(["/login", "/set-password", "/franchisee-intake", "/franchisee-signup", "/report-incident"]);
 
 export function isPublicWebPath(path: string): boolean {
-  return PUBLIC_PATHS.has(path) || path === "/privacy" || path.startsWith("/privacy/") || path.startsWith("/auth/callback") || path.startsWith("/api");
+  return PUBLIC_PATHS.has(path) || path === "/privacy" || path.startsWith("/privacy/") || path === "/more-ice-theme-builder" || path.startsWith("/more-ice-theme-builder/") || path.startsWith("/auth/callback") || path.startsWith("/api");
 }
 
 export function canAccessWebPath(role: SessionProfile["role"], path: string): boolean {

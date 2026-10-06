@@ -16,6 +16,13 @@ test("the permanent customer incident form is public without opening internal in
   assert.equal(isPublicWebPath("/incidents"), false);
 });
 
+test("the theme builder page and its static assets are public", () => {
+  assert.equal(isPublicWebPath("/more-ice-theme-builder"), true);
+  assert.equal(isPublicWebPath("/more-ice-theme-builder/index.html"), true);
+  assert.equal(isPublicWebPath("/more-ice-theme-builder/app.js"), true);
+  assert.equal(isPublicWebPath("/more-ice-theme-builder-archive"), false);
+});
+
 test("downloads are available to every authenticated role", () => {
   for (const role of ["admin", "operator", "franchisee"] as const) {
     assert.equal(canAccessWebPath(role, "/downloads"), true);

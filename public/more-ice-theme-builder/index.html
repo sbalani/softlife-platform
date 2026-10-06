@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>More Ice Theme Builder</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main>
+    <section class="editor">
+      <p class="eyebrow">MORE ICE / LOCAL TOOL</p>
+      <h1>Theme Builder</h1>
+      <p class="intro">Customize the Huaxin New-theme asset slots and export one USB-ready package. Nothing is uploaded.</p>
+      <p class="hint"><strong>Current APK support:</strong> uploaded media, colors, and wording use the original fixed screen positions. Empty media slots keep the machine's existing Huaxin artwork. Canvas movement and custom layers are mockups only and are not applied by the APK yet.</p>
+
+      <form id="theme-form">
+        <fieldset class="identity">
+          <legend>Theme</legend>
+          <label>Theme ID <input id="theme-id" value="my-brand" pattern="[a-z0-9][a-z0-9._\-]{1,63}" required></label>
+          <label>Name <input id="theme-name" value="My Brand" maxlength="80" required></label>
+          <label>Version <input id="theme-version" type="number" value="1" min="1" required></label>
+        </fieldset>
+
+        <nav id="screen-tabs" aria-label="Customer screen"></nav>
+        <div id="screen-fields"></div>
+
+        <button class="export" type="submit">EXPORT .ICE-THEME</button>
+        <p id="message" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section class="preview-shell">
+      <div class="preview-header">
+        <span class="preview-label">LIVE PREVIEW / PORTRAIT</span>
+        <strong id="preview-screen">WELCOME</strong>
+      </div>
+      <div class="canvas-toolbar" aria-label="Canvas tools">
+        <button id="undo" type="button" title="Undo">Undo</button>
+        <button id="redo" type="button" title="Redo">Redo</button>
+        <span></span>
+        <button id="add-text" type="button">+ Text</button>
+        <button id="add-shape" type="button">+ Shape</button>
+        <button id="duplicate-layer" type="button">Duplicate</button>
+        <button id="delete-layer" type="button">Delete</button>
+        <span></span>
+        <button id="align-horizontal" type="button" title="Center horizontally">Center H</button>
+        <button id="align-vertical" type="button" title="Center vertically">Center V</button>
+        <button id="layer-up" type="button">Forward</button>
+        <button id="layer-down" type="button">Backward</button>
+      </div>
+      <div class="workspace">
+        <div id="preview" class="preview" aria-label="1080 by 1920 layout canvas"></div>
+        <aside class="layout-inspector">
+          <label>Layer <select id="layer-select"></select></label>
+          <div class="geometry-grid">
+            <label>X <input id="layer-x" type="number" min="0" max="1080"></label>
+            <label>Y <input id="layer-y" type="number" min="0" max="1920"></label>
+            <label>Width <input id="layer-width" type="number" min="20" max="1080"></label>
+            <label>Height <input id="layer-height" type="number" min="20" max="1920"></label>
+          </div>
+          <label class="visible-control"><input id="layer-visible" type="checkbox" checked> Visible</label>
+          <div id="appearance-controls">
+            <label>Text size <input id="layer-font-size" type="number" min="8" max="240"></label>
+            <label>Text / border <input id="layer-color" type="color"></label>
+            <label>Fill <input id="layer-fill" type="color"></label>
+            <label>Corner radius <input id="layer-radius" type="number" min="0" max="540"></label>
+            <label>Opacity <input id="layer-opacity" type="range" min="0" max="1" step="0.05"></label>
+            <label>Rotation <input id="layer-rotation" type="number" min="-180" max="180"></label>
+          </div>
+          <button id="replace-media" type="button">Replace selected image/video</button>
+          <button id="replace-background" type="button">Replace screen background</button>
+          <button id="reset-layer" type="button">Reset selected layer</button>
+          <p>Double-click text to edit it. Double-click an image to replace it. Drag layers to move and use the lower-right handle to resize.</p>
+        </aside>
+      </div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -46,8 +46,8 @@ Deno.test("temperature excursions are visible only to read-scoped admins", () =>
 
 Deno.test("incident tools separate read access from confirmed lifecycle mutations", async () => {
   const readTools = availableTools(principal("operator", ["read"])).map((tool) => tool.name);
-  assert(!readTools.includes("list_incidents"));
-  assert(!readTools.includes("get_incident"));
+  assert(readTools.includes("list_incidents"));
+  assert(readTools.includes("get_incident"));
   assert(!readTools.includes("resolve_incident"));
   const formTools = availableTools(principal("operator", ["forms"])).map((tool) => tool.name);
   assert(!formTools.includes("start_incident"));
@@ -55,10 +55,11 @@ Deno.test("incident tools separate read access from confirmed lifecycle mutation
   assert(!formTools.includes("reopen_incident"));
   assert(!formTools.includes("list_incidents"));
   const incidentTools = availableTools(principal("operator", ["incidents"])).map((tool) => tool.name);
-  assertEquals(incidentTools, ["list_incidents", "get_incident", "start_incident", "resolve_incident", "reopen_incident"]);
+  assertEquals(incidentTools, ["start_incident", "resolve_incident", "reopen_incident"]);
 
   const incidentId = crypto.randomUUID();
   const actor = principal("admin", ["incidents"]);
+  const reader = principal("admin", ["read"]);
   for (const [name, arguments_] of [
     ["start_incident", { incident_id: incidentId, confirm: false }],
     ["resolve_incident", { incident_id: incidentId, resolution_summary: "Fixed", confirm: false }],
@@ -78,10 +79,10 @@ Deno.test("incident tools separate read access from confirmed lifecycle mutation
   };
   const list = await dispatchMessage({ jsonrpc: "2.0", id: 2, method: "tools/call", params: {
     name: "list_incidents", arguments: { source: "user", offset: 20, limit: 10 },
-  } }, actor, database as never);
+  } }, reader, database as never);
   assertEquals((list?.result as { structuredContent?: unknown }).structuredContent, { items: [{ id: incidentId, status: "open", title: "Test incident" }] });
   assertEquals(calls[0], { name: "mcp_read_incidents", args: {
-    p_actor_id: actor.profileId, p_incident_id: null, p_status: "active", p_source: "user",
+    p_actor_id: reader.profileId, p_incident_id: null, p_status: "active", p_source: "user",
     p_machine_id: null, p_include_recovered: false, p_offset: 20, p_limit: 10,
   } });
   const started = await dispatchMessage({ jsonrpc: "2.0", id: 3, method: "tools/call", params: {
@@ -91,10 +92,10 @@ Deno.test("incident tools separate read access from confirmed lifecycle mutation
   assertEquals(calls[1], { name: "start_incident", args: { p_incident_id: incidentId, p_actor_id: actor.profileId } });
   const fetched = await dispatchMessage({ jsonrpc: "2.0", id: 4, method: "tools/call", params: {
     name: "get_incident", arguments: { incident_id: incidentId },
-  } }, actor, database as never);
+  } }, reader, database as never);
   assertEquals((fetched?.result as { structuredContent?: unknown }).structuredContent, { id: incidentId, status: "open", title: "Test incident" });
   assertEquals(calls[2], { name: "mcp_read_incidents", args: {
-    p_actor_id: actor.profileId, p_incident_id: incidentId, p_status: "all", p_source: "all",
+    p_actor_id: reader.profileId, p_incident_id: incidentId, p_status: "all", p_source: "all",
     p_machine_id: null, p_include_recovered: true, p_offset: 0, p_limit: 1,
   } });
   await dispatchMessage({ jsonrpc: "2.0", id: 5, method: "tools/call", params: {
@@ -340,7 +341,7 @@ Deno.test("initialize validates parameters and negotiates supported versions", a
   assertEquals((invalid?.error as { code?: number }).code, -32602);
   const valid = await dispatchMessage({ jsonrpc: "2.0", id: 2, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } } }, actor, null as never);
   assertEquals((valid?.result as { protocolVersion?: string }).protocolVersion, "2025-03-26");
-  assertEquals((valid?.result as { serverInfo?: { version?: string } }).serverInfo?.version, "3.6.2");
+  assertEquals((valid?.result as { serverInfo?: { version?: string } }).serverInfo?.version, "3.6.3");
   const unknown = await dispatchMessage({ jsonrpc: "2.0", id: 3, method: "initialize", params: { protocolVersion: "2099-01-01", capabilities: {}, clientInfo: { name: "test", version: "1" } } }, actor, null as never);
   assertEquals((unknown?.result as { protocolVersion?: string }).protocolVersion, "2025-03-26");
 });

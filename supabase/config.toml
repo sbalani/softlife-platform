@@ -365,6 +365,9 @@ deno_version = 2
 [functions.defrost]
 verify_jwt = false
 
+[functions.direct-machine-ingest-lab]
+verify_jwt = false
+
 [functions.manufacturing-preparation]
 verify_jwt = false
 

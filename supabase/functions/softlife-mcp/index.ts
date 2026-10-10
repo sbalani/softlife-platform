@@ -69,6 +69,7 @@ const TOOLS: Tool[] = [
   { name: "get_temperature_excursions", description: "Find historical days when a deployed machine's recorded temperature was strictly above a Celsius threshold. Resolve machine names with list_machines first and never guess machine UUIDs.", scope: "read", roles: ["admin"], inputSchema: { type: "object", additionalProperties: false, properties: { machine_id: { type: "string", format: "uuid" }, threshold_c: { type: "number", description: "Finite Celsius threshold; only readings strictly greater than this value count." }, date_from: { type: "string", description: "YYYY-MM-DD in Europe/Madrid. Defaults to 29 days before date_to." }, date_to: { type: "string", description: "YYYY-MM-DD in Europe/Madrid. Defaults to today." }, series_name: { type: "string", maxLength: 200, description: "Optional exact, case-sensitive series name." } }, required: ["machine_id", "threshold_c"] } },
   { name: "list_incidents", description: "List incidents the current user may access. User-submitted means manual or public reports; system means alerts or scheduled work. Recovered alert incidents are hidden by default.", scope: "read", inputSchema: { type: "object", additionalProperties: false, properties: { status: { type: "string", enum: ["active", "resolved", "all"] }, source: { type: "string", enum: ["system", "user", "all"] }, machine_id: { type: "string", format: "uuid" }, include_recovered: { type: "boolean" }, offset: { type: "integer", minimum: 0, maximum: 10000 }, limit: { type: "integer", minimum: 1, maximum: 100 } } } },
   { name: "get_incident", description: "Get one incident the current user may access. Reporter and assignee contact details are never returned.", scope: "read", inputSchema: { type: "object", additionalProperties: false, properties: { incident_id: { type: "string", format: "uuid" } }, required: ["incident_id"] } },
+  { name: "list_action_reports", description: "List accessible user-created Action Reports as bounded summaries. Defaults to outstanding drafts; use status=all for complete history. Notes, transcripts, attachments, and internal errors are excluded.", scope: "read", inputSchema: { type: "object", additionalProperties: false, properties: { status: { type: "string", enum: ["draft", "confirmed", "voided", "all"] }, machine_id: { type: "string", format: "uuid" }, offset: { type: "integer", minimum: 0, maximum: 10000 }, limit: { type: "integer", minimum: 1, maximum: 100 } } } },
   { name: "start_incident", description: "Move an accessible open incident to in progress. Requires explicit confirm=true.", scope: "incidents", inputSchema: { type: "object", additionalProperties: false, properties: { incident_id: { type: "string", format: "uuid" }, confirm: { type: "boolean" } }, required: ["incident_id", "confirm"] } },
   { name: "resolve_incident", description: "Resolve an accessible incident with an audit summary. Alert-backed incidents cannot resolve while telemetry remains active. Requires explicit confirm=true.", scope: "incidents", inputSchema: { type: "object", additionalProperties: false, properties: { incident_id: { type: "string", format: "uuid" }, resolution_summary: { type: "string", minLength: 1, maxLength: 2000 }, confirm: { type: "boolean" } }, required: ["incident_id", "resolution_summary", "confirm"] } },
   { name: "reopen_incident", description: "Reopen an accessible resolved incident with an audit reason. Requires explicit confirm=true.", scope: "incidents", inputSchema: { type: "object", additionalProperties: false, properties: { incident_id: { type: "string", format: "uuid" }, reason: { type: "string", minLength: 1, maxLength: 2000 }, confirm: { type: "boolean" } }, required: ["incident_id", "reason", "confirm"] } },
@@ -932,6 +933,24 @@ async function handleTool(name: string, args: Record<string, unknown>, principal
       if (!incident) throw new ToolError("Incident not found", -32004);
       return incident;
     }
+    case "list_action_reports": {
+      rejectUnknownArguments(args, ["status", "machine_id", "offset", "limit"]);
+      const status = args.status === undefined ? "draft" : args.status;
+      const machineId = args.machine_id === undefined ? null : args.machine_id;
+      if (!["draft", "confirmed", "voided", "all"].includes(String(status))) throw new ToolError("Invalid Action Report status filter");
+      if (machineId !== null && (typeof machineId !== "string" || !UUID.test(machineId))) throw new ToolError("Invalid machine_id");
+      const offset = args.offset === undefined ? 0 : args.offset;
+      if (!Number.isInteger(offset) || Number(offset) < 0 || Number(offset) > 10000) throw new ToolError("offset must be an integer from 0 to 10000");
+      const { data, error } = await s.rpc("mcp_read_action_reports", {
+        p_actor_id: principal.profileId,
+        p_status: status,
+        p_machine_id: machineId,
+        p_offset: offset,
+        p_limit: positiveLimit(args.limit),
+      });
+      if (error) throw error;
+      return data ?? [];
+    }
     case "start_incident": {
       rejectUnknownArguments(args, ["incident_id", "confirm"]);
       if (args.confirm !== true) throw new ToolError("Explicit confirm=true is required");
@@ -1133,7 +1152,7 @@ export async function dispatchMessage(message: unknown, principal: Principal, s:
       return errorPayload(id, -32602, "Invalid initialize parameters");
     }
     const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.has(initialize.protocolVersion) ? initialize.protocolVersion : MCP_PROTOCOL_VERSION;
-    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.6.3" } });
+    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.6.4" } });
   }
   if (request.method === "tools/list") return resultPayload(id, { tools: availableTools(principal) });
   if (request.method !== "tools/call") return errorPayload(id, -32601, `Method not found: ${request.method}`);

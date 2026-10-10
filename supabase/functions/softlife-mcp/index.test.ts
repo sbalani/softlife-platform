@@ -16,6 +16,7 @@ Deno.test("tool listing enforces key scopes and role command fencing", () => {
   const operatorTools = availableTools(principal("operator", ["read", "forms", "commands"])).map((tool) => tool.name);
   assert(operatorTools.includes("list_machines"));
   assert(operatorTools.includes("get_inventory"));
+  assert(operatorTools.includes("list_action_reports"));
   assert(operatorTools.includes("create_action_report_draft"));
   assert(operatorTools.includes("create_action_report_image_upload"));
   assert(operatorTools.includes("complete_action_report_image_upload"));
@@ -25,6 +26,38 @@ Deno.test("tool listing enforces key scopes and role command fencing", () => {
 
   const franchiseeTools = availableTools(principal("franchisee", ["commands"])).map((tool) => tool.name);
   assertEquals(franchiseeTools.sort(), ["disable_machine_sales", "dispense_free_cup"]);
+});
+
+Deno.test("Action Report summaries are available to read-scoped agents", async () => {
+  const reader = principal("admin", ["read"]);
+  const formTools = availableTools(principal("admin", ["forms"]));
+  const tool = availableTools(reader).find((item) => item.name === "list_action_reports");
+  assert(tool);
+  assertEquals((tool.inputSchema as { additionalProperties?: boolean }).additionalProperties, false);
+  assert(!formTools.some((item) => item.name === "list_action_reports"));
+
+  const reportId = crypto.randomUUID();
+  const calls: { name: string; args: Record<string, unknown> }[] = [];
+  const database = {
+    rpc(name: string, args: Record<string, unknown>) {
+      calls.push({ name, args });
+      return Promise.resolve({ data: [{ report_id: reportId, status: "draft", attention_reasons: ["draft"] }], error: null });
+    },
+  };
+  const response = await dispatchMessage({ jsonrpc: "2.0", id: 1, method: "tools/call", params: {
+    name: "list_action_reports", arguments: {},
+  } }, reader, database as never);
+  assertEquals((response?.result as { structuredContent?: unknown }).structuredContent, {
+    items: [{ report_id: reportId, status: "draft", attention_reasons: ["draft"] }],
+  });
+  assertEquals(calls[0], { name: "mcp_read_action_reports", args: {
+    p_actor_id: reader.profileId, p_status: "draft", p_machine_id: null, p_offset: 0, p_limit: 50,
+  } });
+
+  const invalid = await dispatchMessage({ jsonrpc: "2.0", id: 2, method: "tools/call", params: {
+    name: "list_action_reports", arguments: { status: "active" },
+  } }, reader, database as never);
+  assertEquals((invalid?.error as { message?: string }).message, "Invalid Action Report status filter");
 });
 
 Deno.test("sales context scopes expose only bounded context and note tools", () => {
@@ -341,7 +374,7 @@ Deno.test("initialize validates parameters and negotiates supported versions", a
   assertEquals((invalid?.error as { code?: number }).code, -32602);
   const valid = await dispatchMessage({ jsonrpc: "2.0", id: 2, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } } }, actor, null as never);
   assertEquals((valid?.result as { protocolVersion?: string }).protocolVersion, "2025-03-26");
-  assertEquals((valid?.result as { serverInfo?: { version?: string } }).serverInfo?.version, "3.6.3");
+  assertEquals((valid?.result as { serverInfo?: { version?: string } }).serverInfo?.version, "3.6.4");
   const unknown = await dispatchMessage({ jsonrpc: "2.0", id: 3, method: "initialize", params: { protocolVersion: "2099-01-01", capabilities: {}, clientInfo: { name: "test", version: "1" } } }, actor, null as never);
   assertEquals((unknown?.result as { protocolVersion?: string }).protocolVersion, "2025-03-26");
 });

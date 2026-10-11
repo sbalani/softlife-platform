@@ -50,65 +50,67 @@ export function DefrostRunPanel({ machineId, machineName, imei, deployed, online
   }, [active, router]);
 
   function start() {
-    if (!confirm(`Run a ${durationMinutes}-minute defrost cycle on ${machineName} (${imei}) now?\n\nSales will be disabled. The platform will stop refrigeration, run defrost, restart refrigeration, wait for 100% formation, and confirm sales resume.`)) return;
+    const warnings = [!deployed && "Machine is not marked deployed.", !online && "Machine reports offline.", requiresIntervention && "A prior defrost intervention has not been cleared."].filter(Boolean) as string[];
+    if (!confirm(`Run a ${durationMinutes}-minute defrost cycle on ${machineName} (${imei}) now?\n\nSales will be disabled. The platform will stop refrigeration, run defrost, restart refrigeration, wait for formation, and confirm sales resume.${warnings.length ? `\n\nWarnings:\n${warnings.join("\n")}` : ""}`)) return;
+    const reason = warnings.length ? prompt("Enter an override reason. This will be recorded in the defrost audit log:") : "";
+    if (warnings.length && !reason?.trim()) return;
     const requestId = crypto.randomUUID();
     setResult(null);
     startTransition(async () => {
-      const response = await runDefrostNow(machineId, imei, requestId);
+      const response = await runDefrostNow(machineId, imei, requestId, reason ?? undefined);
       setResult(response.ok ? { ok: true, message: "Defrost cycle queued." } : response);
       if (response.ok) router.refresh();
     });
   }
 
-  const safeToResume = online && statusCurrent && !active && !requiresIntervention
-    && isHuaxinOpen(refrigerationValue) && isHuaxinClosed(defrostValue) && formationPct === 100
-    && isHuaxinSalesBlocked(operatingValue);
   const salesReady = statusCurrent && isHuaxinSalesReady(operatingValue);
 
   function resumeSales() {
-    if (!confirm(`Resume customer sales on ${machineName} (${imei})? Refrigeration is on, defrost is off, and formation is 100%.`)) return;
+    const observedWarnings = [!online && "Machine is offline.", !statusCurrent && "Hardware status is stale.", !isHuaxinOpen(refrigerationValue) && "Refrigeration is not confirmed on.", !isHuaxinClosed(defrostValue) && "Defrost is not confirmed off.", formationPct !== 100 && "Formation is not 100%.", requiresIntervention && "Defrost intervention has not been cleared."].filter(Boolean) as string[];
+    if (!confirm(`Resume customer sales on ${machineName} (${imei})?${observedWarnings.length ? `\n\nWarnings:\n${observedWarnings.join("\n")}` : ""}`)) return;
+    const reason = observedWarnings.length ? prompt("Enter an override reason. This will be recorded in the audit log:") : "";
+    if (observedWarnings.length && !reason?.trim()) return;
     setResult(null);
     startTransition(async () => {
-      const response = await sendMachineCommand(imei, "operate_onsale");
+      let response = await sendMachineCommand(imei, "operate_onsale", observedWarnings.length ? { acknowledged: true, reason: reason! } : undefined);
+      if (response.requiresOverride && response.warnings?.length) {
+        const liveReason = prompt(`Live warnings changed:\n\n${response.warnings.join("\n")}\n\nEnter an override reason to continue:`);
+        if (liveReason?.trim()) response = await sendMachineCommand(imei, "operate_onsale", { acknowledged: true, reason: liveReason });
+      }
       setResult(response.ok ? { ok: true, message: "Resume-sales command accepted. Sync the machine to confirm it is selling." } : response);
       if (response.ok) router.refresh();
     });
   }
 
-  const blockedReason = !deployed
-    ? "Deploy this machine first."
-    : !online
-      ? "Machine offline. Restore its connection before starting a defrost cycle."
-    : active?.state === "recovery"
+  const blockedReason = active?.state === "recovery"
       ? "Waiting for the cup anomaly to clear; physical defrost is not running."
       : active
         ? "An automated cycle is already active."
-        : requiresIntervention
-          ? "Inspect the machine and clear the intervention lock first."
-          : null;
+        : null;
+  const startWarnings = [!deployed && "Not deployed", !online && "Offline", requiresIntervention && "Intervention uncleared"].filter(Boolean) as string[];
   return (
     <section className="mt-5 rounded-xl border border-line bg-cream/35 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="font-display text-base font-bold text-cocoa">Defrost control</h3>
-          <p className="mt-1 max-w-2xl text-xs text-taupe">Manual and scheduled cycles use the same audited workflow. Commands are spaced by two seconds; refrigeration, formation, and resumed sales are verified from live Huaxin status.</p>
+          <p className="mt-1 max-w-2xl text-xs text-taupe">Manual and scheduled cycles use the same audited workflow. Hardware commands are sequenced, and observed state is recorded from Huaxin telemetry.</p>
         </div>
         <button type="button" onClick={start} disabled={pending || !!blockedReason} className="rounded-lg bg-terracotta px-4 py-2 text-sm font-bold text-white hover:bg-terracotta-dark disabled:cursor-not-allowed disabled:opacity-50">
           {pending ? "Queueing..." : `Run defrost now · ${durationMinutes} min`}
         </button>
       </div>
       {blockedReason && <p className="mt-2 text-xs font-semibold text-warning">{blockedReason}</p>}
+      {!blockedReason && startWarnings.length > 0 && <p className="mt-2 text-xs font-semibold text-warning">Warnings: {startWarnings.join(" · ")}. An admin can continue with an audited reason.</p>}
       {(active || requiresIntervention || runs[0]?.state === "manual_intervention" || isHuaxinSalesBlocked(operatingValue)) && <div className="mt-4 rounded-lg border border-warning/40 bg-warning/10 p-3">
         <p className="text-xs font-bold text-cocoa">Recovery status</p>
-        {active ? <p className="mt-1 text-xs text-cocoa">The automated workflow is still {STATE_LABELS[active.state]?.toLowerCase() ?? active.state}. Wait for it to finish before using manual controls.</p>
+        {active ? <p className="mt-1 text-xs text-cocoa">The automated workflow is still {STATE_LABELS[active.state]?.toLowerCase() ?? active.state}.{active.state === "recovery" ? " An admin can stop recovery from Remote commands below after acknowledging the warning and entering an audit reason." : " Wait for the in-flight hardware sequence to finish before using manual controls."}</p>
           : requiresIntervention ? <p className="mt-1 text-xs text-cocoa">The workflow has stopped and the safety lock remains. Inspect the machine, then clear the intervention lock before resuming sales.</p>
             : !online ? <p className="mt-1 text-xs text-cocoa">The workflow is finished and the lock is clear, but the machine is offline. Restore its power/network connection, use Sync machine, then resume sales here.</p>
               : !statusCurrent ? <p className="mt-1 text-xs text-cocoa">The workflow is finished and the lock is clear. Sync the machine to obtain current hardware status before resuming sales.</p>
                 : salesReady ? <p className="mt-1 text-xs font-semibold text-sage">The workflow is finished, the lock is clear, and Huaxin confirms the machine is ready for sales.</p>
                   : <p className="mt-1 text-xs text-cocoa">The workflow is finished and the lock is clear. Sales are still paused; resume them after verifying the machine is physically ready.</p>}
-        {!active && !requiresIntervention && !salesReady && <button type="button" onClick={resumeSales} disabled={pending || !safeToResume} className="mt-3 rounded-lg bg-sage px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">{pending ? "Resuming..." : "Resume sales"}</button>}
-        {!active && !requiresIntervention && !salesReady && !safeToResume && online && statusCurrent && <p className="mt-2 text-[11px] font-semibold text-danger">Resume is blocked until refrigeration is ON, defrost is OFF, and formation is 100%.</p>}
-        {safeToResume && <p className="mt-2 text-[11px] text-taupe">The command performs another live safety check before enabling sales.</p>}
+        {!active && !salesReady && <button type="button" onClick={resumeSales} disabled={pending} className="mt-3 rounded-lg bg-sage px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">{pending ? "Resuming..." : "Resume sales"}</button>}
+        {!active && !salesReady && <p className="mt-2 text-[11px] font-semibold text-warning">Refrigeration, defrost, formation, connectivity, and intervention checks are warnings. An admin can acknowledge them with an audited reason.</p>}
       </div>}
       {result && <p className={`mt-2 text-xs font-semibold ${result.ok ? "text-sage" : "text-danger"}`}>{result.ok ? result.message : result.error}</p>}
       {active && (

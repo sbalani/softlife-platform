@@ -8,7 +8,8 @@ import {
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { geocodeAddress } from "@/lib/geocode";
 import { translateLocation } from "@/lib/i18n/huaxin";
-import { normalizeHuaxinTimestamp } from "@/lib/data/temperatures";
+import { normalizeHuaxinTimestamps, parseHuaxinTemperatureValue } from "@/lib/huaxin/temperature-readings";
+import { DEFAULT_TZ, ymd } from "@/lib/dates";
 import { ingestOrders } from "@/lib/data/order-sync";
 import { revalidatePath } from "next/cache";
 import { syncCouponSnapshots } from "@/lib/data/coupons";
@@ -17,9 +18,6 @@ import { getSessionProfile } from "@/lib/auth/session";
 
 export type SyncResult = { ok: boolean; summary: string };
 
-function ymd(d: Date) {
-  return d.toISOString().slice(0, 10);
-}
 /** Full Huaxin → Supabase ingestion: machines, temperatures, and orders (90d). */
 export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<SyncResult> {
   void _prev;
@@ -33,8 +31,10 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
   try {
     const supabase = await createServiceClient();
     const devices = await listDevices(cfg, { force: true });
-    const began = ymd(new Date(Date.now() - 90 * 86_400_000)) + " 00:00:00";
-    const end = ymd(new Date()) + " 23:59:59";
+    const beganDate = ymd(new Date(Date.now() - 90 * 86_400_000), DEFAULT_TZ);
+    const endDate = ymd(new Date(), DEFAULT_TZ);
+    const began = beganDate + " 00:00:00";
+    const end = endDate + " 23:59:59";
 
     let machines = 0;
     let temps = 0;
@@ -62,6 +62,7 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
       try {
         const t = await pullTemperatures(cfg, d.deviceImei, began, end);
         const category = t.category ?? [];
+        const timestamps = normalizeHuaxinTimestamps(category.map((item) => item.label), beganDate);
         const rows: {
           machine_id: string | null;
           reading_time: string;
@@ -69,14 +70,15 @@ export async function sync(_prev: SyncResult | null, _fd: FormData): Promise<Syn
           value: number;
         }[] = [];
         for (const series of t.dataset ?? []) {
-          const sname = series.seriesname ?? "temperature";
+          const sname = series.seriesname?.trim() || "temperature";
           const sdata = series.data ?? [];
           for (let i = 0; i < sdata.length; i++) {
-            const value = Number(sdata[i]?.value);
-            if (!Number.isFinite(value)) continue;
+            const value = parseHuaxinTemperatureValue(sdata[i]?.value);
+            const readingTime = timestamps[i];
+            if (value === null || !readingTime) continue;
             rows.push({
               machine_id: machineId,
-              reading_time: normalizeHuaxinTimestamp(category[i]?.label, ymd(new Date())),
+              reading_time: readingTime,
               series_name: sname,
               value,
             });

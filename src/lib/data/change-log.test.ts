@@ -150,9 +150,22 @@ test("remote command audit records actor, channel, and outcome", async () => {
   }, "operate_status", { outcome: "accepted", code: "200", message: "success" }, {
     id: "admin-1", email: "admin@example.com", role: "admin",
   }, "web");
-  assert.deepEqual(inserted[0].metadata, { channel: "web", source: "web", role: "admin", outcome: "accepted", error: null });
+  assert.deepEqual(inserted[0].metadata, { channel: "web", source: "web", role: "admin", outcome: "accepted", error: null, warnings: [], override_reason: null });
   assert.equal(inserted[0].actor_email, "admin@example.com");
   assert.equal(inserted[0].machine_name, "Test machine");
+});
+
+test("remote command audit records acknowledged warnings and reason", async () => {
+  const inserted: Record<string, unknown>[] = [];
+  const client = { from: () => ({ insert: async (row: Record<string, unknown>) => { inserted.push(row); return { error: null }; } }) };
+  await recordRemoteCommand(client as never, { id: "machine-1", device_imei: "861", name: "Test" }, "operate_onsale", {
+    outcome: "requested", warnings: ["formation_not_ready"], overrideReason: "Technician verified machine",
+  }, { id: "admin-1", email: "admin@example.com", role: "admin" }, "web");
+  assert.equal(inserted[0].action, "remote_command_requested");
+  assert.deepEqual(inserted[0].metadata, {
+    channel: "web", source: "web", role: "admin", outcome: "requested", error: null,
+    warnings: ["formation_not_ready"], override_reason: "Technician verified machine",
+  });
 });
 
 test("menu events use the currently observed product assignment", () => {

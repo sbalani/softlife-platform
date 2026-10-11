@@ -17,7 +17,7 @@ import { geocodeAddress } from "@/lib/geocode";
 import { translateLocation } from "@/lib/i18n/huaxin";
 import { parseMachineRefreshClaim } from "@/lib/data/huaxin-machine-refresh";
 import { inclusiveLocalDatePeriod, localDateTimeToUtc } from "@/lib/odoo-sync-contract";
-import { defrostFormationPct, defrostStatusValue, isHuaxinClosed, isHuaxinCompressorOverheated, isHuaxinLowStock, isHuaxinOpen, isHuaxinSalesReady } from "@/lib/defrost-status";
+import { defrostFormationPct, defrostStatusValue, isHuaxinClosed, isHuaxinCompressorOverheated, isHuaxinLowStock, isHuaxinOpen } from "@/lib/defrost-status";
 
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
@@ -497,7 +497,8 @@ export async function pushMachineProducts(_prev: PushResult | null, fd: FormData
 export async function sendMachineCommand(
   imei: string,
   command: string,
-): Promise<{ ok: boolean; error?: string; huaxinCode?: string; huaxinMsg?: string }> {
+  override?: { acknowledged: boolean; reason: string },
+): Promise<{ ok: boolean; error?: string; huaxinCode?: string; huaxinMsg?: string; warnings?: string[]; requiresOverride?: boolean }> {
   const session = await getSessionProfile();
   if (!session || session.role === "operator") return { ok: false, error: "Access denied." };
   const adminCommands = new Set<string>(HUAXIN_REMOTE_COMMANDS.map((item) => item.command));
@@ -514,10 +515,16 @@ export async function sendMachineCommand(
   }
   const { data: machine } = await service.from("machines").select("id,name,display_name,device_imei").eq("device_imei", imei).maybeSingle();
   if (!machine) return { ok: false, error: "Machine not found or not assigned to you." };
+  const overrideReason = override?.reason.trim() ?? "";
+  const canOverride = session.role === "admin" && override?.acknowledged === true && overrideReason.length >= 5 && overrideReason.length <= 500;
+  const warnings: string[] = [];
   const { data: activeDefrost, error: defrostError } = await service.from("machine_defrost_runs").select("id,state").eq("machine_id", machine.id).in("state", ["scheduled", "thawing", "thaw_closed", "refrigeration_check", "forming", "sales_check", "recovery"]).maybeSingle();
   if (defrostError) return { ok: false, error: "Could not verify automated defrost state." };
   const safeDuringDefrost = new Set(["operate_sellout", "operate_status"]);
-  if (activeDefrost && !safeDuringDefrost.has(command)) return { ok: false, error: `Command blocked while automated defrost is ${activeDefrost.state}.` };
+  if (activeDefrost && !safeDuringDefrost.has(command)) {
+    if (activeDefrost.state !== "recovery") return { ok: false, error: `Command blocked while automated defrost is ${activeDefrost.state}.` };
+    warnings.push("Automated recovery is active and will be stopped before manual control is sent.");
+  }
   if (session.role === "franchisee") {
     if (!session.tenant_id) return { ok: false, error: "No franchisee account assigned." };
     const today = new Date().toISOString().slice(0, 10);
@@ -535,46 +542,50 @@ export async function sendMachineCommand(
 
   const cfg = getConfigFromEnv();
   if (!cfg) return { ok: false, error: "Huaxin not configured." };
+  const { data: schedule, error: scheduleError } = await service.from("machine_defrost_schedules").select("requires_intervention").eq("machine_id", machine.id).maybeSingle();
+  if (scheduleError) return { ok: false, error: "Could not verify intervention status." };
+  if (schedule?.requires_intervention) warnings.push("Defrost intervention has not been cleared.");
+  if (command === "operate_onsale") {
+    const statuses = await getDeviceStatus(cfg, imei);
+    await recordMachineStatuses(service, machine, statuses);
+    const online = defrostStatusValue(statuses, "status_0_online_status")?.toLowerCase() === "online";
+    await service.from("machines").update({ is_online: online, huaxin_last_sync: new Date().toISOString() }).eq("id", machine.id);
+    const activeSignals = new Map(alertStatusSignals(statuses).map((signal) => [signal.field, signal.value]));
+    const cupBlocked = ["cup_empty", "cup_foreign_object", "cup_blocked", "cup_take_fault"].some((field) => activeSignals.get(field) === true);
+    if (!online) warnings.push("Machine reports offline.");
+    if (!isHuaxinOpen(defrostStatusValue(statuses, "status_0_ac")) || !isHuaxinClosed(defrostStatusValue(statuses, "status_0_thaw")) || defrostFormationPct(statuses) !== 100) {
+      warnings.push("Refrigeration is not on, defrost is not off, or formation is not 100%.");
+    }
+    if (cupBlocked || isHuaxinCompressorOverheated(statuses) || isHuaxinLowStock(statuses)) {
+      warnings.push("A live cup, stock, or compressor warning is active.");
+    }
+  }
   const commandOwner = crypto.randomUUID();
   let commandLease = false;
   if (!safeDuringDefrost.has(command)) {
-    const { data: claimed, error: claimError } = await service.rpc("claim_interactive_machine_command", { p_machine_id: machine.id, p_owner: commandOwner });
+    if (warnings.length && !canOverride) {
+      try { await recordRemoteCommand(service, machine, command, { outcome: "blocked", warnings }, session, "web"); } catch (logError) { console.error("[remote-command] Could not write warning log:", logError); }
+      return { ok: false, error: "Review and acknowledge the operational warning to continue.", warnings, requiresOverride: true };
+    }
+    if (activeDefrost?.state === "recovery") {
+      const { data: takenOver, error: takeoverError } = await service.rpc("take_over_defrost_recovery", { p_machine_id: machine.id, p_admin_id: session.id, p_reason: overrideReason });
+      if (takeoverError || !takenOver) return { ok: false, error: "Recovery is processing a step right now. Retry after the current command finishes." };
+    }
+    const { data: claimed, error: claimError } = await service.rpc("claim_interactive_machine_command", { p_machine_id: machine.id, p_owner: commandOwner, p_allow_intervention: canOverride });
     if (claimError || !claimed) return { ok: false, error: "Command blocked by an automated defrost or unresolved intervention." };
     commandLease = true;
   }
   try {
-    if (command === "operate_onsale") {
-      const statuses = await getDeviceStatus(cfg, imei);
-      await recordMachineStatuses(service, machine, statuses);
-      const online = defrostStatusValue(statuses, "status_0_online_status")?.toLowerCase() === "online";
-      await service.from("machines").update({ is_online: online, huaxin_last_sync: new Date().toISOString() }).eq("id", machine.id);
-      const activeSignals = new Map(alertStatusSignals(statuses).map((signal) => [signal.field, signal.value]));
-      const cupBlocked = ["cup_empty", "cup_foreign_object", "cup_blocked", "cup_take_fault"].some((field) => activeSignals.get(field) === true);
-      if (!online) return { ok: false, error: "Machine is offline. Restore its connection before resuming sales." };
-      if (!isHuaxinOpen(defrostStatusValue(statuses, "status_0_ac")) || !isHuaxinClosed(defrostStatusValue(statuses, "status_0_thaw")) || defrostFormationPct(statuses) !== 100) {
-        return { ok: false, error: "Resume blocked: refrigeration must be on, defrost off, and formation at 100%." };
-      }
-      if (cupBlocked || isHuaxinCompressorOverheated(statuses) || isHuaxinLowStock(statuses)) {
-        return { ok: false, error: "Resume blocked by a live cup, stock, or compressor safety signal." };
-      }
-    }
+    if (warnings.length) await recordRemoteCommand(service, machine, command, { outcome: "requested", warnings, overrideReason }, session, "web");
     const result = await sendCommand(cfg, imei, command);
     const code = String(result.code);
     const msg = result.msg ?? "";
     try {
-      await recordRemoteCommand(service, machine, command, { outcome: code === "200" ? "accepted" : "rejected", code, message: msg }, session, "web");
+      await recordRemoteCommand(service, machine, command, { outcome: code === "200" ? "accepted" : "rejected", code, message: msg, warnings, overrideReason: warnings.length ? overrideReason : undefined }, session, "web");
     } catch (logError) {
       console.error("[remote-command] Could not write web command log:", logError);
     }
     if (code === "200") {
-      if (command === "operate_onsale") {
-        await new Promise((resolve) => setTimeout(resolve, 3_000));
-        const statuses = await getDeviceStatus(cfg, imei);
-        await recordMachineStatuses(service, machine, statuses);
-        if (!isHuaxinSalesReady(defrostStatusValue(statuses, "status_0_os")) || !isHuaxinOpen(defrostStatusValue(statuses, "status_0_stock"))) {
-          return { ok: false, error: "Huaxin accepted the command but has not confirmed that sales resumed. Sync and retry when the machine is online.", huaxinCode: code, huaxinMsg: msg };
-        }
-      }
       return { ok: true, huaxinCode: code, huaxinMsg: msg || "success" };
     }
     return { ok: false, error: msg || "Command rejected", huaxinCode: code, huaxinMsg: msg };

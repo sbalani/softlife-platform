@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { LineChart } from "@/components/LineChart";
+import { TemperatureRangeChart } from "@/components/TemperatureRangeChart";
 import { getSessionProfile } from "@/lib/auth/session";
 import { getHistoricalTemperatures, getTemperatureSeriesOptions } from "@/lib/data/temperatures";
 import { formatDateTime } from "@/lib/dates";
@@ -172,16 +172,14 @@ export default async function TemperaturesPage({ searchParams }: { searchParams:
               <div><h2 className="font-display text-lg font-bold text-cocoa">{selectedMachine} · {params.seriesName}</h2><p className="text-xs text-taupe">Page {params.page} of {pageCount}; at most {TEMPERATURE_PAGE_SIZE} points are rendered.</p></div>
               <p className="text-xs text-taupe">{formatDateTime(params.start, tz)} to {formatDateTime(params.end, tz)}</p>
             </div>
-            <LineChart
+            <TemperatureRangeChart
               data={chartRows.map((row) => ({
                 label: new Date(row.bucketStart).toLocaleString("en-GB", { timeZone: tz, day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }),
                 value: row.value,
+                minimum: row.minimum,
+                maximum: row.maximum,
               }))}
-              color="#d47e54"
               height={280}
-              unit="°C"
-              zoomable
-              dynamicScale
             />
           </section>
 

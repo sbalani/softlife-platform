@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { HUAXIN_REMOTE_COMMANDS } from "@/lib/huaxin/remote-commands";
 import { sendMachineCommand } from "./actions";
 
-type CmdResult = { ok: boolean; error?: string; huaxinCode?: string; huaxinMsg?: string; cmd?: string };
+type CmdResult = { ok: boolean; error?: string; huaxinCode?: string; huaxinMsg?: string; cmd?: string; warnings?: string[]; requiresOverride?: boolean };
 
 export function RemoteControls({ imei }: { imei: string }) {
   const [pending, startTransition] = useTransition();
@@ -12,7 +12,11 @@ export function RemoteControls({ imei }: { imei: string }) {
 
   const send = (cmd: string, label: string) => {
     startTransition(async () => {
-      const res = await sendMachineCommand(imei, cmd);
+      let res = await sendMachineCommand(imei, cmd);
+      if (res.requiresOverride && res.warnings?.length) {
+        const reason = prompt(`Warning:\n\n${res.warnings.join("\n")}\n\nEnter an override reason to send ${label}:`);
+        if (reason?.trim()) res = await sendMachineCommand(imei, cmd, { acknowledged: true, reason });
+      }
       const entry: CmdResult = { ...res, cmd: label };
       setResults((prev) => [entry, ...prev].slice(0, 5));
     });

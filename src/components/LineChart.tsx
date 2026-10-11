@@ -85,6 +85,7 @@ export function LineChart({
     label: d.label,
     value: d.value,
   }));
+  const safeHover = hover !== null && hover >= 0 && hover < pts.length ? hover : null;
   const visibleSecondaryData = hasSecondary ? secondaryData?.slice(zoomStart, zoomEnd + 1) : undefined;
   const secondaryMax = Math.max(1, Math.ceil(Math.max(...(visibleSecondaryData?.map((point) => point.value) ?? [0])) * 1.15));
   const secondaryPts = hasSecondary ? visibleData.map((point, i) => ({
@@ -215,8 +216,8 @@ export function LineChart({
         )}
 
         {/* Hover line */}
-        {hover !== null && (
-          <line x1={pts[hover].x} y1={padT} x2={pts[hover].x} y2={padT + chartH} stroke={color} strokeWidth={1} strokeDasharray="4 4" opacity={0.5} />
+        {safeHover !== null && (
+          <line x1={pts[safeHover].x} y1={padT} x2={pts[safeHover].x} y2={padT + chartH} stroke={color} strokeWidth={1} strokeDasharray="4 4" opacity={0.5} />
         )}
 
         {/* Points */}
@@ -225,8 +226,8 @@ export function LineChart({
             <circle
               cx={p.x}
               cy={p.y}
-              r={hover === i ? 6 : 4}
-              fill={hover === i ? color : "#fff"}
+              r={safeHover === i ? 6 : 4}
+              fill={safeHover === i ? color : "#fff"}
               stroke={color}
               strokeWidth={2}
               className="cursor-pointer transition-all"
@@ -236,9 +237,9 @@ export function LineChart({
           </g>
         ))}
         {secondaryPts.map((point, index) => (
-          <circle key={`secondary-point-${index}`} cx={point.x} cy={point.y} r={hover === index ? 5 : 3} fill="#fff" stroke={secondaryColor} strokeWidth={2} className="cursor-pointer transition-all" onMouseEnter={() => setHover(index)} onPointerDown={() => { if (!zoomable) setHover(index); }} />
+          <circle key={`secondary-point-${index}`} cx={point.x} cy={point.y} r={safeHover === index ? 5 : 3} fill="#fff" stroke={secondaryColor} strokeWidth={2} className="cursor-pointer transition-all" onMouseEnter={() => setHover(index)} onPointerDown={() => { if (!zoomable) setHover(index); }} />
         ))}
-        {quantityPts.map((point, index) => <circle key={`quantity-point-${index}`} cx={point.x} cy={point.y} r={hover === index ? 5 : 3} fill="#fff" stroke={quantityColor} strokeWidth={2} className="cursor-pointer transition-all" onMouseEnter={() => setHover(index)} onPointerDown={() => { if (!zoomable) setHover(index); }} />)}
+        {quantityPts.map((point, index) => <circle key={`quantity-point-${index}`} cx={point.x} cy={point.y} r={safeHover === index ? 5 : 3} fill="#fff" stroke={quantityColor} strokeWidth={2} className="cursor-pointer transition-all" onMouseEnter={() => setHover(index)} onPointerDown={() => { if (!zoomable) setHover(index); }} />)}
         {weatherPts.map((point) => <circle key={`weather-${point.day}`} cx={point.x} cy={point.y} r={3} fill="#fff" stroke="#4786a8" strokeWidth={2} className="cursor-pointer" onMouseEnter={() => setHover(Math.round((point.x - padL) / Math.max(step, 1)))} />)}
         {visibleData.map((point, index) => {
           const dayNotes = point.day ? annotationsByDay.get(point.day) ?? [] : [];
@@ -256,21 +257,21 @@ export function LineChart({
       </svg>
 
       {/* Tooltip */}
-      {hover !== null && (
+      {safeHover !== null && (
         <div
           className="pointer-events-none absolute z-10 rounded-lg border border-line bg-white px-3 py-1.5 shadow-lg"
           style={{
-            left: `${(pts[hover].x / W) * 100}%`,
+            left: `${(pts[safeHover].x / W) * 100}%`,
             top: 0,
             transform: "translateX(-50%)",
           }}
         >
-          <div className="text-[10px] uppercase tracking-wide text-taupe">{pts[hover].label}</div>
-          <div className="text-sm font-bold text-cocoa">{fmtVal(pts[hover].value)}</div>
-          {hasSecondary && <div className="text-sm font-bold" style={{ color: secondaryColor }}>{secondaryLabel}: {secondaryPts[hover].value}{secondaryUnit}</div>}
-          {hasQuantity && <div className="text-sm font-bold" style={{ color: quantityColor }}>{quantityLabel}: {quantityPts[hover].value}</div>}
-          {hasWeather && pts[hover].day && weatherByDay.get(pts[hover].day) && (() => { const weather = weatherByDay.get(pts[hover].day!)!; return <div className="mt-1 border-t border-line pt-1 text-xs text-sky-700"><strong>{weatherLabel}: {weather.value}{weatherUnit}</strong><br />{weather.condition} · {weather.minimum}–{weather.maximum}°C · {weather.precipitation} mm</div>; })()}
-          {showNotes && pts[hover].day && (annotationsByDay.get(pts[hover].day) ?? []).map((note) => <div key={note.id} className="mt-1 max-w-64 border-t border-line pt-1 text-xs text-violet-700"><strong>{note.category}{note.machineName ? ` · ${note.machineName}` : ""}</strong><br />{note.text}</div>)}
+          <div className="text-[10px] uppercase tracking-wide text-taupe">{pts[safeHover].label}</div>
+          <div className="text-sm font-bold text-cocoa">{fmtVal(pts[safeHover].value)}</div>
+          {hasSecondary && secondaryPts[safeHover] && <div className="text-sm font-bold" style={{ color: secondaryColor }}>{secondaryLabel}: {secondaryPts[safeHover].value}{secondaryUnit}</div>}
+          {hasQuantity && quantityPts[safeHover] && <div className="text-sm font-bold" style={{ color: quantityColor }}>{quantityLabel}: {quantityPts[safeHover].value}</div>}
+          {hasWeather && pts[safeHover].day && weatherByDay.get(pts[safeHover].day) && (() => { const weather = weatherByDay.get(pts[safeHover].day!)!; return <div className="mt-1 border-t border-line pt-1 text-xs text-sky-700"><strong>{weatherLabel}: {weather.value}{weatherUnit}</strong><br />{weather.condition} · {weather.minimum}–{weather.maximum}°C · {weather.precipitation} mm</div>; })()}
+          {showNotes && pts[safeHover].day && (annotationsByDay.get(pts[safeHover].day) ?? []).map((note) => <div key={note.id} className="mt-1 max-w-64 border-t border-line pt-1 text-xs text-violet-700"><strong>{note.category}{note.machineName ? ` · ${note.machineName}` : ""}</strong><br />{note.text}</div>)}
         </div>
       )}
     </div>

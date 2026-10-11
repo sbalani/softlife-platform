@@ -28,6 +28,7 @@ export type MachineDetail = {
   last_online_at: string | null;
   offline_since: string | null;
   temperatures: DetailTemp[];
+  temperature_series_name: string | null;
   temperature_observed_at: string | null;
   orders: DetailOrder[];
   orders_synced_at: string | null;
@@ -85,7 +86,7 @@ export async function getMachineDetail(
     s.from("machine_menu_snapshots").select("snapshot,synced_at").eq("device_imei", imei).maybeSingle(),
     s.from("machine_status_snapshots").select("field,raw,observed_at").eq("machine_id", machine.id).order("observed_at", { ascending: false }),
     s.from("machine_media_snapshots").select("media,synced_at").eq("machine_id", machine.id).maybeSingle(),
-    s.from("huaxin_temperatures").select("reading_time,series_name,value").eq("machine_id", machine.id).gte("reading_time", new Date(+now - 86_400_000).toISOString()).order("reading_time"),
+    s.from("huaxin_temperatures").select("reading_time,series_name,value").eq("machine_id", machine.id).gte("reading_time", new Date(+now - 86_400_000).toISOString()).lte("reading_time", now.toISOString()).order("reading_time"),
     machineOrderRows(s, imei, range.from, range.to),
     s.from("order_sync_machine_results").select("status,finished_at").eq("device_imei", imei).order("finished_at", { ascending: false }).limit(1).maybeSingle(),
     s.from("order_sync_machine_results").select("fresh_through,order_sync_runs(requested_from)").eq("device_imei", imei).eq("status", "succeeded").gte("fresh_through", range.from).order("fresh_through").limit(1000),
@@ -123,6 +124,7 @@ export async function getMachineDetail(
     last_online_at: machine.last_online_at ?? null,
     offline_since: machine.offline_since ?? null,
     temperatures: temperatureRows.map((row) => ({ time: row.reading_time, value: Number(row.value) })),
+    temperature_series_name: cylinderSeries ?? null,
     temperature_observed_at: temperatureRows.at(-1)?.reading_time ?? null,
     orders: orderRows.map((order) => ({
       order_time: order.order_time,

@@ -381,7 +381,7 @@ export async function recordRemoteCommand(
   s: SupabaseClient,
   machine: { id: string; device_imei: string; name: string | null; display_name?: string | null },
   command: string,
-  result: { outcome: "accepted" | "rejected" | "ambiguous"; code?: string; message?: string; error?: string },
+  result: { outcome: "requested" | "blocked" | "accepted" | "rejected" | "ambiguous"; code?: string; message?: string; error?: string; warnings?: string[]; overrideReason?: string },
   actor: Pick<SessionProfile, "id" | "email" | "role">,
   channel: "web" | "mobile",
 ) {
@@ -390,14 +390,14 @@ export async function recordRemoteCommand(
     device_imei: machine.device_imei,
     machine_name: machine.display_name || machine.name,
     source: "platform",
-    action: result.outcome === "ambiguous" ? "remote_command_failed" : "remote_command",
+    action: result.outcome === "ambiguous" ? "remote_command_failed" : result.outcome === "requested" ? "remote_command_requested" : result.outcome === "blocked" ? "remote_command_blocked" : "remote_command",
     entity_type: "machine",
     entity_key: machine.id,
     field: command,
     new_value: { code: result.code ?? null, message: result.message ?? null },
     actor_id: actor.id,
     actor_email: actor.email,
-    metadata: { channel, source: channel, role: actor.role, outcome: result.outcome, error: result.error ?? null },
+    metadata: { channel, source: channel, role: actor.role, outcome: result.outcome, error: result.error ?? null, warnings: result.warnings ?? [], override_reason: result.overrideReason ?? null },
   });
   if (error) throw new Error(`Could not write remote command log: ${error.message}`);
 }

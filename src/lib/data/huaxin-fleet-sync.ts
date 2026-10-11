@@ -1,7 +1,7 @@
 import { getConfigFromEnv, getDeviceStatus, listDeviceProducts, listDevices, pullTemperatures } from "@/lib/huaxin/client";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { recordMachineStatuses, recordMachineSync } from "@/lib/data/change-log";
-import { normalizeHuaxinTimestamp } from "@/lib/data/temperatures";
+import { normalizeHuaxinTimestamps, parseHuaxinTemperatureValue } from "@/lib/huaxin/temperature-readings";
 import { ingestOrders, type OrderSyncTrigger } from "@/lib/data/order-sync";
 import { syncMachineMedia } from "@/lib/data/machine-media";
 import { syncCouponSnapshots } from "@/lib/data/coupons";
@@ -68,12 +68,14 @@ async function executeFleetSync(
     } catch (error) { console.error(`[fleet-sync] Media failed for ${device.deviceImei}:`, error); }
     try {
       const readings = await pullTemperatures(cfg, device.deviceImei, yesterday, today);
+      const timestamps = normalizeHuaxinTimestamps((readings.category ?? []).map((item) => item.label), yesterday);
       const rows = (readings.dataset ?? []).flatMap((series) => (series.data ?? []).flatMap((point, index) => {
-        const value = Number(point.value);
-        return Number.isFinite(value) ? [{
+        const value = parseHuaxinTemperatureValue(point.value);
+        const readingTime = timestamps[index];
+        return value !== null && readingTime ? [{
           machine_id: machine.id,
-          reading_time: normalizeHuaxinTimestamp(readings.category?.[index]?.label, today),
-          series_name: series.seriesname ?? "temperature",
+          reading_time: readingTime,
+          series_name: series.seriesname?.trim() || "temperature",
           value,
         }] : [];
       }));

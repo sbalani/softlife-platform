@@ -509,11 +509,12 @@ export default async function MachineDetailPage({
       {/* Temperature */}
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">
         <div className="flex items-center justify-between">
-          <h2 className="font-display text-lg font-bold text-cocoa">Cylinder temperature</h2>
+          <h2 className="font-display text-lg font-bold text-cocoa">Historical temperature{telemetry?.temperature_series_name ? ` · ${telemetry.temperature_series_name}` : ""}</h2>
           {telemetry?.temperature_observed_at && (
             <span className="text-xs text-taupe">Observed {formatDateTime(telemetry.temperature_observed_at, tz)}</span>
           )}
         </div>
+        <p className="mt-1 text-xs text-taupe">This is Huaxin’s tracking series. The live status card’s measured temperature is a separate controller signal and may represent a different probe.</p>
         {telemetry && telemetry.temperatures.length ? (
           <div className="mt-3">
             <LineChart data={telemetry.temperatures.map((t) => ({ label: new Date(t.time).toLocaleTimeString("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit" }), value: t.value }))} color="#6fa98c" height={180} unit="°C" zoomable dynamicScale />

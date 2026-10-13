@@ -17,11 +17,12 @@ Send it in `x-odoo-sync-secret` for every endpoint below.
 { "worker": "unique-lease-owner", "limit": 20 }
 ```
 
-The response contains movement rows, `movement_group_id`, and a per-claim
-`lease_token`. Rows sharing a non-null group are one atomic Odoo transfer. Use
-each returned `external_reference` (`softlife:` for individual movements and
-`softlife-transfer:` for transfer legs) as an idempotency key, and execute a
-transfer group as one Odoo operation.
+The response currently claims only complete transfer pairs. It contains both
+movement rows, their shared `movement_group_id`, and a per-claim `lease_token`.
+Use each returned `softlife-transfer:` external reference as an idempotency key,
+and execute the pair as one Odoo internal transfer. Individual receipts,
+corrections, refills, and reversals remain queued until their Odoo accounting
+and location semantics are defined.
 
 ## Record Result
 

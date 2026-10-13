@@ -2,10 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SessionProfile } from "./session.ts";
 import { ymd } from "../dates.ts";
 
-export type MobileCapability = "machines.read" | "analytics.read" | "service.refill" | "service.clean" | "action_reports.write" | "action_reports.attach" | "alerts.read" | "recall.read" | "remote.basic" | "defrost.run";
+export type MobileCapability = "machines.read" | "analytics.read" | "service.refill" | "service.clean" | "action_reports.write" | "action_reports.attach" | "alerts.read" | "recall.read" | "remote.basic" | "defrost.run" | "inventory.transfer";
 
 export const MOBILE_CAPABILITIES: Record<SessionProfile["role"], MobileCapability[]> = {
-  admin: ["machines.read", "analytics.read", "service.refill", "service.clean", "action_reports.write", "action_reports.attach", "alerts.read", "recall.read", "remote.basic", "defrost.run"],
+  admin: ["machines.read", "analytics.read", "service.refill", "service.clean", "action_reports.write", "action_reports.attach", "alerts.read", "recall.read", "remote.basic", "defrost.run", "inventory.transfer"],
   operator: ["machines.read", "analytics.read", "service.refill", "service.clean", "action_reports.write", "action_reports.attach", "alerts.read", "recall.read"],
   franchisee: ["machines.read", "analytics.read", "service.refill", "service.clean", "action_reports.write", "action_reports.attach", "alerts.read", "recall.read", "remote.basic"],
 };

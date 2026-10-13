@@ -10,6 +10,9 @@ test("mobile roles expose only their operational capabilities", () => {
   assert.equal(MOBILE_CAPABILITIES.franchisee.includes("service.clean"), true);
   assert.equal(MOBILE_CAPABILITIES.operator.includes("action_reports.write"), true);
   assert.equal(MOBILE_CAPABILITIES.operator.includes("action_reports.attach"), true);
+  assert.equal(MOBILE_CAPABILITIES.admin.includes("inventory.transfer"), true);
+  assert.equal(MOBILE_CAPABILITIES.operator.includes("inventory.transfer"), false);
+  assert.equal(MOBILE_CAPABILITIES.franchisee.includes("inventory.transfer"), false);
   assert.equal(hasMobileCapability({ id: "user", email: null, role: "operator", tenantId: null, employerKind: "softlife", scopeVersion: 1, capabilities: MOBILE_CAPABILITIES.operator }, "service.refill"), true);
 });
 

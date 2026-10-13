@@ -19,6 +19,7 @@
     "test:fleet": "node --experimental-strip-types --test src/lib/data/fleet-freshness.test.ts",
     "test:service-history": "node --experimental-strip-types --test src/lib/data/clean-logs.test.ts src/lib/data/service-url.test.ts",
     "test:mobile-auth": "node --experimental-strip-types --test src/lib/auth/mobile-authorization.test.ts",
+    "test:inventory-transfers": "node --experimental-strip-types --test src/lib/inventory-transfer-contract.test.ts",
     "test:mobile-status": "node --experimental-strip-types --test src/lib/data/mobile-machine-status.test.ts",
     "test:mobile-refresh": "node --experimental-strip-types --test src/lib/data/huaxin-machine-refresh.test.ts",
     "test:mobile-menu": "node --experimental-strip-types --test src/lib/data/mobile-machine-menu.test.ts",

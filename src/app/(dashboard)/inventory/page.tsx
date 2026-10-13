@@ -25,7 +25,7 @@ export default async function InventoryPage() {
 
       <section className="mb-8 rounded-2xl border border-line bg-white p-5">
         <h2 className="mb-1 font-display text-xl font-bold text-cocoa">Record stock movement</h2>
-        <p className="mb-4 text-sm text-taupe">Movements are append-only and queued for Odoo. Negative changes cannot make effective stock negative.</p>
+        <p className="mb-4 text-sm text-taupe">Receipts and corrections are append-only and queued for Odoo. Use <a href="/transfers" className="font-semibold text-terracotta hover:underline">Transfers</a> to move central stock to a subwarehouse.</p>
         <InventoryMovementForms warehouses={inventory.warehouses} lots={inventory.lots} />
       </section>
 

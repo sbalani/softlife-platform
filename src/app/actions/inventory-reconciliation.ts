@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { getSessionProfile } from "@/lib/auth/session";
+import { parseInventoryTransferInput } from "@/lib/inventory-transfer-contract";
+import { recordInventoryTransfer } from "@/lib/inventory-transfers";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 
 export type InventoryActionResult = { ok: boolean; error?: string; message?: string };
@@ -35,6 +37,7 @@ function movementFields(formData: FormData) {
 
 function refreshInventory() {
   revalidatePath("/inventory");
+  revalidatePath("/transfers");
   revalidatePath("/lot-audit");
   revalidatePath("/refills");
 }
@@ -82,22 +85,10 @@ export async function recordCorrection(_previous: InventoryActionResult | null, 
 export async function recordStockTransfer(_previous: InventoryActionResult | null, formData: FormData): Promise<InventoryActionResult> {
   try {
     const { actor, s } = await adminContext();
-    const values = movementFields(formData);
-    const destinationId = Number(formData.get("destination_warehouse_id"));
-    if (!Number.isInteger(destinationId)) throw new Error("Select a destination warehouse.");
-    const { error } = await s.rpc("record_warehouse_transfer", {
-      p_client_uuid: values.clientUuid,
-      p_source_warehouse_id: values.warehouseId,
-      p_destination_warehouse_id: destinationId,
-      p_odoo_lot_id: values.lotId,
-      p_quantity: positive(formData.get("quantity")),
-      p_occurred_at: values.occurredAt,
-      p_reason: values.reason,
-      p_actor_id: actor.id,
-    });
-    if (error) throw error;
+    const input = parseInventoryTransferInput(Object.fromEntries(formData));
+    const result = await recordInventoryTransfer(s, actor.id, input);
     refreshInventory();
-    return { ok: true, message: "Transfer recorded and queued for Odoo." };
+    return { ok: true, message: result.created ? "Transfer recorded and queued for Odoo." : `Transfer was already recorded. Current Odoo status: ${result.status.replaceAll("_", " ")}.` };
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
 }
 

@@ -3,14 +3,14 @@ import { OrderDataNote } from "@/components/order-data-note";
 import { UpdateOrdersButton } from "./UpdateOrdersButton";
 import { formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
-import { analyticsRange } from "@/lib/analytics";
+import { analyticsRange, cashSalesSummary } from "@/lib/analytics";
 import { getMachines } from "@/lib/data/machines";
 import { filterOrdersByMachinePeriods, getAccessibleMachinePeriods } from "@/lib/data/accessible-machines";
 import { getSessionProfile } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = { dateFrom?: string; dateTo?: string; machineId?: string; minPrice?: string; maxPrice?: string; couponOnly?: string; refundedOnly?: string; serverModeOnly?: string };
+type SearchParams = { dateFrom?: string; dateTo?: string; machineId?: string; minPrice?: string; maxPrice?: string; couponOnly?: string; refundedOnly?: string; serverModeOnly?: string; cashOnly?: string };
 
 const STATE_TONE: Record<string, string> = {
   COMPLETE: "bg-sage/15 text-sage",
@@ -43,6 +43,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     couponOnly: sp.couponOnly === "1" ? true : undefined,
     refundedOnly: sp.refundedOnly === "1" ? true : undefined,
     serverModeOnly: sp.serverModeOnly === "1" ? true : undefined,
+    cashOnly: sp.cashOnly === "1" ? true : undefined,
   });
   const { sync, readError } = orderResult;
   const orders = filterOrdersByMachinePeriods(orderResult.orders, machineAccess, tz);
@@ -52,6 +53,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const franchiseeOwed = completed.filter((o) => o.is_server_mode).reduce((s, o) => s + o.price, 0);
   const couponCount = orders.filter((o) => o.coupon_used).length;
   const refundedCount = orders.filter((o) => o.refund_status === "Refunded").length;
+  const cash = cashSalesSummary(orders);
 
   return (
     <div>
@@ -68,6 +70,12 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       </header>
 
       <OrderDataNote sync={sync} readError={readError} requestedTo={range.to} timeZone={tz} />
+
+      <section className="mt-4 grid gap-3 sm:grid-cols-3" aria-label="Cash sales summary">
+        <div className="rounded-xl border border-line bg-white p-4"><p className="text-[11px] font-bold uppercase tracking-wide text-taupe">Cash collected</p><p className="mt-1 font-display text-2xl font-bold text-cocoa">€{cash.gross.toFixed(2)}</p><p className="text-xs text-taupe">{cash.orders} completed cash transaction{cash.orders === 1 ? "" : "s"}</p></div>
+        <div className="rounded-xl border border-danger/20 bg-danger/5 p-4"><p className="text-[11px] font-bold uppercase tracking-wide text-taupe">Cash refunded</p><p className="mt-1 font-display text-2xl font-bold text-danger">€{cash.refunded.toFixed(2)}</p><p className="text-xs text-taupe">Refunded transactions in this window</p></div>
+        <div className="rounded-xl border border-sage/25 bg-sage/5 p-4"><p className="text-[11px] font-bold uppercase tracking-wide text-taupe">Expected cash</p><p className="mt-1 font-display text-2xl font-bold text-sage">€{cash.expected.toFixed(2)}</p><p className="text-xs text-taupe">Collected less refunded · {range.from} to {range.to}</p></div>
+      </section>
 
       {/* Filters */}
       <form className="mt-4 mb-4 flex flex-wrap items-end gap-3">
@@ -87,6 +95,10 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         <label className="block">
           <span className={label}>Max price (€)</span>
           <input name="maxPrice" type="number" step="0.01" defaultValue={sp.maxPrice} className={`w-24 ${input}`} />
+        </label>
+        <label className="flex items-center gap-1.5 text-sm text-cocoa">
+          <input type="checkbox" name="cashOnly" value="1" defaultChecked={sp.cashOnly === "1"} className="accent-terracotta" />
+          Cash only
         </label>
         <label className="flex items-center gap-1.5 text-sm text-cocoa">
           <input type="checkbox" name="serverModeOnly" value="1" defaultChecked={sp.serverModeOnly === "1"} className="accent-terracotta" />
@@ -112,7 +124,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
               <th className="px-4 py-3 font-bold">Machine name</th>
               <th className="px-4 py-3 font-bold">IMEI</th>
               <th className="px-4 py-3 font-bold">Products</th>
-              <th className="px-4 py-3 font-bold">Pay Type</th>
+              <th className="px-4 py-3 font-bold">Payment method</th>
               <th className="px-4 py-3 text-right font-bold">List Price</th>
               <th className="px-4 py-3 text-right font-bold">Charged</th>
               <th className="px-4 py-3 text-right font-bold">Discount</th>

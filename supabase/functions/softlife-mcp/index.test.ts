@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertThrows } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { actionReportImageInput, apiKeyFromRequest, availableTools, completeWeatherSeries, dispatchMessage, isLowStock, isMcpNetSale, isOverheated, madridMidnightUtc, normalizedMcpOrderState, parseOpenMeteoDaily, reportPayload, salesNoteInput, structuredToolContent, summarizeTemperatureExcursions, temperatureExcursionInput, type Principal } from "./index.ts";
+import { actionReportImageInput, apiKeyFromRequest, availableTools, completeWeatherSeries, dispatchMessage, isLowStock, isMcpNetSale, isOverheated, madridMidnightUtc, normalizedMcpOrderState, parseOpenMeteoDaily, paymentCategory, reportPayload, salesNoteInput, structuredToolContent, summarizeTemperatureExcursions, temperatureExcursionInput, type Principal } from "./index.ts";
 
 function principal(role: "admin" | "operator" | "franchisee", scopes: ("read" | "forms" | "commands" | "sales_context" | "sales_notes" | "incidents")[]): Principal {
   return {
@@ -288,6 +288,14 @@ Deno.test("MCP sales normalize stored Huaxin status and refund codes", () => {
   assert(!isMcpNetSale({ order_state: "COMPLETE", status_code: "3", refund_status: "0", pay_type_raw: "自动制作" }));
 });
 
+Deno.test("payment methods use stable English terminology", () => {
+  assertEquals(paymentCategory("刷卡支付"), "Card");
+  assertEquals(paymentCategory(" 现金支付 "), "Cash");
+  assertEquals(paymentCategory("串码支付"), "Coupon");
+  assertEquals(paymentCategory("自动制作"), "Admin override");
+  assertEquals(paymentCategory("未知方式"), "Other");
+});
+
 Deno.test("Huaxin safety states detect low stock and compressor overheat", () => {
   assert(!isLowStock([{ code: "status_0_lackmaterial", value: "正常" }]));
   assert(isLowStock([{ code: "status_0_lackmaterial", value: "lack" }]));
@@ -374,7 +382,7 @@ Deno.test("initialize validates parameters and negotiates supported versions", a
   assertEquals((invalid?.error as { code?: number }).code, -32602);
   const valid = await dispatchMessage({ jsonrpc: "2.0", id: 2, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } } }, actor, null as never);
   assertEquals((valid?.result as { protocolVersion?: string }).protocolVersion, "2025-03-26");
-  assertEquals((valid?.result as { serverInfo?: { version?: string } }).serverInfo?.version, "3.6.4");
+  assertEquals((valid?.result as { serverInfo?: { version?: string } }).serverInfo?.version, "3.6.5");
   const unknown = await dispatchMessage({ jsonrpc: "2.0", id: 3, method: "initialize", params: { protocolVersion: "2099-01-01", capabilities: {}, clientInfo: { name: "test", version: "1" } } }, actor, null as never);
   assertEquals((unknown?.result as { protocolVersion?: string }).protocolVersion, "2025-03-26");
 });

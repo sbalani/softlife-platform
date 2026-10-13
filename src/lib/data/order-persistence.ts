@@ -1,6 +1,6 @@
 import type { HuaxinOrder } from "../huaxin/client.ts";
 import { huaxinLocalTimeToUtc, huaxinOrderTime } from "../huaxin/order-time.ts";
-import { isAdminOverride, isServerModeOrder, translatePayType } from "../i18n/huaxin.ts";
+import { isAdminOverride, isServerModeOrder, paymentMethodCode, translatePayType } from "../i18n/huaxin.ts";
 import { ymd } from "../dates.ts";
 
 type MachineRef = { id: string | null; tenantId: string | null; imei: string };
@@ -127,6 +127,7 @@ export function storedOrderFromRow(row: Record<string, unknown>) {
     nums: Number(row.nums ?? 1),
     amount: Number(row.amount ?? 1),
     pay_type_raw: payTypeRaw,
+    pay_type_code: paymentMethodCode(payTypeRaw),
     pay_type: translatePayType(payTypeRaw),
     is_server_mode: serverMode,
     is_admin_override: adminOverride,

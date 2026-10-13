@@ -169,6 +169,13 @@ export function filterAnalyticsOrders(orders: Order[], params: AnalyticsParams, 
   });
 }
 
+export function cashSalesSummary(orders: Pick<Order, "order_state" | "pay_type_code" | "is_admin_override" | "refund_status" | "price">[]) {
+  const completedCash = orders.filter((order) => order.order_state === "COMPLETE" && order.pay_type_code === "cash" && !order.is_admin_override);
+  const gross = completedCash.reduce((sum, order) => sum + order.price, 0);
+  const refunded = completedCash.filter((order) => order.refund_status === "Refunded").reduce((sum, order) => sum + order.price, 0);
+  return { orders: completedCash.length, gross, refunded, expected: gross - refunded };
+}
+
 export type ToppingConsumptionRow = { name: string; servings: number; orders: number };
 
 export function toppingConsumption(orders: Order[], aliasMap: AliasMap): ToppingConsumptionRow[] {

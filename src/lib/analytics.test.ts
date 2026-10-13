@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyticsPresetRange, analyticsRange, canonicalProductCombination, dailyIncidentCounts, dailySalesTotals, filterAnalyticsOrders, machineSalesReport, resolveAnalyticsMachineId, salesTimeBreakdown, toppingConsumption } from "./analytics.ts";
+import { analyticsPresetRange, analyticsRange, canonicalProductCombination, cashSalesSummary, dailyIncidentCounts, dailySalesTotals, filterAnalyticsOrders, machineSalesReport, resolveAnalyticsMachineId, salesTimeBreakdown, toppingConsumption } from "./analytics.ts";
 import type { Order } from "./data/orders.ts";
 
 test("analytics range creates an equal previous period", () => {
@@ -85,6 +85,17 @@ test("analytics filters resolve product aliases", () => {
   const aliases = new Map([["old vanilla", { productId: "1", productName: "Vanilla" }]]);
   assert.equal(filterAnalyticsOrders([order], { machineId: "machine-1", payType: "Card", product: "vanilla" }, aliases).length, 1);
   assert.equal(filterAnalyticsOrders([order], { machineId: "machine-2" }, aliases).length, 0);
+});
+
+test("cash sales summary separates refunded cash from expected cash", () => {
+  const orders = [
+    { order_state: "COMPLETE", pay_type_code: "cash", is_admin_override: false, refund_status: null, price: 10 },
+    { order_state: "COMPLETE", pay_type_code: "cash", is_admin_override: false, refund_status: "Refunded", price: 4 },
+    { order_state: "PENDING", pay_type_code: "cash", is_admin_override: false, refund_status: null, price: 50 },
+    { order_state: "COMPLETE", pay_type_code: "card", is_admin_override: false, refund_status: null, price: 20 },
+    { order_state: "COMPLETE", pay_type_code: "cash", is_admin_override: true, refund_status: null, price: 30 },
+  ] as Pick<Order, "order_state" | "pay_type_code" | "is_admin_override" | "refund_status" | "price">[];
+  assert.deepEqual(cashSalesSummary(orders), { orders: 2, gross: 14, refunded: 4, expected: 10 });
 });
 
 test("hourly sales compare weekday occurrences with the all-days average", () => {

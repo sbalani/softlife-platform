@@ -2,6 +2,7 @@ import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { ymd as localYmd } from "@/lib/dates";
 import { storedOrderFromRow } from "@/lib/data/order-persistence";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { PaymentMethodCode } from "@/lib/i18n/huaxin";
 
 export type OrderProduct = { goodsName: string; price: string; position: number };
 
@@ -24,6 +25,7 @@ export type Order = {
   nums: number;
   amount: number;
   pay_type_raw: string | null;
+  pay_type_code: PaymentMethodCode | null;
   pay_type: string | null;
   is_server_mode: boolean;
   is_admin_override: boolean;
@@ -65,6 +67,7 @@ export async function getOrders(filters?: {
   couponOnly?: boolean;
   refundedOnly?: boolean;
   serverModeOnly?: boolean;
+  cashOnly?: boolean;
   dateFrom?: string;
   dateTo?: string;
   timeZone?: string;
@@ -122,6 +125,7 @@ export async function getOrders(filters?: {
     if (filters?.couponOnly) filtered = filtered.filter((o) => o.coupon_used);
     if (filters?.refundedOnly) filtered = filtered.filter((o) => o.refund_status === "Refunded");
     if (filters?.serverModeOnly) filtered = filtered.filter((o) => o.is_server_mode);
+    if (filters?.cashOnly) filtered = filtered.filter((o) => o.pay_type_code === "cash");
     filtered = filtered.filter((order) => {
       const day = localYmd(new Date(order.order_time), range.timeZone);
       return day >= range.from && day <= range.to;

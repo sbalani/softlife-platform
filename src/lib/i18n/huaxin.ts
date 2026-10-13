@@ -3,27 +3,47 @@
 
 // ---- Pay types (order.payType) ----
 
-export const PAY_TYPE_MAP: Record<string, string> = {
-  "自动制作": "Admin override",
-  "微信支付": "WeChat Pay",
-  "支付宝": "Alipay",
-  "刷卡": "Card",
-  "现金": "Cash",
-  "投币": "Coin",
-  "扫码支付": "QR Payment",
-  "串码支付": "Coupon",
-  "免费": "Free",
+export type PaymentMethodCode = "admin_override" | "wechat_pay" | "alipay" | "card" | "cash" | "coin" | "qr_payment" | "coupon" | "free" | "other";
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethodCode, string> = {
+  admin_override: "Admin override",
+  wechat_pay: "WeChat Pay",
+  alipay: "Alipay",
+  card: "Card",
+  cash: "Cash",
+  coin: "Coin",
+  qr_payment: "QR payment",
+  coupon: "Coupon",
+  free: "Free",
+  other: "Other",
 };
 
+const PAYMENT_METHOD_ALIASES: Record<string, PaymentMethodCode> = {
+  "自动制作": "admin_override", "admin override": "admin_override",
+  "微信支付": "wechat_pay", "wechat pay": "wechat_pay", "wechat": "wechat_pay",
+  "支付宝": "alipay", "alipay": "alipay",
+  "刷卡": "card", "刷卡支付": "card", "card": "card", "card payment": "card",
+  "现金": "cash", "现金支付": "cash", "cash": "cash", "cash payment": "cash",
+  "投币": "coin", "coin": "coin",
+  "扫码支付": "qr_payment", "qr payment": "qr_payment", "qr code payment": "qr_payment",
+  "串码支付": "coupon", "coupon": "coupon",
+  "免费": "free", "free": "free",
+};
+
+export function paymentMethodCode(raw: string | null): PaymentMethodCode | null {
+  const normalized = raw?.trim().toLowerCase();
+  return normalized ? PAYMENT_METHOD_ALIASES[normalized] ?? "other" : null;
+}
+
 export function translatePayType(raw: string | null): string | null {
-  if (!raw) return null;
-  return PAY_TYPE_MAP[raw] ?? raw;
+  const code = paymentMethodCode(raw);
+  return code ? PAYMENT_METHOD_LABELS[code] : null;
 }
 
 // ---- Admin override / server mode detection ----
 
 export function isAdminOverride(payType: string | null): boolean {
-  return payType === "自动制作" || payType === "Admin override";
+  return paymentMethodCode(payType) === "admin_override";
 }
 
 export function isServerModeOrder(_payType: string | null): boolean {

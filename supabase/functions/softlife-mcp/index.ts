@@ -11,8 +11,13 @@ const ACTIVE_DEFROST_STATES = ["scheduled", "thawing", "thaw_closed", "refrigera
 const VALID_MODES = ["cleaning", "refill", "other"] as const;
 const ADMIN_OVERRIDE_PAY_TYPES = new Set(["自动制作", "Admin override"]);
 const PAYMENT_TYPES: Record<string, string> = {
-  "微信支付": "WeChat Pay", "支付宝": "Alipay", "刷卡": "Card", "现金": "Cash",
-  "投币": "Coin", "扫码支付": "QR Payment", "免费": "Free",
+  "微信支付": "WeChat Pay", "wechat pay": "WeChat Pay", "wechat": "WeChat Pay",
+  "支付宝": "Alipay", "alipay": "Alipay",
+  "刷卡": "Card", "刷卡支付": "Card", "card": "Card", "card payment": "Card",
+  "现金": "Cash", "现金支付": "Cash", "cash": "Cash", "cash payment": "Cash",
+  "投币": "Coin", "coin": "Coin", "扫码支付": "QR payment", "qr payment": "QR payment",
+  "串码支付": "Coupon", "coupon": "Coupon", "免费": "Free", "free": "Free",
+  "自动制作": "Admin override", "admin override": "Admin override",
 };
 const MCP_PROTOCOL_VERSION = "2025-03-26";
 const ACTION_REPORT_PHOTO_BUCKET = "service-action-evidence";
@@ -204,9 +209,9 @@ function positiveLimit(value: unknown, fallback = 50) {
   return Number(value);
 }
 
-function paymentCategory(value: string | null | undefined) {
+export function paymentCategory(value: string | null | undefined) {
   if (!value) return null;
-  return PAYMENT_TYPES[value] ?? (Object.values(PAYMENT_TYPES).includes(value) ? value : "Other");
+  return PAYMENT_TYPES[value.trim().toLowerCase()] ?? "Other";
 }
 
 export function normalizedMcpOrderState(row: { order_state?: unknown; status_code?: unknown }) {
@@ -1152,7 +1157,7 @@ export async function dispatchMessage(message: unknown, principal: Principal, s:
       return errorPayload(id, -32602, "Invalid initialize parameters");
     }
     const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.has(initialize.protocolVersion) ? initialize.protocolVersion : MCP_PROTOCOL_VERSION;
-    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.6.4" } });
+    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.6.5" } });
   }
   if (request.method === "tools/list") return resultPayload(id, { tools: availableTools(principal) });
   if (request.method !== "tools/call") return errorPayload(id, -32601, `Method not found: ${request.method}`);

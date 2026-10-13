@@ -21,7 +21,7 @@ const SEV: Record<string, { ring: string; dot: string; label: string }> = {
   info: { ring: "border-sage/30", dot: "bg-sage", label: "Info" },
 };
 
-export default async function AlertsPage({ searchParams }: { searchParams: Promise<{ tenant?: string | string[] }> }) {
+export default async function AlertsPage({ searchParams }: { searchParams: Promise<{ tenant?: string | string[]; pasteurizationMachine?: string | string[] }> }) {
   const params = await searchParams;
   const [session, machineScope, tz] = await Promise.all([getSessionProfile(), getAccessibleMachineIds(), getDisplayTimezone()]);
   const isAdmin = session?.role === "admin";
@@ -39,6 +39,8 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
   const machines = adminData?.[1].machines ?? [];
   const products = adminData?.[2] ?? [];
   const pasteurization = adminData?.[3] ?? { schedules: [], suggestions: [] };
+  const requestedPasteurizationMachine = typeof params.pasteurizationMachine === "string" ? params.pasteurizationMachine : undefined;
+  const defaultPasteurizationMachine = machines.some((machine) => machine.id === requestedPasteurizationMachine) ? requestedPasteurizationMachine : undefined;
   return (
     <div>
       <header className="mb-8">
@@ -50,6 +52,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
       {isAdmin && <PasteurizationManager
         machines={machines.map((machine) => ({ id: machine.id, name: machine.display_name || machine.name }))}
         schedules={pasteurization.schedules} suggestions={pasteurization.suggestions} timeZone={tz} today={ymd(new Date(), tz)}
+        defaultMachineId={defaultPasteurizationMachine}
       />}
 
       <h2 className="mb-3 font-display text-xl font-bold text-cocoa">Active alerts</h2>

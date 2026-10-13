@@ -14,16 +14,17 @@ function observed(value: string, timeZone: string) {
   return new Intl.DateTimeFormat("en-GB", { timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-export function PasteurizationManager({ machines, schedules, suggestions, timeZone, today }: {
+export function PasteurizationManager({ machines, schedules, suggestions, timeZone, today, defaultMachineId }: {
   machines: { id: string; name: string }[];
   schedules: PasteurizationSchedule[];
   suggestions: PasteurizationSuggestion[];
   timeZone: string;
   today: string;
+  defaultMachineId?: string;
 }) {
   const [result, action, pending] = useActionState<AlertRuleResult | null, FormData>(savePasteurizationSchedule, null);
   const [updating, startTransition] = useTransition();
-  return <section className="mb-6 rounded-2xl border border-terracotta/25 bg-terracotta/5 p-5">
+  return <section id="pasteurization-alert-windows" className="mb-6 scroll-mt-6 rounded-2xl border border-terracotta/25 bg-terracotta/5 p-5">
     <h2 className="font-display text-lg font-bold text-cocoa">Pasteurization alert windows</h2>
     <p className="mt-1 text-xs text-taupe">Temperature readings remain stored, but temperature alerts are suppressed during an active window. A schedule is operational alert handling only and is not proof that a product batch was pasteurized.</p>
 
@@ -47,7 +48,7 @@ export function PasteurizationManager({ machines, schedules, suggestions, timeZo
     </div>}
 
     <form action={action} className="mt-5 flex flex-wrap items-end gap-3 border-t border-terracotta/15 pt-4">
-      <label><span className={label}>Machine</span><select name="machine_id" required className={input}><option value="">Select machine</option>{machines.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}</select></label>
+      <label><span className={label}>Machine</span><select name="machine_id" required defaultValue={defaultMachineId ?? ""} className={input}><option value="">Select machine</option>{machines.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}</select></label>
       <label><span className={label}>Temperature series</span><input name="series_name" placeholder="Blank = all series" className={`w-40 ${input}`} /></label>
       <label><span className={label}>Anchor date</span><input name="anchor_date" type="date" required defaultValue={today} className={input} /></label>
       <label><span className={label}>Every</span><select name="interval_days" defaultValue="2" className={input}><option value="1">1 day</option><option value="2">2 days</option><option value="3">3 days</option></select></label>

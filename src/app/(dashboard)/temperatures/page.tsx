@@ -12,6 +12,7 @@ import {
   type TemperaturePeriod,
 } from "@/lib/temperature-explorer";
 import { getDisplayTimezone } from "@/lib/timezone";
+import { getPasteurizationAlertSettings } from "@/lib/data/pasteurization";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +54,7 @@ export default async function TemperaturesPage({ searchParams }: { searchParams:
   if (!session || session.role !== "admin") redirect("/refills");
 
   const parsed = parseTemperatureExplorerParams(await searchParams);
-  const [{ options, error: optionError }, tz] = await Promise.all([getTemperatureSeriesOptions(), getDisplayTimezone()]);
+  const [{ options, error: optionError }, tz, pasteurization] = await Promise.all([getTemperatureSeriesOptions(), getDisplayTimezone(), getPasteurizationAlertSettings()]);
   const firstOption = options.find((option) => option.machineId === parsed.machineId) ?? options[0];
   const params: TemperatureExplorerParams = {
     ...parsed,
@@ -91,6 +92,13 @@ export default async function TemperaturesPage({ searchParams }: { searchParams:
           ))}
         </div>
       </header>
+
+      <section className={`mb-6 rounded-xl border px-4 py-3 ${pasteurization.suggestions.length ? "border-warning/40 bg-warning/10" : "border-line bg-cream/35"}`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><p className="text-sm font-bold text-cocoa">Pasteurization alert windows</p><p className="mt-0.5 text-xs text-taupe">{pasteurization.suggestions.length ? `${pasteurization.suggestions.length} detected pattern${pasteurization.suggestions.length === 1 ? " is" : "s are"} awaiting review.` : "Set or review expected elevated-temperature windows from the Alerts workspace."}</p></div>
+          <Link href={`/alerts${params.machineId ? `?pasteurizationMachine=${params.machineId}` : ""}#pasteurization-alert-windows`} className="rounded-lg bg-cocoa px-4 py-2 text-xs font-bold text-white">{pasteurization.suggestions.length ? "Review suggestions" : "Configure windows"}</Link>
+        </div>
+      </section>
 
       <form className="mb-6 rounded-2xl border border-line bg-sand/35 p-4" method="get">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

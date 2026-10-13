@@ -42,6 +42,7 @@ import { createRefillIncident } from "@/app/actions/incidents";
 import { defrostFormationPct, defrostStatusValue, isHuaxinClosed, isHuaxinOpen, isMachineStatusCurrent } from "@/lib/defrost-status";
 import { getAlerts } from "@/lib/data/alerts";
 import { DismissAlertButton } from "@/components/DismissAlertButton";
+import { getPasteurizationAlertSettings } from "@/lib/data/pasteurization";
 
 export const dynamic = "force-dynamic";
 
@@ -79,12 +80,13 @@ export default async function MachineDetailPage({
   } else if (Date.parse(`${dateTo}T00:00:00Z`) - Date.parse(`${dateFrom}T00:00:00Z`) > 365 * 86_400_000) {
     dateFrom = ymd(new Date(Date.parse(`${dateTo}T00:00:00Z`) - 365 * 86_400_000), "UTC");
   }
-  const [config, tenants, telemetry, ingredients, { machines: allMachines }] = await Promise.all([
+  const [config, tenants, telemetry, ingredients, { machines: allMachines }, pasteurization] = await Promise.all([
     getMachineConfig(imei),
     getTenants(),
     getMachineDetail(imei, { from: dateFrom, to: dateTo, timeZone: tz }),
     getProducts(),
     getMachines(),
+    session.role === "admin" ? getPasteurizationAlertSettings() : Promise.resolve({ schedules: [], suggestions: [] }),
   ]);
   const menu = telemetry?.menu ?? { diy: [], unify: [] };
   const status = telemetry?.status ?? [];
@@ -103,6 +105,9 @@ export default async function MachineDetailPage({
     ])
     : [null, [], [], [], [], [], { alerts: [] }];
   const machineAlerts = machineAlertResult.alerts;
+  const pasteurizationSchedules = pasteurization.schedules.filter((schedule) => schedule.machineId === config?.machineId);
+  const pasteurizationSuggestions = pasteurization.suggestions.filter((suggestion) => suggestion.machineId === config?.machineId);
+  const activePasteurizationSchedule = pasteurizationSchedules.find((schedule) => schedule.enabled);
   const blockingAlerts = machineAlerts.filter((alert) => alert.type !== "defrost_automation_failed");
   const draftByMenuKey = new Map((pendingDraft?.items ?? []).filter((item) => item.menuKind).map((item) => [`${item.menuKind}:${item.position}`, item]));
   const legacyDraftByPosition = new Map((pendingDraft?.items ?? []).filter((item) => !item.menuKind).map((item) => [item.position, item]));
@@ -198,6 +203,13 @@ export default async function MachineDetailPage({
       <p className="-mt-6 mb-6 text-xs text-taupe">
         Supabase snapshot · Machine data synced {telemetry?.machine_synced_at ? formatDateTime(telemetry.machine_synced_at, tz) : "never"}
       </p>
+
+      {session.role === "admin" && config?.machineId && <section className={`mb-6 rounded-xl border p-4 ${pasteurizationSuggestions.length ? "border-warning/40 bg-warning/10" : activePasteurizationSchedule ? "border-sage/30 bg-sage/5" : "border-line bg-cream/35"}`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><p className="text-[11px] font-bold uppercase tracking-wide text-taupe">Pasteurization alert window</p>{pasteurizationSuggestions.length ? <p className="mt-1 text-sm font-bold text-warning">{pasteurizationSuggestions.length} detected pattern{pasteurizationSuggestions.length === 1 ? "" : "s"} awaiting review</p> : activePasteurizationSchedule ? <p className="mt-1 text-sm font-semibold text-cocoa">Active every {activePasteurizationSchedule.intervalDays} day{activePasteurizationSchedule.intervalDays === 1 ? "" : "s"} at {activePasteurizationSchedule.startLocal} for {activePasteurizationSchedule.durationMinutes} minutes</p> : <p className="mt-1 text-sm font-semibold text-cocoa">No alert-suppression window is configured for this machine.</p>}<p className="mt-1 text-xs text-taupe">Windows suppress expected elevated-temperature alerts; they do not certify batch pasteurization.</p></div>
+          <Link href={`/alerts?pasteurizationMachine=${config.machineId}#pasteurization-alert-windows`} className="rounded-lg bg-cocoa px-4 py-2 text-xs font-bold text-white">{pasteurizationSuggestions.length ? "Review suggestion" : activePasteurizationSchedule ? "Manage window" : "Set window"}</Link>
+        </div>
+      </section>}
 
       <section className="mb-6 grid gap-3 sm:grid-cols-2" aria-label="Refrigeration and physical defrost status">
         <div className={`rounded-xl border p-4 ${!statusCurrent ? "border-warning/40 bg-warning/10" : refrigerationOn ? "border-sage/40 bg-sage/10" : refrigerationOff ? "border-danger/40 bg-danger/10" : "border-warning/40 bg-warning/10"}`}>

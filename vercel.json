@@ -11,7 +11,7 @@
     },
     {
       "path": "/api/cron/action-report-stock",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 9 * * *"
     }
   ]
 }

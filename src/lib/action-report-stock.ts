@@ -8,6 +8,7 @@ const LANE_TO_POSITION: Record<string, string> = {
 };
 
 type SnapshotResult = { id: string; status: "captured" | "needs_review"; duplicate: boolean };
+type ClaimedStockJob = { job_id: string; report_id: string; actor_id: string; lease_token: string; attempt_count: number };
 
 async function sha256(value: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -56,4 +57,30 @@ export async function captureActionReportStockSnapshot(s: SupabaseClient, report
   });
   if (error) throw error;
   return data as SnapshotResult;
+}
+
+export async function runActionReportStockSnapshotJobs(limit = 1) {
+  const { createServiceClient } = await import("@/lib/supabase/server");
+  const s = await createServiceClient();
+  const worker = `vercel-${crypto.randomUUID()}`;
+  const { data, error } = await s.rpc("claim_service_action_stock_snapshot_jobs", { p_worker: worker, p_limit: limit });
+  if (error) throw error;
+  const jobs = (data as ClaimedStockJob[]) ?? [];
+  const results: { jobId: string; status: string }[] = [];
+  for (const job of jobs) {
+    try {
+      await captureActionReportStockSnapshot(s, job.report_id, job.actor_id);
+      results.push({ jobId: job.job_id, status: "complete" });
+    } catch (jobError) {
+      const { data: status, error: failError } = await s.rpc("fail_service_action_stock_snapshot_job", {
+        p_job_id: job.job_id,
+        p_worker: worker,
+        p_lease_token: job.lease_token,
+        p_error: jobError instanceof Error ? jobError.message : String(jobError),
+      });
+      if (failError) console.error("[action-report-stock] Unable to fail job", job.job_id, failError.message);
+      results.push({ jobId: job.job_id, status: typeof status === "string" ? status : "failed" });
+    }
+  }
+  return { claimed: jobs.length, results };
 }

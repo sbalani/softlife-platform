@@ -19,7 +19,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     const reportId = (await params).id;
     if (!/^[0-9a-f-]{36}$/i.test(reportId)) return Response.json({ error: { message: "Invalid report ID" } }, { status: 400 });
-    let body: { path?: unknown; mime_type?: unknown; refill_line_id?: unknown; purpose?: unknown };
+    let body: { path?: unknown; mime_type?: unknown; refill_line_id?: unknown; purpose?: unknown; stage?: unknown; caption?: unknown };
     try { body = await request.json(); } catch { return Response.json({ error: { code: "invalid_attachment", message: "Invalid JSON" } }, { status: 400 }); }
     const path = typeof body.path === "string" ? body.path : "";
     const mimeType = typeof body.mime_type === "string" ? body.mime_type.split(";")[0] : "";
@@ -60,12 +60,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return Response.json(data);
     }
     const refillLineId = typeof body.refill_line_id === "string" ? body.refill_line_id : null;
+    const stage = typeof body.stage === "string" ? body.stage : refillLineId ? "refill_batch" : "general";
+    const caption = typeof body.caption === "string" && body.caption.trim() ? body.caption.trim() : null;
+    if (!["general", "cleaning_before", "cleaning_after", "refill_batch"].includes(stage)
+      || (stage === "refill_batch") !== Boolean(refillLineId) || (caption?.length ?? 0) > 500) {
+      return Response.json({ error: { code: "invalid_attachment", message: "Invalid photo metadata" } }, { status: 400 });
+    }
     if (refillLineId) {
       const { data: line, error: lineError } = await s.from("service_action_refill_lines").select("id").eq("id", refillLineId).eq("report_id", reportId).maybeSingle();
       if (lineError) throw lineError;
       if (!line) return Response.json({ error: { code: "refill_line_conflict", message: "The refill line changed; refresh the draft and try again" } }, { status: 409 });
     }
-    const { data, error } = await s.rpc("finalize_unreserved_service_action_photo", { p_report_id: reportId, p_actor_id: session.id, p_storage_path: path, p_mime_type: mimeType, p_size_bytes: size, p_refill_line_id: refillLineId });
+    const { data, error } = await s.rpc("finalize_unreserved_service_action_photo_v2", { p_report_id: reportId, p_actor_id: session.id, p_storage_path: path, p_mime_type: mimeType, p_size_bytes: size, p_refill_line_id: refillLineId, p_stage: stage, p_caption: caption });
     if (error) {
       const mapped = actionReportAttachmentError(error);
       return Response.json({ error: { code: mapped.code, message: mapped.message } }, { status: mapped.status });

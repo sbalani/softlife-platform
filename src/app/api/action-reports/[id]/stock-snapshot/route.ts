@@ -1,5 +1,6 @@
 import { getSessionProfile } from "@/lib/auth/session";
-import { captureActionReportStockSnapshot } from "@/lib/action-report-stock";
+import { after } from "next/server";
+import { runActionReportStockSnapshotJobs } from "@/lib/action-report-stock";
 import { authorizedActionReport } from "@/lib/data/action-report-access";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 
@@ -14,7 +15,10 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     const s = await createServiceClient();
     const report = await authorizedActionReport(s, actor, reportId);
     if (!report || report.status !== "confirmed" || !(report.action_modes as string[]).includes("refill")) return Response.json({ error: "Confirmed refill report not found" }, { status: 404 });
-    return Response.json(await captureActionReportStockSnapshot(s, reportId, actor.id));
+    const { data, error } = await s.rpc("retry_service_action_stock_snapshot_job", { p_report_id: reportId, p_actor_id: actor.id });
+    if (error) throw error;
+    after(async () => { try { await runActionReportStockSnapshotJobs(1); } catch (workerError) { console.error("[action-report-stock-after]", workerError); } });
+    return Response.json(data, { status: 202 });
   } catch (error) {
     console.error("[action-report-stock-snapshot]", error);
     return Response.json({ error: error instanceof Error ? error.message : "Unable to capture menu stock" }, { status: 500 });

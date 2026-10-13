@@ -1,4 +1,6 @@
+import { after } from "next/server";
 import { getApiSession } from "@/lib/auth/api-session";
+import { runActionReportStockSnapshotJobs } from "@/lib/action-report-stock";
 import { hasMobileCapability, mobileMachineIds } from "@/lib/auth/mobile-authorization";
 import { persistMobileActionReport } from "@/lib/mobile-action-reports";
 import { createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
@@ -25,6 +27,9 @@ export async function POST(request: Request) {
       accepted.push({ client_uuid: clientUuid, report_id: result.id, status: result.status, revision: result.revision, provenance_status: result.provenance_status, warning: result.projection_error ? "Legacy projection needs review" : undefined });
     } catch (error) { rejected.push({ client_uuid: clientUuid, reason: error instanceof Error ? error.message : String(error) }); }
   }
+  if (accepted.some((record) => record.status === "confirmed")) {
+    after(async () => { try { await runActionReportStockSnapshotJobs(1); } catch (error) { console.error("[mobile-action-report-stock-after]", error); } });
+  }
   return Response.json({ accepted, rejected });
 }
 
@@ -37,7 +42,7 @@ export async function GET(request: Request) {
   const allowedIds = await mobileMachineIds(s, session);
   if (allowedIds?.length === 0) return Response.json({ records: [], scope_version: session.scopeVersion });
   let query = s.from("service_action_reports")
-    .select("id,client_uuid,machine_id,occurred_at,action_kind,action_modes,status,notes,cleaning_material_used,water_bucket_count,provenance_status,revision,mobile_draft_payload,updated_at,service_action_refill_lines(id,line_number,quantity,unit,product_name,observed_lot_code,observed_odoo_lot_id,finished_bottle,left_unfinished_bottle,inventory_quantity,provenance_status,unresolved_reason),service_action_attachments(id,refill_line_id,kind,mime_type,size_bytes,created_at),service_action_report_incidents(incident_id)")
+    .select("id,client_uuid,machine_id,occurred_at,action_kind,action_modes,status,notes,cleaning_material_used,water_bucket_count,provenance_status,revision,mobile_draft_payload,updated_at,service_action_refill_lines(id,line_number,quantity,unit,product_name,observed_lot_code,observed_odoo_lot_id,finished_bottle,left_unfinished_bottle,inventory_quantity,provenance_status,unresolved_reason),service_action_attachments(id,refill_line_id,kind,stage,caption,mime_type,size_bytes,created_at),service_action_report_incidents(incident_id)")
     .eq("operator_id", session.id).eq("status", "draft").order("updated_at", { ascending: false }).limit(100);
   if (allowedIds) query = query.in("machine_id", allowedIds);
   const { data, error } = await query;

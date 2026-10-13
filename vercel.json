@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/action-report-ai",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/action-report-stock",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

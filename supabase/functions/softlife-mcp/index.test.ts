@@ -66,18 +66,18 @@ Deno.test("sales context scopes expose only bounded context and note tools", () 
   assertEquals(availableTools(principal("operator", ["sales_context", "sales_notes"])), []);
 });
 
-Deno.test("coupon management uses stable admin read and command scopes", async () => {
+Deno.test("coupon management uses stable admin read and forms scopes", async () => {
   const reads = availableTools(principal("admin", ["read"])).map((tool) => tool.name);
-  const commands = availableTools(principal("admin", ["commands"])).map((tool) => tool.name);
+  const forms = availableTools(principal("admin", ["forms"])).map((tool) => tool.name);
   assert(reads.includes("list_coupon_groups"));
   assert(reads.includes("get_coupon_group"));
   assert(!reads.includes("create_coupon_group"));
-  assert(commands.includes("create_coupon_group"));
-  assert(commands.includes("distribute_coupon_code"));
-  assert(!availableTools(principal("franchisee", ["read", "commands"])).some((tool) => tool.name.includes("coupon")));
+  assert(forms.includes("create_coupon_group"));
+  assert(forms.includes("distribute_coupon_code"));
+  assert(!availableTools(principal("franchisee", ["read", "forms"])).some((tool) => tool.name.includes("coupon")));
   const response = await dispatchMessage({ jsonrpc: "2.0", id: 1, method: "tools/call", params: {
     name: "distribute_coupon_code", arguments: { idempotency_key: crypto.randomUUID(), group: "Autumn", note: "Reception", confirm: false },
-  } }, principal("admin", ["commands"]), null as never);
+  } }, principal("admin", ["forms"]), null as never);
   assertEquals((response?.error as { message?: string }).message, "Explicit confirm=true is required");
 });
 
@@ -397,7 +397,7 @@ Deno.test("initialize validates parameters and negotiates supported versions", a
   assertEquals((invalid?.error as { code?: number }).code, -32602);
   const valid = await dispatchMessage({ jsonrpc: "2.0", id: 2, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } } }, actor, null as never);
   assertEquals((valid?.result as { protocolVersion?: string }).protocolVersion, "2025-03-26");
-  assertEquals((valid?.result as { serverInfo?: { version?: string } }).serverInfo?.version, "3.7.1");
+  assertEquals((valid?.result as { serverInfo?: { version?: string } }).serverInfo?.version, "3.7.2");
   const unknown = await dispatchMessage({ jsonrpc: "2.0", id: 3, method: "initialize", params: { protocolVersion: "2099-01-01", capabilities: {}, clientInfo: { name: "test", version: "1" } } }, actor, null as never);
   assertEquals((unknown?.result as { protocolVersion?: string }).protocolVersion, "2025-03-26");
 });

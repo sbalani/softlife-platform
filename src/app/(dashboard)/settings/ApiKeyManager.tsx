@@ -5,7 +5,7 @@ import { generateApiKey, revokeApiKey, type ApiKeyRow } from "./api-key-actions"
 
 export const MCP_ENDPOINT = "https://awsfqnymosevmhawbukf.supabase.co/functions/v1/softlife-mcp";
 
-export function ApiKeyManager({ keys, canCommand, canManageCoupons }: { keys: ApiKeyRow[]; canCommand: boolean; canManageCoupons: boolean }) {
+export function ApiKeyManager({ keys, canCommand }: { keys: ApiKeyRow[]; canCommand: boolean }) {
   const [pending, startTransition] = useTransition();
   const [name, setName] = useState("");
   const [scopes, setScopes] = useState(["read"]);
@@ -78,7 +78,7 @@ export function ApiKeyManager({ keys, canCommand, canManageCoupons }: { keys: Ap
         </button>
       </div>
       <div className="flex flex-wrap gap-3 text-xs text-cocoa">
-        {[["read", "Read data"], ["forms", "Action Reports"], ["incidents", "Manage incidents"], ...(canCommand ? [["sales_context", "Sales context"], ["sales_notes", "Sales notes"], ["commands", "Safe commands"]] : []), ...(canManageCoupons ? [["coupons", "Coupon management"]] : [])].map(([scope, label]) => <label key={scope} className="flex items-center gap-1.5"><input type="checkbox" checked={scopes.includes(scope)} disabled={!scopes.includes(scope) && scopes.length >= 3} onChange={(event) => setScopes((current) => event.target.checked ? [...current, scope] : current.filter((value) => value !== scope))} className="accent-terracotta disabled:opacity-40" />{label}</label>)}
+        {[["read", "Read data"], ["forms", "Action Reports"], ["incidents", "Manage incidents"], ...(canCommand ? [["sales_context", "Sales context"], ["sales_notes", "Sales notes"], ["commands", "Safe commands"]] : [])].map(([scope, label]) => <label key={scope} className="flex items-center gap-1.5"><input type="checkbox" checked={scopes.includes(scope)} disabled={!scopes.includes(scope) && scopes.length >= 3} onChange={(event) => setScopes((current) => event.target.checked ? [...current, scope] : current.filter((value) => value !== scope))} className="accent-terracotta disabled:opacity-40" />{label}</label>)}
         <span className="text-taupe">Choose up to 3</span>
       </div>
 

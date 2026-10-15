@@ -4,8 +4,10 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BRIDGE_URL = Deno.env.get("HUAXIN_DEFROST_BRIDGE_URL") ?? "https://softlife-platform.vercel.app/api/internal/huaxin-defrost";
 const STOCK_BRIDGE_URL = Deno.env.get("ACTION_REPORT_STOCK_BRIDGE_URL") ?? "https://platform.softlife.es/api/internal/action-report-stock";
+const COUPON_BRIDGE_URL = Deno.env.get("COUPON_MCP_BRIDGE_URL") ?? "https://platform.softlife.es/api/internal/mcp-coupons";
 const BRIDGE_TOKEN = Deno.env.get("HUAXIN_DEFROST_BRIDGE_TOKEN") ?? "";
 const STOCK_BRIDGE_TOKEN = Deno.env.get("ACTION_REPORT_STOCK_BRIDGE_TOKEN") ?? "";
+const COUPON_BRIDGE_TOKEN = Deno.env.get("COUPON_MCP_BRIDGE_TOKEN") ?? "";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ACTIVE_DEFROST_STATES = ["scheduled", "thawing", "thaw_closed", "refrigeration_check", "forming", "sales_check", "recovery"];
 const VALID_MODES = ["cleaning", "refill", "other"] as const;
@@ -30,7 +32,7 @@ const ACTION_REPORT_PHOTO_TYPES: Record<string, string> = {
 const SUPPORTED_PROTOCOL_VERSIONS = new Set([MCP_PROTOCOL_VERSION]);
 const DEFAULT_ALLOWED_ORIGINS = ["https://platform.softlife.es", "https://softlife-platform.vercel.app", "https://chatgpt.com", "https://claude.ai"];
 
-type Scope = "read" | "forms" | "commands" | "sales_context" | "sales_notes" | "incidents";
+type Scope = "read" | "forms" | "commands" | "sales_context" | "sales_notes" | "incidents" | "coupons";
 export type Principal = {
   keyId: string;
   profileId: string;
@@ -82,6 +84,10 @@ const TOOLS: Tool[] = [
   { name: "get_sales_context", description: "Compare daily net sales with historical weather and dated context notes for one authorized machine over at most 92 days. Use the structured evidence to investigate why sales changed; use your own research capabilities for external events.", scope: "sales_context", roles: ["admin", "franchisee"], inputSchema: { type: "object", additionalProperties: false, properties: { machine_id: { type: "string" }, date_from: { type: "string", description: "YYYY-MM-DD" }, date_to: { type: "string", description: "YYYY-MM-DD" } }, required: ["machine_id", "date_from", "date_to"] } },
   { name: "create_sales_note", description: "Record dated evidence that may explain sales, with an optional machine and HTTPS source. Use a unique UUID idempotency_key. Never present speculation as fact; include a source URL for externally researched claims.", scope: "sales_notes", roles: ["admin", "franchisee"], inputSchema: salesNoteSchema() },
   { name: "delete_sales_note", description: "Soft-delete an owned sales context note using its current revision. Requires explicit confirm=true.", scope: "sales_notes", roles: ["admin", "franchisee"], inputSchema: { type: "object", additionalProperties: false, properties: { note_id: { type: "string" }, expected_revision: { type: "integer", minimum: 1 }, confirm: { type: "boolean" } }, required: ["note_id", "expected_revision", "confirm"] } },
+  { name: "list_coupon_groups", description: "List coupon groups ordered with available active groups first and latest expiry first. Includes availability, distribution, usage, and expiry counts.", scope: "coupons", roles: ["admin"], inputSchema: { type: "object", additionalProperties: false, properties: {} } },
+  { name: "get_coupon_group", description: "Get one coupon group by exact ID, exact name, or an unambiguous partial name, including codes, expiry dates, redemption status, distribution state, notes, and revisions.", scope: "coupons", roles: ["admin"], inputSchema: { type: "object", additionalProperties: false, properties: { group: { type: "string", minLength: 1, maxLength: 200 } }, required: ["group"] } },
+  { name: "create_coupon_group", description: "Create a discount or one-cup coupon group for selected machine IDs. Requires explicit confirm=true and a stable UUID idempotency_key. Never retry an ambiguous result with a new key.", scope: "coupons", roles: ["admin"], inputSchema: { type: "object", additionalProperties: false, properties: { idempotency_key: { type: "string", format: "uuid" }, name: { type: "string", minLength: 1, maxLength: 200 }, coupon_type: { type: "string", enum: ["discount", "one_cup"] }, start_date: { type: "string", description: "YYYY-MM-DD" }, end_date: { type: "string", description: "YYYY-MM-DD" }, code_count: { type: "integer", minimum: 0, maximum: 100 }, uses_per_code: { type: "integer", minimum: 1, maximum: 1000 }, machine_ids: { type: "array", minItems: 1, maxItems: 100, uniqueItems: true, items: { type: "string", format: "uuid" } }, location_label: { type: "string", minLength: 1, maxLength: 200 }, discount_amount: { type: "number", exclusiveMinimum: 0 }, confirm: { type: "boolean" } }, required: ["idempotency_key", "name", "coupon_type", "start_date", "end_date", "code_count", "uses_per_code", "machine_ids", "location_label", "confirm"] } },
+  { name: "distribute_coupon_code", description: "Mark a coupon code distributed with a note. Omit code to atomically grab the earliest-expiring unused and unexpired code from the named group. Requires explicit confirm=true and a stable UUID idempotency_key.", scope: "coupons", roles: ["admin"], inputSchema: { type: "object", additionalProperties: false, properties: { idempotency_key: { type: "string", format: "uuid" }, group: { type: "string", minLength: 1, maxLength: 200 }, code: { type: "string", minLength: 1, maxLength: 200 }, note: { type: "string", minLength: 1, maxLength: 1000 }, confirm: { type: "boolean" } }, required: ["idempotency_key", "group", "note", "confirm"] } },
   { name: "create_action_report_draft", description: "Create an idempotent Action Report draft. This never confirms physical work.", scope: "forms", inputSchema: reportSchema(false) },
   { name: "update_action_report_draft", description: "Update an owned Action Report draft using its current revision.", scope: "forms", inputSchema: reportSchema(true) },
   { name: "get_action_report", description: "Get an owned Action Report with refill lines, incidents, attachment metadata, AI state, questions, and stock observations.", scope: "forms", inputSchema: { type: "object", properties: { report_id: { type: "string" } }, required: ["report_id"] } },
@@ -443,6 +449,19 @@ async function captureReportStock(reportId: string, actorId: string) {
   });
   const body = await response.json().catch(() => ({})) as { id?: string; status?: string; duplicate?: boolean; error?: string };
   if (!response.ok) throw new ToolError(body.error ?? "Stock snapshot capture failed", -32603);
+  return body;
+}
+
+async function couponBridge(action: string, actorId: string, payload: Record<string, unknown> = {}) {
+  if (!COUPON_BRIDGE_TOKEN) throw new ToolError("Coupon management is not configured", -32603);
+  const response = await fetch(COUPON_BRIDGE_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-coupon-mcp-token": COUPON_BRIDGE_TOKEN },
+    body: JSON.stringify({ action, actor_id: actorId, ...payload }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  const body = await response.json().catch(() => ({})) as Record<string, unknown> & { error?: string };
+  if (!response.ok) throw new ToolError(body.error ?? "Coupon request failed", response.status === 403 ? -32003 : -32603);
   return body;
 }
 
@@ -1059,6 +1078,45 @@ async function handleTool(name: string, args: Record<string, unknown>, principal
       }
       return data;
     }
+    case "list_coupon_groups": {
+      rejectUnknownArguments(args, []);
+      return couponBridge("list", principal.profileId);
+    }
+    case "get_coupon_group": {
+      rejectUnknownArguments(args, ["group"]);
+      const group = typeof args.group === "string" ? args.group.trim() : "";
+      if (!group || group.length > 200) throw new ToolError("group must contain 1 to 200 characters");
+      return couponBridge("get", principal.profileId, { group });
+    }
+    case "create_coupon_group": {
+      rejectUnknownArguments(args, ["idempotency_key", "name", "coupon_type", "start_date", "end_date", "code_count", "uses_per_code", "machine_ids", "location_label", "discount_amount", "confirm"]);
+      if (args.confirm !== true) throw new ToolError("Explicit confirm=true is required");
+      if (typeof args.idempotency_key !== "string" || !UUID.test(args.idempotency_key)) throw new ToolError("A UUID idempotency_key is required");
+      const name = typeof args.name === "string" ? args.name.trim() : "";
+      const location = typeof args.location_label === "string" ? args.location_label.trim() : "";
+      if (!name || name.length > 200) throw new ToolError("name must contain 1 to 200 characters");
+      if (!location || location.length > 200) throw new ToolError("location_label must contain 1 to 200 characters");
+      if (!validDay(String(args.start_date ?? "")) || !validDay(String(args.end_date ?? "")) || String(args.end_date) <= String(args.start_date)) throw new ToolError("Use valid start_date and later end_date values");
+      if (!Number.isInteger(args.code_count) || Number(args.code_count) < 0 || Number(args.code_count) > 100) throw new ToolError("code_count must be an integer from 0 to 100");
+      if (!Number.isInteger(args.uses_per_code) || Number(args.uses_per_code) < 1 || Number(args.uses_per_code) > 1000) throw new ToolError("uses_per_code must be an integer from 1 to 1000");
+      if (!Array.isArray(args.machine_ids) || !args.machine_ids.length || args.machine_ids.length > 100 || args.machine_ids.some((id) => typeof id !== "string" || !UUID.test(id))) throw new ToolError("machine_ids must contain 1 to 100 unique machine UUIDs");
+      if (new Set(args.machine_ids).size !== args.machine_ids.length) throw new ToolError("machine_ids must be unique");
+      if (!new Set(["discount", "one_cup"]).has(String(args.coupon_type))) throw new ToolError("coupon_type must be discount or one_cup");
+      if (args.coupon_type === "discount" && (typeof args.discount_amount !== "number" || !Number.isFinite(args.discount_amount) || args.discount_amount <= 0)) throw new ToolError("discount_amount must be positive for discount coupons");
+      return couponBridge("create", principal.profileId, { ...args, name, location_label: location });
+    }
+    case "distribute_coupon_code": {
+      rejectUnknownArguments(args, ["idempotency_key", "group", "code", "note", "confirm"]);
+      if (args.confirm !== true) throw new ToolError("Explicit confirm=true is required");
+      if (typeof args.idempotency_key !== "string" || !UUID.test(args.idempotency_key)) throw new ToolError("A UUID idempotency_key is required");
+      const group = typeof args.group === "string" ? args.group.trim() : "";
+      const code = args.code === undefined ? null : typeof args.code === "string" ? args.code.trim() : "";
+      const note = typeof args.note === "string" ? args.note.trim() : "";
+      if (!group || group.length > 200) throw new ToolError("group must contain 1 to 200 characters");
+      if (code !== null && (!code || code.length > 200)) throw new ToolError("code must contain 1 to 200 characters");
+      if (!note || note.length > 1000) throw new ToolError("note must contain 1 to 1000 characters");
+      return couponBridge("distribute", principal.profileId, { idempotency_key: args.idempotency_key, group, code, note });
+    }
     case "create_action_report_draft": {
       const idempotencyKey = args.idempotency_key ?? args.client_uuid;
       if (typeof idempotencyKey !== "string" || !UUID.test(idempotencyKey)) throw new ToolError("A UUID idempotency_key is required");
@@ -1157,7 +1215,7 @@ export async function dispatchMessage(message: unknown, principal: Principal, s:
       return errorPayload(id, -32602, "Invalid initialize parameters");
     }
     const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.has(initialize.protocolVersion) ? initialize.protocolVersion : MCP_PROTOCOL_VERSION;
-    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.6.5" } });
+    return resultPayload(id, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "softlife-mcp", version: "3.7.0" } });
   }
   if (request.method === "tools/list") return resultPayload(id, { tools: availableTools(principal) });
   if (request.method !== "tools/call") return errorPayload(id, -32601, `Method not found: ${request.method}`);

@@ -1,4 +1,3 @@
-import { getCoupons } from "@/lib/data/coupons";
 import { CouponCreator } from "./CouponCreator";
 import { CouponCard } from "./CouponCard";
 import { getMachines } from "@/lib/data/machines";
@@ -9,6 +8,7 @@ import { redirect } from "next/navigation";
 import { getAccessibleMachines } from "@/lib/data/accessible-machines";
 import { getCouponRequests } from "@/lib/data/coupon-requests";
 import { AdminCouponRequests, FranchiseCouponRequests } from "./CouponRequests";
+import { getAdminCouponGroups } from "@/lib/data/coupon-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -28,14 +28,14 @@ export default async function CouponsPage() {
       </div>
     );
   }
-  const [{ machines }, { coupons, latestSyncedAt, staleMachines, readError }, tz, requests] = await Promise.all([getMachines(), getCoupons(), getDisplayTimezone(), getCouponRequests(session)]);
+  const [{ machines }, { groups, latestSyncedAt, staleMachines, readError }, tz, requests] = await Promise.all([getMachines(), getAdminCouponGroups(), getDisplayTimezone(), getCouponRequests(session)]);
 
   return (
     <div>
       <header className="mb-8">
         <h1 className="font-display text-3xl font-bold text-cocoa">Promotions</h1>
         <p className="mt-1 text-sm text-taupe">
-          {coupons.length} coupon{coupons.length === 1 ? "" : "s"} — discounts and one-cup vouchers
+          {groups.length} coupon group{groups.length === 1 ? "" : "s"} · active groups with the latest expiry appear first
         </p>
       </header>
 
@@ -52,13 +52,13 @@ export default async function CouponsPage() {
         </div>
       </details>
 
-      <div className="space-y-4">
-        {coupons.map((c) => (
+      <div className="space-y-3">
+        {groups.map((c) => (
           <CouponCard key={c.couponId ?? c.couponName} coupon={c} />
         ))}
       </div>
 
-      {!readError && coupons.length === 0 && (
+      {!readError && groups.length === 0 && (
         <p className="rounded-2xl border border-line bg-white p-10 text-center text-taupe">
           No coupons yet. Create a discount or one-cup voucher above.
         </p>

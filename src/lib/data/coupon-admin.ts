@@ -11,6 +11,8 @@ import {
 } from "@/lib/huaxin/client";
 import { createServiceClient } from "@/lib/supabase/server";
 import { deleteCouponCodeMetadata, getCouponCodesWithMetadata, updateCouponCodeMetadata } from "@/lib/data/coupon-code-metadata";
+import { couponCodeIsAvailable, couponGroup, sortCouponGroups, type CouponGroup } from "@/lib/coupon-groups";
+import { getCoupons, type Coupon } from "@/lib/data/coupons";
 
 export type CreateCouponInput = {
   couponType: string;
@@ -117,6 +119,57 @@ export async function generateAdminCouponCodes(couponId: string, num: number, ac
 
 export async function getAdminCouponCodes(couponId: string) {
   return getCouponCodesWithMetadata(couponId);
+}
+
+export async function getAdminCouponGroups(includeRecords = false) {
+  const snapshot = await getCoupons();
+  if (snapshot.readError) return { ...snapshot, groups: [] as CouponGroup[] };
+  const groups = await Promise.all(snapshot.coupons.map(async (coupon) => {
+    try {
+      const records = coupon.couponId == null ? [] : await getCouponCodesWithMetadata(String(coupon.couponId));
+      const summary = couponGroup(coupon, records);
+      return includeRecords ? summary : { ...summary, records: undefined };
+    } catch (error) {
+      return couponGroup(coupon, [], Date.now(), error instanceof Error ? error.message : String(error));
+    }
+  }));
+  return { ...snapshot, groups: sortCouponGroups(groups) };
+}
+
+export function resolveCouponGroup(coupons: Coupon[], query: string) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return { error: "Coupon group is required." } as const;
+  const exactId = coupons.filter((coupon) => String(coupon.couponId ?? "") === query.trim());
+  if (exactId.length === 1) return { coupon: exactId[0] } as const;
+  const exactName = coupons.filter((coupon) => String(coupon.couponName ?? "").trim().toLowerCase() === normalized);
+  if (exactName.length === 1) return { coupon: exactName[0] } as const;
+  if (exactName.length > 1) return { error: "Multiple coupon groups have that name. Use the coupon group ID." } as const;
+  const partial = coupons.filter((coupon) => String(coupon.couponName ?? "").toLowerCase().includes(normalized));
+  if (partial.length === 1) return { coupon: partial[0] } as const;
+  return { error: partial.length ? "Multiple coupon groups match. Use the coupon group ID." : "Coupon group not found." } as const;
+}
+
+export async function claimAdminCouponCode(groupQuery: string, note: string, actor: CouponActor) {
+  const normalizedNote = note.trim().slice(0, 1000);
+  if (!normalizedNote) return { ok: false, error: "A distribution note is required." };
+  const snapshot = await getCoupons();
+  if (snapshot.readError) return { ok: false, error: snapshot.readError };
+  const resolved = resolveCouponGroup(snapshot.coupons, groupQuery);
+  if ("error" in resolved) return { ok: false, error: resolved.error };
+  const couponId = String(resolved.coupon.couponId ?? "");
+  if (!validCouponId(couponId)) return { ok: false, error: "Coupon group has no valid provider ID." };
+  try {
+    const records = (await getCouponCodesWithMetadata(couponId)).filter((record) => couponCodeIsAvailable(record));
+    for (const record of records.sort((a, b) => String(a.expireTime ?? "9999").localeCompare(String(b.expireTime ?? "9999")) || String(a.code).localeCompare(String(b.code)))) {
+      if (!record.code) continue;
+      const claimed = await updateCouponCodeMetadata(couponId, record.code, true, normalizedNote, record.metadataRevision, actor);
+      if (claimed.ok) return { ok: true, couponId, couponName: resolved.coupon.couponName ?? null, code: record.code, expireTime: record.expireTime ?? null, note: normalizedNote, revision: claimed.revision };
+      if (!claimed.error?.includes("changed elsewhere")) return claimed;
+    }
+    return { ok: false, error: "No unused, unexpired, undistributed coupon codes are available in this group." };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 export async function updateAdminCouponCode(couponId: string, code: string, distributed: boolean, extraInformation: string, expectedRevision: number | null, actor: CouponActor) {

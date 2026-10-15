@@ -421,6 +421,7 @@ export type HuaxinCoupon = {
   createTime?: string;
   updateTime?: string;
   merchantName?: string;
+  totalCount?: string | number;
 };
 
 export function couponApiError(data: Envelope): string | null {
@@ -469,7 +470,8 @@ export async function getCouponRecords(cfg: HuaxinConfig, couponId: string, coup
     if (error) throw new Error(error);
     const payload = data.data as { list?: unknown[]; totalPage?: number } | null;
     records.push(...(payload?.list ?? []));
-    totalPage = Math.min(Number(payload?.totalPage ?? 1) || 1, 20);
+    totalPage = Number(payload?.totalPage ?? 1) || 1;
+    if (totalPage > 20) throw new Error(`Huaxin coupon records require ${totalPage} pages; limit is 20`);
     page++;
   } while (page <= totalPage);
   return records;

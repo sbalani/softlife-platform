@@ -2,10 +2,10 @@
 
 import { useState, useTransition } from "react";
 import { generateCodes, fetchRecords, deleteCouponAction } from "./actions";
-import type { HuaxinCoupon } from "@/lib/huaxin/client";
 import { parseCouponSecondary } from "@/lib/coupon-content";
 import type { CouponCodeRecord } from "@/lib/coupon-code-metadata";
 import { CouponCodeTable } from "./CouponCodeTable";
+import type { CouponGroup } from "@/lib/coupon-groups";
 
 const TYPE_BADGE: Record<string, string> = {
   "0": "bg-terracotta/15 text-terracotta",
@@ -13,10 +13,9 @@ const TYPE_BADGE: Record<string, string> = {
 };
 const TYPE_NAME: Record<string, string> = { "0": "Discount", "1": "One-cup" };
 
-export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
+export function CouponCard({ coupon }: { coupon: CouponGroup }) {
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState(false);
   const [codes, setCodes] = useState<CouponCodeRecord[] | null>(null);
   const [genCount, setGenCount] = useState("5");
   const [msg, setMsg] = useState<string | null>(null);
@@ -30,16 +29,13 @@ export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
       if (res.ok) {
         const loaded = await fetchRecords(String(coupon.couponId));
         setCodes(loaded.records as CouponCodeRecord[]);
-        setExpanded(true);
         if (loaded.error) setMsg(loaded.error);
       }
     });
   };
 
-  const viewCodes = () => {
-    if (expanded) { setExpanded(false); return; }
-    setExpanded(true);
-    setCodes(null);
+  const loadCodes = () => {
+    if (pending) return;
     startTransition(async () => {
       const res = await fetchRecords(String(coupon.couponId));
       if (res.error) { setCodes([]); setMsg(res.error); }
@@ -58,22 +54,21 @@ export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
   const secondary = parseCouponSecondary(coupon.content);
 
   return (
-    <details className="rounded-2xl border border-line bg-white p-5" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <details className="group rounded-2xl border border-line bg-white shadow-sm transition open:border-terracotta/30" onToggle={(event) => { const next = event.currentTarget.open; setOpen(next); if (next) loadCodes(); }}>
       <summary className="cursor-pointer list-none">
-        <div className="flex items-center justify-between gap-4">
-          <div><div className="flex items-center gap-2"><h3 className="font-display text-lg font-bold text-cocoa">{coupon.couponName ?? "Unnamed"}</h3><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${TYPE_BADGE[ct] ?? "bg-cream text-taupe"}`}>{TYPE_NAME[ct] ?? ct}</span></div><p className="mt-1 text-xs text-taupe">ID {coupon.couponId}{coupon.startTime ? ` · ${coupon.startTime}` : ""}{coupon.endTime ? ` → ${coupon.endTime}` : ""}</p></div>
-          <span className="text-xs font-bold text-terracotta">{open ? "Hide coupon" : "Show coupon"}</span>
+        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate font-display text-lg font-bold text-cocoa">{coupon.couponName ?? "Unnamed"}</h3><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${TYPE_BADGE[ct] ?? "bg-cream text-taupe"}`}>{TYPE_NAME[ct] ?? ct}</span>{coupon.availableCount > 0 ? <span className="rounded-full bg-sage/15 px-2 py-0.5 text-[10px] font-bold text-sage">{coupon.availableCount} available</span> : <span className="rounded-full bg-danger/10 px-2 py-0.5 text-[10px] font-bold text-danger">No available codes</span>}</div><p className="mt-1 text-xs text-taupe">ID {coupon.couponId}{coupon.startTime ? ` · ${coupon.startTime}` : ""}{coupon.endTime ? ` → ${coupon.endTime}` : ""}</p></div>
+          <div className="flex shrink-0 items-center gap-4 text-xs"><span className="text-taupe">{coupon.distributedCount} distributed · {coupon.usedCount} used</span><span className="font-bold text-terracotta">{open ? "Close" : "Open"}</span><span aria-hidden className="text-lg text-terracotta transition group-open:rotate-180">⌄</span></div>
         </div>
       </summary>
 
-      <div className="mt-4 border-t border-line pt-4">
+      <div className="border-t border-line px-4 pb-5 pt-4 sm:px-5">
         {coupon.validDay && <p className="text-xs text-taupe">Duration: {coupon.validDay} days</p>}
         {coupon.deviceImeis && <p className="mt-1 text-xs text-taupe">Machines: {coupon.deviceImeis}</p>}
         {coupon.content && <p className="mt-1 text-xs text-taupe">{coupon.content}</p>}
         {secondary && <p className="mt-1 text-xs font-semibold text-cocoa">Uses per code: {secondary}</p>}
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+        {coupon.availabilityError && <p className="mt-2 text-xs font-semibold text-warning">Availability could not be refreshed: {coupon.availabilityError}</p>}
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
         <input
           type="number" min="1" max="100" value={genCount}
           onChange={(e) => setGenCount(e.target.value)}
@@ -82,16 +77,14 @@ export function CouponCard({ coupon }: { coupon: HuaxinCoupon }) {
         <button onClick={generate} disabled={pending} className="rounded bg-cocoa px-3 py-1 text-[10px] font-bold text-white hover:opacity-90 disabled:opacity-50">
           Generate codes
         </button>
-        <button onClick={viewCodes} disabled={pending} className="px-2 text-xs font-bold text-terracotta hover:underline disabled:opacity-50">{expanded ? "Hide codes" : "View codes"}</button>
         <button onClick={remove} disabled={pending} className="ml-auto text-xs font-bold text-danger hover:underline disabled:opacity-50">Delete</button>
         {msg && <span className="text-[10px] text-taupe">{msg}</span>}
       </div>
 
-      {expanded && (
-        <div className="mt-3 border-t border-line pt-3">
+        <div className="mt-4 border-t border-line pt-4">
           {codes ? <CouponCodeTable records={codes} couponId={String(coupon.couponId)} /> : <p className="text-xs text-taupe">Loading...</p>}
         </div>
-      )}
+      </div>
     </details>
   );
 }

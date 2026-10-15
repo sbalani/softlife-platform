@@ -154,7 +154,7 @@ export default async function SettingsPage() {
           Generate scoped keys to connect ChatGPT, Claude, or other AI tools to your SoftLife data and approved workflows.
           Endpoint: <code className="rounded bg-cream px-1 text-xs">{MCP_ENDPOINT}</code>. Use <code className="rounded bg-cream px-1 text-xs">Authorization: Bearer sl_mcp_...</code> where supported. For Codex, generate a key below and use the provided URL with no authentication.
         </p>
-        <ApiKeyManager keys={apiKeys} canCommand={profile?.role === "admin" || profile?.role === "franchisee"} />
+        <ApiKeyManager keys={apiKeys} canCommand={profile?.role === "admin" || profile?.role === "franchisee"} canManageCoupons={profile?.role === "admin"} />
       </section>
 
       <section className="mb-6 rounded-2xl border border-line bg-white p-5">

@@ -374,6 +374,9 @@ verify_jwt = false
 [functions.softlife-mcp]
 verify_jwt = false
 
+[functions.huaxin-status-shadow]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

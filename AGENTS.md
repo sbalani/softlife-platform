@@ -6,6 +6,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ## Supabase Operations
 
+- Supabase is the first choice for backend infrastructure. Use Supabase for scheduled jobs, background workers, persistence, locks, and server-side orchestration by default.
+- Use Vercel or GitHub Actions for backend work only when a documented technical requirement prevents using Supabase. Do not introduce a second scheduler for the same job.
 - Use the authenticated linked Supabase CLI workflow for this project (`npx supabase migration list --linked`, `npx supabase migration up --linked`, and other `npx supabase ...` commands).
 - Do not use Docker, a local Supabase stack, direct Postgres tools, or `SUPABASE_DB_PASSWORD` as fallbacks unless the user explicitly requests that workflow.
 

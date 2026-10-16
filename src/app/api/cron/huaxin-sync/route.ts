@@ -4,8 +4,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-/** Invoked by Vercel Cron (hourly/daily). Pulls the Huaxin device list and
- *  upserts machines (matched by device_imei). Protected by CRON_SECRET. */
+/** Runs legacy fleet workloads that have not yet moved to Supabase. */
 export async function GET(req: Request) {
   const authHeader = req.headers.get("authorization");
   if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -13,7 +12,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const result = await runHuaxinFleetSync("cron");
+    const result = await runHuaxinFleetSync("cron", { pollStatuses: false });
     const { data: scheduledIncidents, error } = await (await createServiceClient()).rpc("refresh_scheduled_refill_incidents");
     if (error) throw error;
     return NextResponse.json({ ...result, scheduledIncidents: Number(scheduledIncidents ?? 0) });

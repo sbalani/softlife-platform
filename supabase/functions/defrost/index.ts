@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { alertStatusSignals, isCompleteHuaxinStatusPayload } from "../_shared/huaxin-status-signals.ts";
 import { cupAnomalyReason, type StatusRow } from "./status.ts";
 
 type HuaxinConfig = {
@@ -36,25 +37,6 @@ type PushToken = { id: string; user_id: string; expo_push_token: string };
 type Profile = { id: string; role: string; tenant_id: string | null };
 type AlertRow = { id: string; machine_id: string | null; title: string; message: string; machine_name: string | null };
 
-const RESOURCE_FIELDS: Record<string, string> = {
-  status_0_cuplack: "cup_empty",
-  status_0_lackmaterial: "material_empty",
-};
-const FAULT_FIELDS: Record<string, string> = {
-  status_0_faultcup: "cup_foreign_object",
-  status_0_cupfault: "cup_blocked",
-  status_0_cupget: "cup_take_fault",
-};
-const OPERATING_STATE_FIELDS: Record<string, string> = {
-  "8": "material_empty",
-  "101": "cup_empty",
-  "102": "material_out",
-  "104": "cup_take_fault",
-  "120": "cup_foreign_object",
-  "255": "mixture_ratio_fault",
-};
-const BENIGN_OPERATING_STATES = new Set(["4", "9", "11", "105"]);
-const OPERATING_ACTIONABLE_FIELDS = [...new Set(Object.values(OPERATING_STATE_FIELDS))];
 const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const COMMAND_DELAY_MS = 2_000;
 const POLL_INTERVAL_MS = 60_000;
@@ -114,105 +96,19 @@ async function getDeviceStatus(cfg: HuaxinConfig, deviceImei: string): Promise<S
   return (data.data as StatusRow[] | null) ?? [];
 }
 
-function operatingStatusSignals(row: StatusRow) {
-  if (row.code !== "status_0_os") return [];
-  const value = String(row.value ?? row.data ?? "").trim();
-  const normalized = value.toLowerCase();
-  const stateCode = value.match(/^\[(\d+)]/)?.[1];
-  const cleared = OPERATING_ACTIONABLE_FIELDS.map((field) => ({ field, value: false, raw: row }));
-  if (!value || ["0", "false", "normal", "none", "close", "closed", "off", "cierre", "正常", "无", "关"].includes(normalized)) {
-    return [{ field: "ordering_system_fault", value: false, raw: row }, ...cleared];
-  }
-  const specificField = stateCode && OPERATING_STATE_FIELDS[stateCode];
-  if (specificField) return [{ field: "ordering_system_fault", value: false, raw: row }, ...cleared.map((signal) => signal.field === specificField ? { ...signal, value: true } : signal)];
-  if (stateCode && BENIGN_OPERATING_STATES.has(stateCode)) return [{ field: "ordering_system_fault", value: false, raw: row }, ...cleared];
-  return [{ field: "ordering_system_fault", value: true, raw: row }, ...cleared];
-}
-
-function statusSignals(rows: StatusRow[]) {
-  const byCode = new Map(rows.map((row) => [row.code, row]));
-  const signals = new Map<string, { field: string; value: boolean | number; raw: StatusRow }>();
-  const set = (field: string, value: boolean | number, raw: StatusRow) => {
-    const existing = signals.get(field);
-    if (existing?.value === true && value === false) return;
-    signals.set(field, { field, value, raw });
-  };
-  for (const row of byCode.values()) {
-    if (!row.code) continue;
-    const resourceField = RESOURCE_FIELDS[row.code];
-    if (resourceField) {
-      const value = String(row.value ?? "").trim().toLowerCase();
-      const inactive = ["0", "false", "normal", "none", "available", "正常", "无"].includes(value);
-      const active = ["1", "true", "abnormal", "anomaly", "anomalies", "anomalía", "anomalías", "anomalia", "anomalias", "starts lacking material", "liquid level low", "comienza a faltar material"].includes(value);
-      const numericData = Number(String(row.data ?? "").trim());
-      set(resourceField, inactive ? false : active || (!value && Number.isFinite(numericData) && numericData > 0), row);
-    }
-    if (row.code === "status_0_os") {
-      for (const signal of operatingStatusSignals(row)) set(signal.field, signal.value, row);
-      continue;
-    }
-    const faultField = FAULT_FIELDS[row.code];
-    if (faultField) {
-      const value = String(row.value ?? row.data ?? "").trim().toLowerCase();
-      set(faultField, Boolean(value) && !["0", "false", "normal", "none", "close", "closed", "off", "cierre", "正常", "无", "关"].includes(value), row);
-    }
-  }
-  const online = byCode.get("status_0_online_status");
-  if (online) set("device_online", String(online.value).toLowerCase() === "online", online);
-  const material = byCode.get("status_0_sellcup");
-  if (material) {
-    const normal = String(material.value ?? "").trim().match(/^normal\s*\[\s*(\d+)\s*]$/i);
-    const counter = [material.value, material.data].map(String).find((value) => /\d+\s*\[\s*\d+\s*]/.test(value));
-    const match = counter?.match(/(\d+)\s*\[\s*(\d+)\s*]/);
-    if (normal && Number(normal[1]) > 0) {
-      set("material_remaining_pct", 100, material);
-      set("material_out", false, material);
-    } else if (match && Number(match[2]) > 0) {
-      const remaining = Number(match[1]);
-      set("material_remaining_pct", Math.max(0, Math.min(100, Math.floor(remaining / Number(match[2]) * 100))), material);
-      set("material_out", remaining === 0, material);
-    }
-  }
-  return [...signals.values()];
-}
-
 async function recordMachineStatuses(s: SupabaseClient, machine: Machine, rows: StatusRow[]) {
-  const signals = statusSignals(rows);
-  const { data: saved, error: readError } = await s.from("machine_status_snapshots").select("field,value").eq("machine_id", machine.id);
-  if (readError) throw readError;
-  const previous = new Map(((saved as { field: string; value: unknown }[]) ?? []).map((row) => [row.field, row.value]));
-  if (signals.length) {
-    const { error } = await s.from("machine_change_log").insert(signals.map((signal) => ({
-      machine_id: machine.id,
-      device_imei: machine.device_imei,
-      machine_name: machine.display_name || machine.name,
-      source: "machine_sync",
-      action: previous.has(signal.field) && previous.get(signal.field) !== signal.value ? "status_changed" : "observed",
-      entity_type: "machine_status",
-      entity_key: signal.field,
-      field: signal.field,
-      old_value: previous.get(signal.field) ?? null,
-      new_value: signal.value,
-      metadata: { description: signal.raw.desc, raw_value: signal.raw.value, raw_data: signal.raw.data },
-    })));
-    if (error) throw error;
-  }
+  if (!isCompleteHuaxinStatusPayload(rows)) throw new Error("Huaxin returned an incomplete machine status payload");
   const observedAt = new Date().toISOString();
-  const rawSnapshots = [...new Map(rows.map((row, index) => {
-    const field = `raw:${row.code ?? index}`;
-    return [field, { machine_id: machine.id, field, value: row.value ?? row.data ?? "", raw: row, observed_at: observedAt }];
-  })).values()];
-  const snapshots = [
-    ...signals.map((signal) => ({ machine_id: machine.id, field: signal.field, value: signal.value, raw: signal.raw, observed_at: observedAt })),
-    ...rawSnapshots,
-  ];
-  if (snapshots.length) {
-    const { error } = await s.from("machine_status_snapshots").upsert(snapshots, { onConflict: "machine_id,field" });
-    if (error) throw error;
-  }
-  const currentRaw = new Set(rawSnapshots.map((row) => row.field));
-  const staleRaw = ((saved as { field: string }[]) ?? []).filter((row) => row.field.startsWith("raw:") && !currentRaw.has(row.field)).map((row) => row.field);
-  if (staleRaw.length) await s.from("machine_status_snapshots").delete().eq("machine_id", machine.id).in("field", staleRaw);
+  const { data, error } = await s.rpc("ingest_huaxin_machine_status", {
+    p_machine_id: machine.id,
+    p_observed_at: observedAt,
+    p_statuses: rows,
+    p_signals: alertStatusSignals(rows),
+    p_writer: "defrost",
+  });
+  if (error) throw error;
+  const result = (Array.isArray(data) ? data[0] : data) as { accepted?: boolean; reason?: string } | null;
+  if (!result?.accepted && result?.reason !== "stale") throw new Error(`Status write was rejected: ${result?.reason ?? "unknown reason"}`);
 }
 
 function formationPct(row: StatusRow) {

@@ -1,7 +1,12 @@
-# Huaxin Status Shadow
+# Huaxin Status Worker
 
-This worker compares live Huaxin status reads with the current production snapshots. It writes only to `huaxin_status_shadow_runs` and `huaxin_status_shadow_results`; it does not update machine state, alerts, orders, or menus.
+This worker fetches Huaxin machine status and records every run in `huaxin_status_shadow_runs` and `huaxin_status_shadow_results`. Its database configuration supports two rollout modes:
 
-The Huaxin certificate cannot be validated by the hosted Edge runtime, so the pilot uses the read-only `/api/internal/huaxin-status` transport bridge. Deployment requires the same randomly generated `HUAXIN_STATUS_BRIDGE_TOKEN` in Vercel production and Supabase Edge secrets. The bridge only accepts the status-detail operation.
+- `shadow` compares live responses with production snapshots without changing them.
+- `authoritative` persists snapshots and alert observations atomically through `ingest_huaxin_machine_status`.
 
-The initial migration does not configure a project URL or select targets. Deployment must explicitly call `configure_huaxin_status_shadow` and insert at most two pilot targets after both transports are live. Once configured, `configure_huaxin_status_shadow_schedule(true)` runs the read-only comparison at minutes 7 and 37 of every hour; pass `false` to stop it without removing the worker or its audit history. Fresh environments without the Vault configuration leave the schedule disabled during migration.
+`configure_huaxin_status_worker(mode, target_scope)` controls whether the worker is read-only or authoritative and whether it processes the pilot target table or every deployed machine. New environments start in `shadow`/`targets` mode.
+
+The Huaxin certificate cannot be validated by the hosted Edge runtime, so the worker uses the narrow `/api/internal/huaxin-status` transport bridge. Deployment requires the same randomly generated `HUAXIN_STATUS_BRIDGE_TOKEN` in Vercel production and Supabase Edge secrets. The bridge only accepts the status-detail operation.
+
+`configure_huaxin_status_shadow_schedule(true)` runs the worker at minutes 7 and 37 of every hour; pass `false` to stop it without removing audit history. The historical function and table names retain `shadow` to avoid replacing deployed Vault and cron configuration during promotion.

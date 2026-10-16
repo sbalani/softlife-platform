@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { COUPON_PATHS, type ProductDiyItem, type DiyPushItem } from "../huaxin/client.ts";
 import type { SessionProfile } from "@/lib/auth/session";
-import { faultStatusSignal, materialRemainingStatus, operatingStatusSignals, resourceStatusSignal, type HuaxinStatusRow } from "../huaxin/status-signals.ts";
+import { alertStatusSignals, isCompleteHuaxinStatusPayload, type HuaxinStatusRow } from "../huaxin/status-signals.ts";
 
 export type { HuaxinStatusRow } from "../huaxin/status-signals.ts";
 
@@ -269,74 +269,21 @@ export async function recordProductChange(
   if (error) throw new Error(`Could not write product change log: ${error.message}`);
 }
 
-export function alertStatusSignals(rows: HuaxinStatusRow[]) {
-  const byCode = new Map(rows.map((row) => [row.code, row]));
-  const signals = new Map<string, { field: string; value: boolean | number; raw: HuaxinStatusRow }>();
-  const setSignal = (field: string, value: boolean | number, raw: HuaxinStatusRow) => {
-    const existing = signals.get(field);
-    if (existing?.value === true && value === false) return;
-    signals.set(field, { field, value, raw });
-  };
-  for (const row of byCode.values()) {
-    const resource = resourceStatusSignal(row);
-    if (resource) setSignal(resource.field, resource.active, row);
-    if (row.code === "status_0_os") {
-      for (const status of operatingStatusSignals(row)) setSignal(status.field, status.active, row);
-      continue;
-    }
-    const fault = faultStatusSignal(row);
-    if (fault) setSignal(fault.field, fault.active, row);
-  }
-  const online = byCode.get("status_0_online_status");
-  if (online) setSignal("device_online", String(online.value).toLowerCase() === "online", online);
-  const materialCounter = byCode.get("status_0_sellcup");
-  const remaining = materialCounter && materialRemainingStatus(materialCounter);
-  if (remaining) {
-    setSignal("material_remaining_pct", remaining.remainingPct, materialCounter);
-    setSignal("material_out", remaining.outOfStock, materialCounter);
-  }
-  return [...signals.values()];
-}
+export { alertStatusSignals };
 
 export async function recordMachineStatuses(s: SupabaseClient, machine: Machine, rows: HuaxinStatusRow[]) {
-  const signals = alertStatusSignals(rows);
-  const { data: saved, error: readError } = await s.from("machine_status_snapshots").select("field,value").eq("machine_id", machine.id);
-  if (readError) throw new Error(`Could not read machine status snapshots: ${readError.message}`);
-  const savedRows = (saved as { field: string; value: unknown }[]) ?? [];
-  const previous = new Map(savedRows.map((row) => [row.field, row.value]));
-  if (signals.length) {
-    const { error } = await s.from("machine_change_log").insert(signals.map((signal) => ({
-      ...baseRow(machine, null),
-      source: "machine_sync",
-      action: previous.has(signal.field) && previous.get(signal.field) !== signal.value ? "status_changed" : "observed",
-      entity_type: "machine_status",
-      entity_key: signal.field,
-      field: signal.field,
-      old_value: previous.get(signal.field) ?? null,
-      new_value: signal.value,
-      metadata: { description: signal.raw.desc, raw_value: signal.raw.value, raw_data: signal.raw.data },
-    })));
-    if (error) throw new Error(`Could not write machine status observations: ${error.message}`);
-  }
+  if (!isCompleteHuaxinStatusPayload(rows)) throw new Error("Huaxin returned an incomplete machine status payload");
   const observedAt = new Date().toISOString();
-  const rawSnapshots = [...new Map(rows.map((row, index) => {
-    const field = `raw:${row.code ?? index}`;
-    return [field, { machine_id: machine.id, field, value: row.value ?? row.data ?? "", raw: row, observed_at: observedAt }];
-  })).values()];
-  const snapshots = [
-    ...signals.map((signal) => ({ machine_id: machine.id, field: signal.field, value: signal.value, raw: signal.raw, observed_at: observedAt })),
-    ...rawSnapshots,
-  ];
-  if (snapshots.length) {
-    const { error: snapshotError } = await s.from("machine_status_snapshots").upsert(snapshots);
-    if (snapshotError) throw new Error(`Could not save machine status snapshots: ${snapshotError.message}`);
-  }
-  const currentRawFields = new Set(rawSnapshots.map((row) => row.field));
-  const staleRawFields = savedRows.filter((row) => row.field.startsWith("raw:") && !currentRawFields.has(row.field)).map((row) => row.field);
-  if (staleRawFields.length) {
-    const { error: deleteError } = await s.from("machine_status_snapshots").delete().eq("machine_id", machine.id).in("field", staleRawFields);
-    if (deleteError) throw new Error(`Could not remove stale machine statuses: ${deleteError.message}`);
-  }
+  const { data, error } = await s.rpc("ingest_huaxin_machine_status", {
+    p_machine_id: machine.id,
+    p_observed_at: observedAt,
+    p_statuses: rows,
+    p_signals: alertStatusSignals(rows),
+    p_writer: "platform",
+  });
+  if (error) throw new Error(`Could not save machine statuses: ${error.message}`);
+  const result = (Array.isArray(data) ? data[0] : data) as { accepted?: boolean; reason?: string } | null;
+  if (!result?.accepted && result?.reason !== "stale") throw new Error(`Could not save machine statuses: ${result?.reason ?? "unknown ingestion result"}`);
 }
 
 export async function recordCouponExchange(

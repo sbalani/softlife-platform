@@ -9,7 +9,9 @@ import { sendPendingAlertNotifications, type AlertNotificationResult } from "@/l
 import { DEFAULT_TZ, ymd } from "@/lib/dates";
 import { detectMachinePasteurizationPatterns } from "@/lib/data/pasteurization";
 
-export async function runHuaxinFleetSync(trigger: OrderSyncTrigger = "cron") {
+type HuaxinFleetSyncOptions = { pollStatuses?: boolean };
+
+export async function runHuaxinFleetSync(trigger: OrderSyncTrigger = "cron", { pollStatuses = true }: HuaxinFleetSyncOptions = {}) {
   const cfg = getConfigFromEnv();
   if (!cfg) throw new Error("Huaxin not configured");
   if (!isSupabaseConfigured()) return { synced: 0, devicesSeen: 0, stored: false };
@@ -20,7 +22,7 @@ export async function runHuaxinFleetSync(trigger: OrderSyncTrigger = "cron") {
   if (!claimed) throw new Error("A full fleet sync is already running.");
   try {
     const devices = await listDevices(cfg, { force: true });
-    return await executeFleetSync(supabase, cfg, devices, trigger);
+    return await executeFleetSync(supabase, cfg, devices, trigger, pollStatuses);
   } finally {
     const { error } = await supabase.rpc("release_huaxin_sync_lock", { p_owner: owner });
     if (error) console.error("[fleet-sync] Could not release sync lock:", error);
@@ -32,6 +34,7 @@ async function executeFleetSync(
   cfg: NonNullable<ReturnType<typeof getConfigFromEnv>>,
   devices: Awaited<ReturnType<typeof listDevices>>,
   trigger: OrderSyncTrigger,
+  pollStatuses: boolean,
 ) {
   let synced = 0;
   let statuses = 0;
@@ -54,10 +57,12 @@ async function executeFleetSync(
     }, { onConflict: "device_imei" }).select("id,name,device_imei").single();
     if (error || !machine) continue;
     synced++;
-    try {
-      await recordMachineStatuses(supabase, machine, await getDeviceStatus(cfg, device.deviceImei));
-      statuses++;
-    } catch (error) { console.error(`[fleet-sync] Status failed for ${device.deviceImei}:`, error); }
+    if (pollStatuses) {
+      try {
+        await recordMachineStatuses(supabase, machine, await getDeviceStatus(cfg, device.deviceImei));
+        statuses++;
+      } catch (error) { console.error(`[fleet-sync] Status failed for ${device.deviceImei}:`, error); }
+    }
     try {
       await recordMachineSync(supabase, machine, await listDeviceProducts(cfg, device.deviceImei), null);
       menus++;

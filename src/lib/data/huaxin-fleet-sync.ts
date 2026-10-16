@@ -9,9 +9,9 @@ import { sendPendingAlertNotifications, type AlertNotificationResult } from "@/l
 import { DEFAULT_TZ, ymd } from "@/lib/dates";
 import { detectMachinePasteurizationPatterns } from "@/lib/data/pasteurization";
 
-type HuaxinFleetSyncOptions = { pollStatuses?: boolean };
+type HuaxinFleetSyncOptions = { pollStatuses?: boolean; syncOrders?: boolean };
 
-export async function runHuaxinFleetSync(trigger: OrderSyncTrigger = "cron", { pollStatuses = true }: HuaxinFleetSyncOptions = {}) {
+export async function runHuaxinFleetSync(trigger: OrderSyncTrigger = "cron", { pollStatuses = true, syncOrders = true }: HuaxinFleetSyncOptions = {}) {
   const cfg = getConfigFromEnv();
   if (!cfg) throw new Error("Huaxin not configured");
   if (!isSupabaseConfigured()) return { synced: 0, devicesSeen: 0, stored: false };
@@ -22,7 +22,7 @@ export async function runHuaxinFleetSync(trigger: OrderSyncTrigger = "cron", { p
   if (!claimed) throw new Error("A full fleet sync is already running.");
   try {
     const devices = await listDevices(cfg, { force: true });
-    return await executeFleetSync(supabase, cfg, devices, trigger, pollStatuses);
+    return await executeFleetSync(supabase, cfg, devices, trigger, pollStatuses, syncOrders);
   } finally {
     const { error } = await supabase.rpc("release_huaxin_sync_lock", { p_owner: owner });
     if (error) console.error("[fleet-sync] Could not release sync lock:", error);
@@ -35,6 +35,7 @@ async function executeFleetSync(
   devices: Awaited<ReturnType<typeof listDevices>>,
   trigger: OrderSyncTrigger,
   pollStatuses: boolean,
+  syncOrders: boolean,
 ) {
   let synced = 0;
   let statuses = 0;
@@ -105,7 +106,9 @@ async function executeFleetSync(
     couponSync.failed.push(error instanceof Error ? error.message : String(error));
     console.error("[fleet-sync] Coupons failed:", error);
   }
-  const orderSync = await ingestOrders(yesterday, today, [], trigger);
+  const orderSync = syncOrders
+    ? await ingestOrders(yesterday, today, [], trigger)
+    : { orders: 0, runId: undefined, status: "skipped", succeededMachines: 0, failedMachines: [], error: undefined };
   let notificationResult: AlertNotificationResult = { sent: 0, tokens: 0, claimed: 0, eligible: 0, failed: 0, status: "error" };
   try { notificationResult = await sendPendingAlertNotifications(supabase); } catch (error) { console.error("[fleet-sync] Alert push failed:", error); }
 

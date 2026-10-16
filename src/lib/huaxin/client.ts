@@ -206,7 +206,7 @@ export async function listDevices(
     return devicesCache.rows;
   }
   const data = await call("/machine/cloud/api/devices", cfg);
-  const rows = rowsFrom(data.data);
+  const rows = rowsFrom(huaxinReadData(data, "device list"));
   devicesCache = { at: Date.now(), rows };
   return rows;
 }
@@ -244,7 +244,7 @@ export async function listOrdersPage(
     endTime: end ?? "",
     page: String(page),
   });
-  const payload = data.data;
+  const payload = huaxinReadData(data, "orders list");
   if (Array.isArray(payload)) return { records: payload as HuaxinOrder[], totalPage: 1 };
   const obj = payload as { records?: HuaxinOrder[]; list?: HuaxinOrder[]; orders?: HuaxinOrder[]; totalPage?: number } | null;
   return {

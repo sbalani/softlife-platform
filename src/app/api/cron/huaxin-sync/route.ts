@@ -12,7 +12,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const result = await runHuaxinFleetSync("cron", { pollStatuses: false });
+    const result = await runHuaxinFleetSync("cron", { pollStatuses: false, syncOrders: false });
     const { data: scheduledIncidents, error } = await (await createServiceClient()).rpc("refresh_scheduled_refill_incidents");
     if (error) throw error;
     return NextResponse.json({ ...result, scheduledIncidents: Number(scheduledIncidents ?? 0) });

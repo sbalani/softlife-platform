@@ -171,6 +171,9 @@ async function handler(request: Request) {
     if (!allDevices) {
       throw new Error("Huaxin order bridge returned invalid devices");
     }
+    if (allDevices.some((device) => !device.deviceImei)) {
+      throw new Error("Huaxin order bridge returned a device without an IMEI");
+    }
     const { devices, missing } = selectOrderDevices(allDevices, selectedImeis);
     const [
       { data: machineData, error: machineError },
@@ -271,6 +274,11 @@ async function handler(request: Request) {
     }
 
     const status = orderSyncStatus(succeeded, failed);
+    const summaryError = failed > 0
+      ? `${failed} machine order reconciliation${
+        failed === 1 ? "" : "s"
+      } failed`
+      : null;
     const { error: finishError } = await supabase.from("order_sync_runs")
       .update({
         status,
@@ -279,6 +287,7 @@ async function handler(request: Request) {
         machines_succeeded: succeeded,
         machines_failed: failed,
         orders_fetched: orders,
+        error: summaryError,
       }).eq("id", runId);
     if (finishError) throw finishError;
     return Response.json({

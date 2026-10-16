@@ -105,6 +105,15 @@ export function getConfigFromEnv(): HuaxinConfig | null {
   };
 }
 
+export function isAllowedInsecureHuaxinUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "uatapi.huaxinvending.com";
+  } catch {
+    return false;
+  }
+}
+
 function commonParams(cfg: HuaxinConfig) {
   return {
     mch_id: cfg.mchId,
@@ -130,6 +139,7 @@ async function request(
 
   let res: { ok: boolean; status: number; statusText: string; text(): Promise<string> };
   if (cfg.verifySsl === false) {
+    if (!isAllowedInsecureHuaxinUrl(url)) throw new Error("TLS verification may only be disabled for Huaxin UAT");
     // Use undici's own fetch (not the Next.js-patched global) so the dispatcher
     // — which disables TLS verification for the expired UAT cert — is honoured.
     const undici = await import("undici");
@@ -192,10 +202,26 @@ export async function call(
   return data;
 }
 
-function rowsFrom(payload: unknown): HuaxinDevice[] {
-  if (Array.isArray(payload)) return payload;
+export function huaxinDeviceRows(payload: unknown): HuaxinDevice[] {
+  if (Array.isArray(payload)) return payload as HuaxinDevice[];
   const obj = payload as { list?: HuaxinDevice[]; devices?: HuaxinDevice[] } | null;
-  return obj?.list ?? obj?.devices ?? [];
+  const rows = obj?.list ?? obj?.devices;
+  if (!Array.isArray(rows)) throw new Error("Huaxin device list returned invalid data");
+  return rows;
+}
+
+export function huaxinOrderPage(payload: unknown): { records: HuaxinOrder[]; totalPage: number } {
+  const obj = (Array.isArray(payload) ? { records: payload, totalPage: 1 } : payload) as {
+    records?: HuaxinOrder[];
+    list?: HuaxinOrder[];
+    orders?: HuaxinOrder[];
+    totalPage?: number;
+  } | null;
+  const records = obj?.records ?? obj?.list ?? obj?.orders;
+  if (!Array.isArray(records) || records.some((record) => !record || typeof record !== "object")) {
+    throw new Error("Huaxin orders list returned invalid data");
+  }
+  return { records, totalPage: Number(obj?.totalPage ?? 1) || 1 };
 }
 
 export async function listDevices(
@@ -206,7 +232,7 @@ export async function listDevices(
     return devicesCache.rows;
   }
   const data = await call("/machine/cloud/api/devices", cfg);
-  const rows = rowsFrom(huaxinReadData(data, "device list"));
+  const rows = huaxinDeviceRows(huaxinReadData(data, "device list"));
   devicesCache = { at: Date.now(), rows };
   return rows;
 }
@@ -245,12 +271,7 @@ export async function listOrdersPage(
     page: String(page),
   });
   const payload = huaxinReadData(data, "orders list");
-  if (Array.isArray(payload)) return { records: payload as HuaxinOrder[], totalPage: 1 };
-  const obj = payload as { records?: HuaxinOrder[]; list?: HuaxinOrder[]; orders?: HuaxinOrder[]; totalPage?: number } | null;
-  return {
-    records: obj?.records ?? obj?.list ?? obj?.orders ?? [],
-    totalPage: Number(obj?.totalPage ?? 1) || 1,
-  };
+  return huaxinOrderPage(payload);
 }
 
 export async function listOrders(

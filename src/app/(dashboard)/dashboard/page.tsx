@@ -140,6 +140,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <div className="basis-full sm:basis-auto sm:pr-3">
           <p className="text-[11px] font-bold uppercase tracking-wide text-taupe">KPI period</p>
           <div className="mt-2 flex flex-wrap gap-2">
+            <Link href={presetUrl("today")} className={`rounded-full border px-3 py-1.5 text-xs font-bold ${activeRollingDays === 1 ? "border-terracotta bg-terracotta text-white" : "border-line text-cocoa hover:border-terracotta"}`}>Today</Link>
             {([30, 10, 7] as const).map((days) => <Link key={days} href={presetUrl(`last-${days}-days` as AnalyticsPeriodPreset)} className={`rounded-full border px-3 py-1.5 text-xs font-bold ${activeRollingDays === days ? "border-terracotta bg-terracotta text-white" : "border-line text-cocoa hover:border-terracotta"}`}>Last {days} days</Link>)}
           </div>
         </div>

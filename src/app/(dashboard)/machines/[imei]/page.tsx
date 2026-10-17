@@ -43,6 +43,10 @@ import { defrostFormationPct, defrostStatusValue, isHuaxinClosed, isHuaxinOpen, 
 import { getAlerts } from "@/lib/data/alerts";
 import { DismissAlertButton } from "@/components/DismissAlertButton";
 import { getPasteurizationAlertSettings } from "@/lib/data/pasteurization";
+import { getMachineDetailWidgetOrder } from "@/lib/data/machine-detail-layout";
+import { MachineWidgetOrderEditor } from "./MachineWidgetOrderEditor";
+import { MachineIncidentResolution } from "./MachineIncidentResolution";
+import { MachineWidgetLayout } from "./MachineWidgetLayout";
 
 export const dynamic = "force-dynamic";
 
@@ -80,13 +84,14 @@ export default async function MachineDetailPage({
   } else if (Date.parse(`${dateTo}T00:00:00Z`) - Date.parse(`${dateFrom}T00:00:00Z`) > 365 * 86_400_000) {
     dateFrom = ymd(new Date(Date.parse(`${dateTo}T00:00:00Z`) - 365 * 86_400_000), "UTC");
   }
-  const [config, tenants, telemetry, ingredients, { machines: allMachines }, pasteurization] = await Promise.all([
+  const [config, tenants, telemetry, ingredients, { machines: allMachines }, pasteurization, widgetLayout] = await Promise.all([
     getMachineConfig(imei),
     getTenants(),
     getMachineDetail(imei, { from: dateFrom, to: dateTo, timeZone: tz }),
     getProducts(),
     getMachines(),
     session.role === "admin" ? getPasteurizationAlertSettings() : Promise.resolve({ schedules: [], suggestions: [] }),
+    getMachineDetailWidgetOrder(),
   ]);
   const menu = telemetry?.menu ?? { diy: [], unify: [] };
   const status = telemetry?.status ?? [];
@@ -176,6 +181,7 @@ export default async function MachineDetailPage({
   const statusCurrent = isMachineStatusCurrent(online, telemetry?.status_observed_at ?? null);
   const activeDefrostRun = config?.defrostRuns.find((run) => ["scheduled", "thawing", "thaw_closed", "refrigeration_check", "forming", "sales_check", "recovery"].includes(run.state));
   const cupRecoveryActive = activeDefrostRun?.state === "recovery" && activeDefrostRun.failureDetail?.startsWith("cup_anomaly_wait:");
+  const widgetOrder = widgetLayout.widgetOrder;
 
   return (
     <div>
@@ -204,14 +210,18 @@ export default async function MachineDetailPage({
         Supabase snapshot · Machine data synced {telemetry?.machine_synced_at ? formatDateTime(telemetry.machine_synced_at, tz) : "never"}
       </p>
 
-      {session.role === "admin" && config?.machineId && <section className={`mb-6 rounded-xl border p-4 ${pasteurizationSuggestions.length ? "border-warning/40 bg-warning/10" : activePasteurizationSchedule ? "border-sage/30 bg-sage/5" : "border-line bg-cream/35"}`}>
+      {session.role === "admin" && <MachineWidgetOrderEditor key={`${widgetLayout.updatedAt}:${widgetOrder.join("|")}`} initialOrder={widgetOrder} version={widgetLayout.updatedAt} />}
+
+      <MachineWidgetLayout order={widgetOrder}>
+
+      {session.role === "admin" && config?.machineId && <section data-machine-widget="pasteurization" className={`mb-6 rounded-xl border p-4 ${pasteurizationSuggestions.length ? "border-warning/40 bg-warning/10" : activePasteurizationSchedule ? "border-sage/30 bg-sage/5" : "border-line bg-cream/35"}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div><p className="text-[11px] font-bold uppercase tracking-wide text-taupe">Pasteurization alert window</p>{pasteurizationSuggestions.length ? <p className="mt-1 text-sm font-bold text-warning">{pasteurizationSuggestions.length} detected pattern{pasteurizationSuggestions.length === 1 ? "" : "s"} awaiting review</p> : activePasteurizationSchedule ? <p className="mt-1 text-sm font-semibold text-cocoa">Active every {activePasteurizationSchedule.intervalDays} day{activePasteurizationSchedule.intervalDays === 1 ? "" : "s"} at {activePasteurizationSchedule.startLocal} for {activePasteurizationSchedule.durationMinutes} minutes</p> : <p className="mt-1 text-sm font-semibold text-cocoa">No alert-suppression window is configured for this machine.</p>}<p className="mt-1 text-xs text-taupe">Windows suppress expected elevated-temperature alerts; they do not certify batch pasteurization.</p></div>
           <Link href={`/alerts?pasteurizationMachine=${config.machineId}#pasteurization-alert-windows`} className="rounded-lg bg-cocoa px-4 py-2 text-xs font-bold text-white">{pasteurizationSuggestions.length ? "Review suggestion" : activePasteurizationSchedule ? "Manage window" : "Set window"}</Link>
         </div>
       </section>}
 
-      <section className="mb-6 grid gap-3 sm:grid-cols-2" aria-label="Refrigeration and physical defrost status">
+      <section data-machine-widget="hardware_status" className="mb-6 grid gap-3 sm:grid-cols-2" aria-label="Refrigeration and physical defrost status">
         <div className={`rounded-xl border p-4 ${!statusCurrent ? "border-warning/40 bg-warning/10" : refrigerationOn ? "border-sage/40 bg-sage/10" : refrigerationOff ? "border-danger/40 bg-danger/10" : "border-warning/40 bg-warning/10"}`}>
           <p className={`text-[10px] font-bold uppercase tracking-wide ${refrigerationOn ? "text-sage" : refrigerationOff ? "text-danger" : "text-warning"}`}>Refrigeration</p>
           <p className={`mt-1 font-display text-xl font-bold ${statusCurrent && refrigerationOn ? "text-sage" : statusCurrent && refrigerationOff ? "text-danger" : "text-warning"}`}>{statusCurrent ? refrigerationOn ? "ON" : refrigerationOff ? "OFF" : "UNKNOWN" : "NOT CURRENT"}</p>
@@ -225,7 +235,7 @@ export default async function MachineDetailPage({
       </section>
 
       {(cupRecoveryActive || blockingAlerts.length > 0) && (
-        <section className="mb-6 rounded-2xl border border-danger/40 bg-white p-5" aria-label="Machine recovery center">
+        <section data-machine-widget="recovery_center" className="mb-6 rounded-2xl border border-danger/40 bg-white p-5" aria-label="Machine recovery center">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="max-w-2xl">
               <h2 className="font-display text-lg font-bold text-cocoa">Recovery center</h2>
@@ -242,17 +252,17 @@ export default async function MachineDetailPage({
         </section>
       )}
 
-      <section className="mb-6 grid gap-3 md:grid-cols-3">
+      <section data-machine-widget="service_overview" className="mb-6 grid gap-3 md:grid-cols-3">
         <div className={`rounded-xl border p-4 ${refill.state === "overdue" ? "border-danger/30 bg-danger/5" : refill.state === "due" ? "border-warning/30 bg-warning/5" : "border-sage/25 bg-sage/5"}`}><p className="text-[10px] font-bold uppercase tracking-wide text-taupe">Last refill</p><p className={`mt-1 font-display text-lg font-bold ${refill.state === "overdue" ? "text-danger" : refill.state === "due" ? "text-warning" : "text-cocoa"}`}>{machineRow?.last_refill_at ? formatDateTime(machineRow.last_refill_at, tz) : "Never recorded"}</p>{refill.days !== null && <p className="text-xs text-taupe">{refill.days} day{refill.days === 1 ? "" : "s"} ago</p>}{config?.machineId && (refill.state === "due" || refill.state === "overdue") && !machineRow?.open_refill_incident && <form action={createRefillIncident} className="mt-2"><input type="hidden" name="machine_id" value={config.machineId} /><button className="text-xs font-bold text-terracotta hover:underline">Create refill incident</button></form>}</div>
         <div className="rounded-xl border border-sage/25 bg-sage/5 p-4"><p className="text-[10px] font-bold uppercase tracking-wide text-taupe">Last cleaning</p><p className="mt-1 font-display text-lg font-bold text-cocoa">{latestCleaning ? formatDateTime(latestCleaning.device_event_time, tz) : "Never recorded"}</p>{latestCleaning && <p className="text-xs capitalize text-taupe">{latestCleaning.kind} clean{latestCleaning.operator_name ? ` · ${latestCleaning.operator_name}` : ""}</p>}</div>
         <Link href="/incidents" className={`rounded-xl border p-4 ${machineIncidents.length ? "border-danger/30 bg-danger/5" : "border-sage/25 bg-sage/5"}`}><p className="text-[10px] font-bold uppercase tracking-wide text-taupe">Open incidents</p><p className={`mt-1 font-display text-lg font-bold ${machineIncidents.length ? "text-danger" : "text-sage"}`}>{machineIncidents.length}</p><p className="text-xs text-taupe">View incident workspace</p></Link>
       </section>
 
-      {machineIncidents.length > 0 && <details open={machineIncidents.some((incident) => incident.severity === "critical")} className="mb-6 overflow-hidden rounded-2xl border border-danger/25 bg-white"><summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4"><span className="font-display text-lg font-bold text-cocoa">Open incidents for this machine</span><span className="rounded-full bg-danger/10 px-3 py-1 text-xs font-bold text-danger">{machineIncidents.length}</span></summary><div className="space-y-2 border-t border-line p-4">{machineIncidents.map((incident) => <div key={incident.id} className="rounded-lg bg-cream/50 p-3"><div className="flex flex-wrap justify-between gap-2"><span className="font-semibold text-cocoa">{incident.title}</span><span className={`text-xs font-bold capitalize ${incident.severity === "critical" ? "text-danger" : incident.severity === "warning" ? "text-warning" : "text-sage"}`}>{incident.severity}</span></div>{incident.description && <p className="mt-1 text-xs text-taupe">{incident.description}</p>}<time dateTime={incident.openedAt} className="mt-2 block text-[11px] font-semibold text-taupe">Opened {formatDateTime(incident.openedAt, tz)} · {relativeAge(incident.openedAt, today)}</time><Link href={`/incidents#incident-${incident.id}`} className="mt-2 inline-block text-xs font-bold text-terracotta">Review incident</Link></div>)}</div></details>}
+      {machineIncidents.length > 0 && <details data-machine-widget="incidents" open={machineIncidents.some((incident) => incident.severity === "critical")} className="mb-6 overflow-hidden rounded-2xl border border-danger/25 bg-white"><summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4"><span className="font-display text-lg font-bold text-cocoa">Open incidents for this machine</span><span className="rounded-full bg-danger/10 px-3 py-1 text-xs font-bold text-danger">{machineIncidents.length}</span></summary><div className="space-y-2 border-t border-line p-4">{machineIncidents.map((incident) => <div key={incident.id} className="rounded-lg bg-cream/50 p-3"><div className="flex flex-wrap justify-between gap-2"><span className="font-semibold text-cocoa">{incident.title}</span><span className={`text-xs font-bold capitalize ${incident.severity === "critical" ? "text-danger" : incident.severity === "warning" ? "text-warning" : "text-sage"}`}>{incident.severity}</span></div>{incident.description && <p className="mt-1 text-xs text-taupe">{incident.description}</p>}<time dateTime={incident.openedAt} className="mt-2 block text-[11px] font-semibold text-taupe">Opened {formatDateTime(incident.openedAt, tz)} · {relativeAge(incident.openedAt, today)}</time><div className="mt-2 flex flex-wrap items-center gap-3"><Link href={`/incidents#incident-${incident.id}`} className="text-xs font-bold text-terracotta">Review incident</Link></div><MachineIncidentResolution incidentId={incident.id} imei={imei} sourceKind={incident.sourceKind} sourceResolved={Boolean(incident.sourceAlertResolvedAt)} sourceResolutionSource={incident.sourceAlertResolutionSource} /></div>)}</div></details>}
 
       {/* Location map */}
       {location && (
-        <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+        <section data-machine-widget="location" className="mb-6 rounded-2xl border border-line bg-white p-5">
           <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Location</h2>
           <p className="mb-3 text-sm text-taupe">{location}</p>
           <MachineMap address={location} lat={config?.latitude ?? null} lng={config?.longitude ?? null} />
@@ -260,7 +270,7 @@ export default async function MachineDetailPage({
       )}
 
       {/* Configuration + Push + Remote */}
-      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+      <section data-machine-widget="configuration" className="mb-6 rounded-2xl border border-line bg-white p-5">
         <h2 className="mb-4 font-display text-lg font-bold text-cocoa">Configuration &amp; control</h2>
         {config ? (
           <>
@@ -286,10 +296,10 @@ export default async function MachineDetailPage({
         )}
       </section>
 
-      {config?.machineId && <MachineServiceQr machineId={config.machineId} machineName={name} />}
+      {config?.machineId && <div data-machine-widget="service_qr"><MachineServiceQr machineId={config.machineId} machineName={name} /></div>}
 
       {/* Cleaning history */}
-      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+      <section data-machine-widget="cleaning_history" className="mb-6 rounded-2xl border border-line bg-white p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-display text-lg font-bold text-cocoa">Cleaning history</h2>
           <span className="text-xs font-semibold text-taupe">Last full clean: {config?.lastFullClean ? formatDate(config.lastFullClean, tz) : "never recorded"}</span>
@@ -305,7 +315,7 @@ export default async function MachineDetailPage({
       </section>
 
       {/* Lots & traceability */}
-      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+      <section data-machine-widget="lots_traceability" className="mb-6 rounded-2xl border border-line bg-white p-5">
         <h2 className="mb-3 font-display text-lg font-bold text-cocoa">Lots &amp; traceability</h2>
         {config && config.ingredients.length > 0 ? (
           <>
@@ -366,14 +376,14 @@ export default async function MachineDetailPage({
       </section>
 
       {/* Branding */}
-      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+      <section data-machine-widget="branding" className="mb-6 rounded-2xl border border-line bg-white p-5">
         <h2 className="mb-1 font-display text-lg font-bold text-cocoa">Branding (machine screen)</h2>
         <p className="mb-3 text-xs text-taupe">Updates the display label, merchant, phone and language shown on the machine.</p>
         <DeviceBrandingForm imei={imei} />
       </section>
 
       {/* Monitored status */}
-      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+      <section data-machine-widget="monitored_status" className="mb-6 rounded-2xl border border-line bg-white p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-display text-lg font-bold text-cocoa">Monitored status</h2>
           <span className="text-xs text-taupe">Observed {telemetry?.status_observed_at ? formatDateTime(telemetry.status_observed_at, tz) : "never"}</span>
@@ -424,7 +434,7 @@ export default async function MachineDetailPage({
       </section>
 
       {/* Screen media */}
-      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+      <section data-machine-widget="screen_media" className="mb-6 rounded-2xl border border-line bg-white p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-display text-lg font-bold text-cocoa">Screen media (advertising)</h2>
           <span className="text-xs text-taupe">Synchronized {telemetry?.media_synced_at ? formatDateTime(telemetry.media_synced_at, tz) : "never"}</span>
@@ -433,7 +443,7 @@ export default async function MachineDetailPage({
       </section>
 
       {/* Product menu */}
-      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+      <section data-machine-widget="product_menu" className="mb-6 rounded-2xl border border-line bg-white p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="font-display text-lg font-bold text-cocoa">Synchronized product menu</h2>
@@ -519,7 +529,7 @@ export default async function MachineDetailPage({
       </section>
 
       {/* Temperature */}
-      <section className="mb-6 rounded-2xl border border-line bg-white p-5">
+      <section data-machine-widget="temperature" className="mb-6 rounded-2xl border border-line bg-white p-5">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-lg font-bold text-cocoa">Historical temperature{telemetry?.temperature_series_name ? ` · ${telemetry.temperature_series_name}` : ""}</h2>
           {telemetry?.temperature_observed_at && (
@@ -537,7 +547,7 @@ export default async function MachineDetailPage({
       </section>
 
       {/* Orders */}
-      <section id="sales" className="scroll-mt-4 rounded-2xl border border-line bg-white p-5">
+      <section id="sales" data-machine-widget="sales" className="mb-6 scroll-mt-4 rounded-2xl border border-line bg-white p-5">
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div><h2 className="font-display text-lg font-bold text-cocoa">Sales &amp; orders</h2><p className="mt-1 text-xs text-taupe">{completedSales.length} completed sales · €{salesRevenue.toFixed(2)}</p></div>
           <form action={`/machines/${imei}#sales`} className="flex flex-wrap items-end gap-2">
@@ -580,6 +590,7 @@ export default async function MachineDetailPage({
           <p className="text-sm text-taupe">No orders in the selected date range.</p>
         )}
       </section>
+      </MachineWidgetLayout>
     </div>
   );
 }

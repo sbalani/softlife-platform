@@ -32,6 +32,7 @@ export type Incident = {
   sourceKind: "alert" | "schedule" | "manual" | "public";
   sourceAlertId: string | null;
   sourceAlertResolvedAt: string | null;
+  sourceAlertResolutionSource: "telemetry" | "manual_dismissal" | "safety_clearance" | null;
   title: string;
   description: string | null;
   severity: "info" | "warning" | "critical";
@@ -79,7 +80,7 @@ function relation(row: Record<string, unknown>, key: string) {
   return (Array.isArray(value) ? value[0] : value) as Record<string, unknown> | null;
 }
 
-function presentIncident(row: Record<string, unknown>, events: IncidentEvent[], publicReport: PublicIncidentReport | null): Incident {
+function presentIncident(row: Record<string, unknown>, events: IncidentEvent[], publicReport: PublicIncidentReport | null, sourceAlertResolutionSource: Incident["sourceAlertResolutionSource"]): Incident {
   const machine = relation(row, "machines");
   const warehouse = relation(row, "odoo_warehouses");
   const owner = relation(row, "owning_tenant");
@@ -100,6 +101,7 @@ function presentIncident(row: Record<string, unknown>, events: IncidentEvent[], 
     sourceKind: row.source_kind as Incident["sourceKind"],
     sourceAlertId: row.source_alert_id as string | null,
     sourceAlertResolvedAt: row.source_alert_resolved_at as string | null,
+    sourceAlertResolutionSource,
     title: row.title as string,
     description: row.description as string | null,
     severity: row.severity as Incident["severity"],
@@ -153,6 +155,13 @@ export async function getIncidents(session: SessionProfile, options: {
   const ids = rows.map((row) => row.id as string);
   const eventsByIncident = new Map<string, IncidentEvent[]>();
   const publicReportsByIncident = new Map<string, PublicIncidentReport>();
+  const resolutionSourceByAlert = new Map<string, Incident["sourceAlertResolutionSource"]>();
+  const sourceAlertIds = [...new Set(rows.flatMap((row) => row.source_alert_id ? [row.source_alert_id as string] : []))];
+  if (sourceAlertIds.length) {
+    const { data: alerts, error } = await s.from("alerts").select("id,resolution_source").in("id", sourceAlertIds);
+    if (error) throw error;
+    for (const alert of alerts ?? []) resolutionSourceByAlert.set(alert.id, alert.resolution_source as Incident["sourceAlertResolutionSource"]);
+  }
   if (ids.length) {
     const { data, error } = await s.from("incident_events")
       .select("id,incident_id,event_type,from_status,to_status,message,created_at,profiles(full_name,email)")
@@ -202,7 +211,12 @@ export async function getIncidents(session: SessionProfile, options: {
       attachments: attachmentsBySubmission.get(report.id as string) ?? [],
     });
   }
-  return rows.map((row) => presentIncident(row, eventsByIncident.get(row.id as string) ?? [], publicReportsByIncident.get(row.id as string) ?? null));
+  return rows.map((row) => presentIncident(
+    row,
+    eventsByIncident.get(row.id as string) ?? [],
+    publicReportsByIncident.get(row.id as string) ?? null,
+    row.source_alert_id ? resolutionSourceByAlert.get(row.source_alert_id as string) ?? null : null,
+  ));
 }
 
 export async function getIncidentPolicies(): Promise<IncidentPolicy[]> {

@@ -18,9 +18,32 @@ import { translateLocation } from "@/lib/i18n/huaxin";
 import { parseMachineRefreshClaim } from "@/lib/data/huaxin-machine-refresh";
 import { inclusiveLocalDatePeriod, localDateTimeToUtc } from "@/lib/odoo-sync-contract";
 import { defrostFormationPct, defrostStatusValue, isHuaxinClosed, isHuaxinCompressorOverheated, isHuaxinLowStock, isHuaxinOpen } from "@/lib/defrost-status";
+import { normalizeMachineDetailWidgetOrder } from "@/lib/machine-detail-layout";
 
 export type SaveResult = { ok: boolean; error?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
+
+export async function saveMachineWidgetOrder(_previous: SaveResult | null, formData: FormData): Promise<SaveResult> {
+  const actor = await getSessionProfile();
+  if (!actor || actor.role !== "admin") return { ok: false, error: "Admin access required." };
+  let submitted: unknown;
+  try {
+    submitted = JSON.parse(String(formData.get("widget_order") ?? "[]"));
+  } catch {
+    return { ok: false, error: "Invalid widget order." };
+  }
+  const widgetOrder = normalizeMachineDetailWidgetOrder(submitted);
+  const version = String(formData.get("version") ?? "");
+  if (!version || Number.isNaN(Date.parse(version))) return { ok: false, error: "Reload the page before saving the master order." };
+  const { data, error } = await (await createServiceClient()).from("machine_detail_settings").update({
+    widget_order: widgetOrder,
+    updated_by: actor.id,
+  }).eq("singleton", true).eq("updated_at", version).select("updated_at").maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!data) return { ok: false, error: "Another administrator changed the master order. Reload and try again." };
+  revalidatePath("/machines/[imei]", "page");
+  return { ok: true };
+}
 
 export async function saveMachineWarehousePeriod(_prev: SaveResult | null, fd: FormData): Promise<SaveResult> {
   const actor = await getSessionProfile();

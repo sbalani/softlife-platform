@@ -106,6 +106,42 @@ export async function resolveIncident(_previous: IncidentActionResult | null, fo
   return incidentRpc("resolve_incident", { p_incident_id: incidentId, p_resolution_summary: summary }, "Incident resolved.");
 }
 
+export async function resolveMachineIncident(_previous: IncidentActionResult | null, formData: FormData): Promise<IncidentActionResult> {
+  const actor = await getSessionProfile();
+  if (!actor || actor.role !== "admin") return { ok: false, error: "Admin access required." };
+  const incidentId = text(formData, "incident_id", 36);
+  const imei = text(formData, "imei", 100);
+  const summary = text(formData, "resolution_summary", 2000);
+  if (!UUID.test(incidentId) || !imei || !summary) return { ok: false, error: "Describe how the incident was resolved." };
+  const s = await createServiceClient();
+  const { data: incident, error: incidentError } = await s.from("incidents")
+    .select("machine_id,source_kind,source_alert_id,source_alert_resolved_at")
+    .eq("id", incidentId)
+    .maybeSingle();
+  if (incidentError) return { ok: false, error: incidentError.message };
+  if (!incident?.machine_id) return { ok: false, error: "Incident not found." };
+  const { data: machine, error: machineError } = await s.from("machines").select("device_imei").eq("id", incident.machine_id).maybeSingle();
+  if (machineError) return { ok: false, error: machineError.message };
+  if (machine?.device_imei !== imei) return { ok: false, error: "Incident does not belong to this machine." };
+  if (incident.source_kind === "alert") {
+    if (!incident.source_alert_id || !incident.source_alert_resolved_at) return { ok: false, error: "Telemetry still reports this alert as active." };
+    const { data: alert, error: alertError } = await s.from("alerts").select("resolution_source").eq("id", incident.source_alert_id).maybeSingle();
+    if (alertError) return { ok: false, error: alertError.message };
+    if (!alert || !["telemetry", "safety_clearance"].includes(alert.resolution_source ?? "")) return { ok: false, error: "A manually dismissed alert cannot confirm machine recovery. Sync the machine first." };
+  }
+  const { error } = await s.rpc("resolve_incident", {
+    p_incident_id: incidentId,
+    p_actor_id: actor.id,
+    p_resolution_summary: summary,
+  });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/machines/${encodeURIComponent(imei)}`);
+  revalidatePath("/machines");
+  revalidatePath("/incidents");
+  revalidatePath("/alerts");
+  return { ok: true, message: "Incident resolved without an Action Report." };
+}
+
 export async function clearIncidentDefrostIntervention(_previous: IncidentActionResult | null, formData: FormData): Promise<IncidentActionResult> {
   const actor = await getSessionProfile();
   if (!actor || actor.role !== "admin") return { ok: false, error: "Admin access required." };

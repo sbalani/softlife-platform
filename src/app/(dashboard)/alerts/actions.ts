@@ -32,7 +32,7 @@ export async function dismissAlert(alertId: string): Promise<AlertRuleResult> {
   if (alert.resolved_at) return { ok: true };
 
   const now = new Date().toISOString();
-  const { data: dismissed, error } = await s.from("alerts").update({ resolved_at: now, resolved_by: actor.id }).eq("id", alertId).is("resolved_at", null).select("id").maybeSingle();
+  const { data: dismissed, error } = await s.from("alerts").update({ resolved_at: now, resolved_by: actor.id, resolution_source: "manual_dismissal" }).eq("id", alertId).is("resolved_at", null).select("id").maybeSingle();
   if (error) return { ok: false, error: error.message };
   if (!dismissed) return { ok: true };
   revalidatePath("/alerts");

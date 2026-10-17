@@ -28,7 +28,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!accessible) return Response.json({ error: { message: "Alert not found or not accessible" } }, { status: 404 });
     if (alert.resolved_at) return Response.json({ ok: true });
 
-    const { error } = await s.from("alerts").update({ resolved_at: now, resolved_by: session.id })
+    const { error } = await s.from("alerts").update({ resolved_at: now, resolved_by: session.id, resolution_source: "manual_dismissal" })
       .eq("id", alertId).is("resolved_at", null);
     if (error) throw error;
     return Response.json({ ok: true });

@@ -48,3 +48,12 @@ export async function retryFiscalInvoiceDraftBatch(s: SupabaseClient, input: { j
   if (error) throwFiscalQueueError(error);
   return data as { batch_id: string; request_id: string; document_count: number };
 }
+
+export async function cancelEmptyFailedFiscalInvoiceJob(s: SupabaseClient, input: { jobId: string; cancelledBy: string }) {
+  const { data, error } = await s.rpc("cancel_empty_failed_fiscal_invoice_job", {
+    p_job_id: input.jobId,
+    p_cancelled_by: input.cancelledBy,
+  });
+  if (error) throwFiscalQueueError(error);
+  return data as { job_id: string; document_count: number };
+}

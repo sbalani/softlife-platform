@@ -117,6 +117,15 @@ test("blocks a fixed-amount tax that happens to have amount 10", () => {
   assert(result.findings.some((finding) => finding.code === "sales_tax_invalid"));
 });
 
+test("blocks a price-excluded vending sales tax", () => {
+  const result = evaluateFiscalConfiguration(settings, {
+    ...configuration,
+    tax: { ...configuration.tax, price_include: false },
+  });
+  assert.equal(result.accepted, false);
+  assert(result.findings.some((finding) => finding.code === "sales_tax_price_mode_invalid"));
+});
+
 test("blocks a non-Spanish global sales tax", () => {
   const result = evaluateFiscalConfiguration(settings, {
     ...configuration,

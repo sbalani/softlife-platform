@@ -8,7 +8,7 @@ import { cancelUnconfirmedManufacturingPeriod, confirmManufacturingPeriod, confi
 import { createFiscalPreflight } from "@/lib/data/odoo-fiscal";
 import { enqueueFiscalProductRemediation } from "@/lib/data/odoo-fiscal-remediation";
 import { enqueueFiscalInvoiceDraftBatch } from "@/lib/data/odoo-fiscal-invoices";
-import { enqueueFiscalInvoiceConfirmation, retryFiscalInvoiceDraftBatch } from "@/lib/data/odoo-fiscal-invoice-requests";
+import { cancelEmptyFailedFiscalInvoiceJob, enqueueFiscalInvoiceConfirmation, retryFiscalInvoiceDraftBatch } from "@/lib/data/odoo-fiscal-invoice-requests";
 import { inclusiveLocalDatePeriod, localDateTimeToUtc } from "@/lib/odoo-sync-contract";
 import { parseProductionRecipeAssignments } from "@/lib/production-recipe-assignments";
 import { enqueueFiscalSaleLinks } from "@/lib/data/odoo-fiscal-sale-links";
@@ -101,6 +101,22 @@ export async function retryFiscalInvoiceDrafts(_state: OdooActionResult | null, 
     const result = await retryFiscalInvoiceDraftBatch(s, { jobId, requestedBy: actor.id });
     revalidatePath("/odoo");
     return { ok: true, message: `Retried the frozen payload for ${result.document_count} invoice draft${result.document_count === 1 ? "" : "s"}.` };
+  } catch (error) { return actionError(error); }
+}
+
+export async function cancelFailedFiscalInvoiceJob(_state: OdooActionResult | null, fd: FormData): Promise<OdooActionResult> {
+  try {
+    const s = await productionAdminClient();
+    const actor = await getSessionProfile();
+    if (!actor || actor.role !== "admin") throw new Error("Admin access required.");
+    if (String(fd.get("cancel_acknowledgement") ?? "") !== "cancel_empty_failed_invoice_job") {
+      throw new Error("Acknowledge cancellation of the failed invoice job.");
+    }
+    const jobId = String(fd.get("job_id") ?? "");
+    if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw new Error("A valid failed invoice job is required.");
+    const result = await cancelEmptyFailedFiscalInvoiceJob(s, { jobId, cancelledBy: actor.id });
+    revalidatePath("/odoo");
+    return { ok: true, message: `Cancelled the failed job while preserving all ${result.document_count} unissued document records for audit.` };
   } catch (error) { return actionError(error); }
 }
 

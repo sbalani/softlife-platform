@@ -41,7 +41,7 @@ Example report:
 ```
 
 The income account and taxes are the effective values after product/category defaults and the customer fiscal position. The connector reports every active finished product referenced by a platform recipe.
-`price_include` may be either `true` or `false`. For an included tax, Odoo derives the line unit price from the frozen gross amount; for an excluded tax, it derives the line unit price from the frozen tax base. In both cases the resulting invoice total must equal `expected_total_cents`.
+`price_include` must be `true`. Vending source prices are immutable gross consumer amounts; a price-included tax lets Odoo reproduce the exact rounded tax base, VAT, and invoice total for every EUR-cent amount.
 
 ## Preflight controls
 

@@ -104,7 +104,7 @@ export function buildFiscalInvoiceDraftPayload(input: {
   if (input.items.some((item) => item.zero_value_reason !== null) && ![1, 2].includes(zeroValueCapability)) blockers.push("Odoo must advertise a supported zero-value fiscal invoice capability when the batch contains zero-value invoices.");
   if (input.items.some((item) => item.zero_value_reason === "coupon") && zeroValueCapability !== 2) blockers.push("Odoo must advertise zero-value fiscal invoice capability version 2 for coupon vends.");
   if (!companyId || !customerId || !taxId) blockers.push("The fiscal configuration report is missing required Odoo company, customer, or tax identifiers.");
-  if (typeof tax.price_include !== "boolean") blockers.push("The fiscal configuration report has no valid tax price-inclusion mode.");
+  if (tax.price_include !== true) blockers.push("The accepted Odoo vending sales tax must be price-included.");
   if (customerId !== input.customerOdooId || requiredText(journal.code)?.toUpperCase() !== input.journalCode) blockers.push("The fiscal configuration report does not match the frozen customer or journal settings.");
   if (input.items.length === 0) blockers.push("The preflight has no eligible sales.");
   if (input.items.length > 500) blockers.push("A fiscal invoice batch cannot contain more than 500 sales.");

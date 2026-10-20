@@ -91,7 +91,7 @@ test("requires zero-value capability only when a queued item is zero-value", () 
   assert(draft({ ...item, gross_cents: 0, tax_base_cents: 0, vat_cents: 0, zero_value_reason: "free" }, null).blockers.some((blocker) => blocker.includes("batch contains zero-value")));
 });
 
-test("preserves excluded-price Odoo tax configuration without forcing price inclusion", () => {
+test("blocks excluded-price Odoo tax configuration", () => {
   const now = Date.parse("2026-09-29T13:00:00Z");
   const configuration = {
     contract_version: 1, checked_at: "2026-09-29T12:00:00Z",
@@ -104,7 +104,8 @@ test("preserves excluded-price Odoo tax configuration without forcing price incl
     now, report: { id: "report", checked_at: configuration.checked_at, accepted: true, payload_sha256: sha256(configuration), payload: configuration },
     currency: "EUR", journalCode: "VEND", customerOdooId: 722, items: [item], platformInvoiceIds: ["invoice"],
   });
-  assert.equal(result.payload?.tax.price_include, false);
+  assert.equal(result.payload, null);
+  assert(result.blockers.some((blocker) => blocker.includes("price-included")));
 });
 
 test("normalizes accepted report text and requires an explicit tax price mode", () => {
@@ -132,7 +133,7 @@ test("normalizes accepted report text and requires an explicit tax price mode", 
     report: { id: "report", checked_at: invalidPayload.checked_at, accepted: true, payload_sha256: sha256(invalidPayload), payload: invalidPayload },
     currency: "EUR", journalCode: "VEND", customerOdooId: 722, items: [item], platformInvoiceIds: ["invoice"],
   });
-  assert(invalid.blockers.some((message) => message.includes("price-inclusion")));
+  assert(invalid.blockers.some((message) => message.includes("price-included")));
 });
 
 test("allows reviewed report age but blocks incapable, refund-warning, empty, and oversized draft sources", () => {

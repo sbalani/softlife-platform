@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SessionProfile } from "./session.ts";
 import { ymd } from "../dates.ts";
 
-export type MobileCapability = "machines.read" | "analytics.read" | "service.refill" | "service.clean" | "action_reports.write" | "action_reports.attach" | "alerts.read" | "recall.read" | "remote.basic" | "defrost.run" | "inventory.transfer";
+export type MobileCapability = "machines.read" | "analytics.read" | "service.refill" | "service.clean" | "action_reports.write" | "action_reports.attach" | "cashbox.write" | "alerts.read" | "recall.read" | "remote.basic" | "defrost.run" | "inventory.transfer";
 
 export const MOBILE_CAPABILITIES: Record<SessionProfile["role"], MobileCapability[]> = {
   admin: ["machines.read", "analytics.read", "service.refill", "service.clean", "action_reports.write", "action_reports.attach", "alerts.read", "recall.read", "remote.basic", "defrost.run", "inventory.transfer"],
@@ -26,7 +26,7 @@ export function normalizeMobileRole(value: unknown): SessionProfile["role"] {
 
 export async function mobileUserProfile(s: SupabaseClient, user: { id: string; email?: string | null }) {
   const { data: profile, error } = await s.from("profiles")
-    .select("role,tenant_id,employer_kind,scope_version,full_name,tenants(name)").eq("id", user.id).maybeSingle();
+    .select("role,tenant_id,employer_kind,scope_version,full_name,cash_access,tenants(name)").eq("id", user.id).maybeSingle();
   if (error || !profile) throw error ?? new Error("User profile not found");
   const role = normalizeMobileRole(profile.role);
   const employerKind = ["softlife", "franchisee", "contractor"].includes(String(profile.employer_kind))
@@ -40,7 +40,8 @@ export async function mobileUserProfile(s: SupabaseClient, user: { id: string; e
     employer_kind: employerKind,
     employer_name: employerKind === "softlife" ? "SoftLife" : tenant?.name ?? null,
     tenant_id: (profile.tenant_id as string) ?? null,
-    capabilities: MOBILE_CAPABILITIES[role],
+    capabilities: [...MOBILE_CAPABILITIES[role], ...(role === "admin" || profile.cash_access === true ? ["cashbox.write" as const] : [])],
+    cash_access: role === "admin" || profile.cash_access === true,
     scope_version: Number(profile.scope_version ?? 1),
   };
 }

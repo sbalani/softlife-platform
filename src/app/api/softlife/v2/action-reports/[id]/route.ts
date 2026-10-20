@@ -16,7 +16,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const s = await createServiceClient();
   if (!await authorizedMobileActionReport(s, session, reportId)) return Response.json({ error: { message: "Not found" } }, { status: 404 });
   const { data, error } = await s.from("service_action_reports")
-    .select("id,client_uuid,machine_id,occurred_at,status,revision,action_kind,action_modes,provenance_status,notes,cleaning_material_used,water_bucket_count,machines(name,display_name),service_action_refill_lines(id,line_number,quantity,inventory_quantity,unit,product_name,observed_lot_code,observed_odoo_lot_id,finished_bottle,left_unfinished_bottle,provenance_status,unresolved_reason),service_action_attachments(id,refill_line_id,kind,stage,caption,mime_type,size_bytes,created_at),service_action_stock_snapshots(id,status,captured_at),service_action_stock_snapshot_jobs(status,total_attempt_count,last_attempt_at,last_error,completed_at),service_action_report_incidents(incidents(id,title,status))")
+    .select("id,client_uuid,machine_id,occurred_at,status,revision,action_kind,action_modes,provenance_status,notes,cleaning_material_used,water_bucket_count,machines(name,display_name),service_action_refill_lines(id,line_number,quantity,inventory_quantity,unit,product_name,observed_lot_code,observed_odoo_lot_id,finished_bottle,left_unfinished_bottle,provenance_status,unresolved_reason),service_action_attachments(id,refill_line_id,kind,stage,caption,mime_type,size_bytes,created_at),service_action_stock_snapshots(id,status,captured_at),service_action_stock_snapshot_jobs(status,total_attempt_count,last_attempt_at,last_error,completed_at),service_action_report_incidents(incidents(id,title,status)),service_action_cash_reconciliations(expected_before_cents,withdrawal_cents,physical_remainder_cents,discrepancy_cents,discrepancy_reason,status)")
     .eq("id", reportId).maybeSingle();
   if (error) return Response.json({ error: { message: error.message } }, { status: 500 });
   if (!data) return Response.json({ error: { message: "Not found" } }, { status: 404 });
@@ -29,6 +29,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const jobRelation = row.service_action_stock_snapshot_jobs as Record<string, unknown> | Record<string, unknown>[] | null;
   const job = Array.isArray(jobRelation) ? jobRelation[0] : jobRelation;
   const modes = parseActionReportModes(row.action_modes, row.action_kind) ?? modesFromLegacyKind(row.action_kind);
+  const cashRelation = row.service_action_cash_reconciliations as Record<string, unknown> | Record<string, unknown>[] | null;
+  const cashbox = Array.isArray(cashRelation) ? cashRelation[0] : cashRelation;
   return Response.json({
     report_id: row.id, client_uuid: row.client_uuid, machine_id: row.machine_id,
     machine_name: machine?.display_name || machine?.name || "Unknown machine",
@@ -48,5 +50,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       : snapshot ? { status: "succeeded", attempts: Number(job?.total_attempt_count ?? 0), last_attempt_at: job?.last_attempt_at ?? null, completed_at: snapshot.captured_at, error: null, retryable: false }
       : { status: job?.status === "failed" ? "failed" : "pending", attempts: Number(job?.total_attempt_count ?? 0), last_attempt_at: job?.last_attempt_at ?? null, completed_at: null, error: job?.last_error ?? null, retryable: job?.status === "failed" },
     incident_ids: incidents.map((incident) => incident.id).sort(),
+    cashbox: hasMobileCapability(session, "cashbox.write") && cashbox?.status === "confirmed" ? cashbox : null,
   }, { headers: { "cache-control": "no-store" } });
 }

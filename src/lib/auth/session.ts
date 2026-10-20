@@ -6,6 +6,7 @@ export type SessionProfile = {
   role: "admin" | "operator" | "franchisee";
   tenant_id: string | null;
   full_name: string | null;
+  cash_access?: boolean;
 };
 
 /** Current signed-in user + profile, read via the per-request cookie client
@@ -19,7 +20,7 @@ export async function getSessionProfile(): Promise<SessionProfile | null> {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: profile } = await supabase.from("profiles").select("role,tenant_id,full_name").eq("id", user.id).maybeSingle();
+  const { data: profile } = await supabase.from("profiles").select("role,tenant_id,full_name,cash_access").eq("id", user.id).maybeSingle();
   const rawRole = profile?.role as string;
   const role = rawRole === "admin" || rawRole === "franchisee" ? rawRole : "operator";
   return {
@@ -28,5 +29,6 @@ export async function getSessionProfile(): Promise<SessionProfile | null> {
     role,
     tenant_id: (profile?.tenant_id as string) ?? null,
     full_name: (profile?.full_name as string) ?? null,
+    cash_access: role === "admin" || profile?.cash_access === true,
   };
 }

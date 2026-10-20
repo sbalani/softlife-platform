@@ -19,8 +19,9 @@ import { parseMachineRefreshClaim } from "@/lib/data/huaxin-machine-refresh";
 import { inclusiveLocalDatePeriod, localDateTimeToUtc } from "@/lib/odoo-sync-contract";
 import { defrostFormationPct, defrostStatusValue, isHuaxinClosed, isHuaxinCompressorOverheated, isHuaxinLowStock, isHuaxinOpen } from "@/lib/defrost-status";
 import { normalizeMachineDetailWidgetOrder } from "@/lib/machine-detail-layout";
+import { parseEuroCents } from "@/lib/cashbox";
 
-export type SaveResult = { ok: boolean; error?: string };
+export type SaveResult = { ok: boolean; error?: string; warning?: string };
 export type PushResult = { ok: boolean; error?: string; pushed?: number };
 
 export async function saveMachineWidgetOrder(_previous: SaveResult | null, formData: FormData): Promise<SaveResult> {
@@ -110,6 +111,21 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
     const defrostTime = String(fd.get("defrost_time") ?? "03:00");
     const defrostMinutes = Number(fd.get("defrost_minutes") ?? 4);
     const locationOverride = String(fd.get("location_override") ?? "").trim() || null;
+    const cashTrackingEnabled = fd.get("cash_tracking_enabled") === "on";
+    const cashBalanceRaw = String(fd.get("cash_balance") ?? "").trim();
+    const cashBalanceCents = cashBalanceRaw ? parseEuroCents(cashBalanceRaw) : null;
+    const cashFinalCountRaw = String(fd.get("cash_final_count") ?? "").trim();
+    const cashFinalWithdrawalRaw = String(fd.get("cash_final_withdrawal") ?? "").trim();
+    const cashFinalCountCents = cashFinalCountRaw ? parseEuroCents(cashFinalCountRaw) : null;
+    const cashFinalWithdrawalCents = cashFinalWithdrawalRaw ? parseEuroCents(cashFinalWithdrawalRaw) : null;
+    const cashEffectiveRaw = String(fd.get("cash_effective_at") ?? "").trim();
+    let cashEffectiveAt = new Date().toISOString();
+    if (cashEffectiveRaw) {
+      try { cashEffectiveAt = localDateTimeToUtc(cashEffectiveRaw, "Europe/Madrid"); } catch { return { ok: false, error: "Invalid cashbox effective time." }; }
+    }
+    if (cashBalanceRaw && cashBalanceCents === null) return { ok: false, error: "Cashbox balance must be a non-negative amount with at most two decimals." };
+    if (cashFinalCountRaw && cashFinalCountCents === null) return { ok: false, error: "Final cash count is invalid." };
+    if (cashFinalWithdrawalRaw && cashFinalWithdrawalCents === null) return { ok: false, error: "Final cash withdrawal is invalid." };
     if (warehouseValue && (!Number.isInteger(odooWarehouseId) || Number(odooWarehouseId) <= 0)) return { ok: false, error: "Invalid warehouse." };
     if (lastClean && lastClean > ymd(new Date())) return { ok: false, error: "Cleaning date cannot be in the future." };
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(defrostTime)) return { ok: false, error: "Invalid defrost start time." };
@@ -117,7 +133,7 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
 
     const { data: currentLocation, error: locationError } = await s
       .from("machines")
-      .select("location,latitude,longitude,geocoded_from")
+      .select("location,latitude,longitude,geocoded_from,cash_tracking_enabled")
       .eq("id", machineId)
       .maybeSingle();
     if (locationError) return { ok: false, error: locationError.message };
@@ -136,48 +152,53 @@ export async function saveMachineConfig(_prev: SaveResult | null, fd: FormData):
     // base_product_id is NOT touched here — it's set from the Base hopper
     // card in the product menu section (updateBaseHopper), which is the one
     // place that both pushes to the machine and keeps this field linked.
-    const { data: savedMachine, error: mErr } = await s
-      .from("machines")
-      .update({
-        profile: profile || null,
-        display_name: String(fd.get("display_name") ?? "").trim() || null,
-        nayax_id: String(fd.get("nayax_id") ?? "").trim() || null,
-        payment_model: String(fd.get("payment_model") ?? "automatic"),
-        location_override: locationOverride,
-        odoo_warehouse_id: odooWarehouseId,
-        latitude: coordinates?.lat ?? null,
-        longitude: coordinates?.lng ?? null,
-        geocoded_from: coordinates ? effectiveLocation : null,
-      })
-      .eq("id", machineId)
-      .select("id,last_full_clean_date")
-      .single();
-    if (mErr) return { ok: false, error: mErr.message };
-
-    const { error: scheduleError } = await s.rpc("set_machine_operations", {
+    const cashConfigurationChanged = cashTrackingEnabled !== (currentLocation?.cash_tracking_enabled === true) || cashBalanceCents !== null;
+    const { data: saved, error: saveError } = await s.rpc("save_machine_configuration", {
       p_machine_id: machineId,
+      p_actor_id: actor.id,
+      p_profile: profile,
+      p_display_name: String(fd.get("display_name") ?? "").trim(),
+      p_nayax_id: String(fd.get("nayax_id") ?? "").trim(),
+      p_payment_model: String(fd.get("payment_model") ?? "automatic"),
+      p_location_override: locationOverride,
+      p_odoo_warehouse_id: odooWarehouseId,
+      p_latitude: coordinates?.lat ?? null,
+      p_longitude: coordinates?.lng ?? null,
+      p_geocoded_from: coordinates ? effectiveLocation : null,
       p_deployed: deployed,
       p_defrost_enabled: defrostEnabled,
       p_defrost_time: defrostTime,
       p_defrost_seconds: defrostMinutes * 60,
-      p_updated_by: actor.id,
+      p_apply_cash_config: cashConfigurationChanged,
+      p_cash_enabled: cashTrackingEnabled,
+      p_cash_effective_at: cashEffectiveAt,
+      p_cash_balance_cents: cashBalanceCents,
+      p_cash_final_count_cents: cashFinalCountCents,
+      p_cash_final_withdrawal_cents: cashFinalWithdrawalCents,
     });
-    if (scheduleError) return { ok: false, error: scheduleError.message };
+    if (saveError) return { ok: false, error: saveError.message };
+    const savedMachine = saved as { id: string; last_full_clean_date: string | null };
 
+    let warning: string | undefined;
     if (lastClean && cleanDay(savedMachine.last_full_clean_date) !== lastClean) {
-      await recordMachineClean(s, {
-        machineId,
-        clientUuid: crypto.randomUUID(),
-        operatorId: actor.id,
-        kind: "full",
-        eventTime: `${lastClean}T12:00:00Z`,
-      });
+      try {
+        await recordMachineClean(s, {
+          machineId,
+          clientUuid: crypto.randomUUID(),
+          operatorId: actor.id,
+          kind: "full",
+          eventTime: `${lastClean}T12:00:00Z`,
+        });
+      } catch (error) {
+        console.error("[machine-config] Configuration saved but clean history failed", error);
+        warning = "Configuration saved, but the cleaning date was not recorded. Retry the cleaning date separately.";
+      }
     }
 
     revalidatePath(`/machines/${imei}`);
     revalidatePath("/machines");
     revalidatePath("/report-incident");
-    return { ok: true };
+    return { ok: true, warning };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

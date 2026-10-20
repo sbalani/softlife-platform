@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   const calendarState = actionReportCalendarState(new URL(request.url).searchParams.get("month") ?? undefined, undefined);
   if (machineIds?.length === 0) return Response.json({ records: [], calendar: [], month: calendarState.month }, { headers: { "cache-control": "no-store" } });
   let query = s.from("service_action_reports")
-    .select("id,client_uuid,machine_id,occurred_at,status,revision,action_kind,action_modes,provenance_status,notes,machines(name,display_name),service_action_report_incidents(incident_id)")
+    .select("id,client_uuid,machine_id,occurred_at,status,revision,action_kind,action_modes,provenance_status,notes,machines(name,display_name),service_action_report_incidents(incident_id),service_action_cash_reconciliations(expected_before_cents,withdrawal_cents,physical_remainder_cents,discrepancy_cents,discrepancy_reason,status)")
     .neq("status", "draft").order("occurred_at", { ascending: false }).limit(50);
   if (session.role !== "admin") query = query.eq("operator_id", session.id);
   if (machineIds) query = query.in("machine_id", machineIds);
@@ -31,6 +31,8 @@ export async function GET(request: Request) {
   if (calendarError) return Response.json({ error: { message: calendarError.message } }, { status: 500 });
   const records = ((data as Record<string, unknown>[]) ?? []).map((row) => {
     const machine = (Array.isArray(row.machines) ? row.machines[0] : row.machines) as { name: string; display_name: string | null } | null;
+    const cashRelation = row.service_action_cash_reconciliations as Record<string, unknown> | Record<string, unknown>[] | null;
+    const cashbox = Array.isArray(cashRelation) ? cashRelation[0] : cashRelation;
     return {
       report_id: row.id, client_uuid: row.client_uuid, machine_id: row.machine_id,
       machine_name: machine?.display_name || machine?.name || "Unknown machine",
@@ -38,6 +40,7 @@ export async function GET(request: Request) {
       action_kind: row.action_kind, action_modes: parseActionReportModes(row.action_modes, row.action_kind) ?? modesFromLegacyKind(row.action_kind),
       provenance_status: row.provenance_status, notes: row.notes,
       incident_ids: ((row.service_action_report_incidents as { incident_id: string }[]) ?? []).map((link) => link.incident_id).sort(),
+      cashbox: hasMobileCapability(session, "cashbox.write") && cashbox?.status === "confirmed" ? cashbox : null,
     };
   });
   const calendar = ((calendarData as Record<string, unknown>[]) ?? []).map((row) => {

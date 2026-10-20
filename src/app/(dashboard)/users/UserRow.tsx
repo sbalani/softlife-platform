@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { deleteUser, sendUserPasswordReset, setUserAccess, setUserMachines } from "./actions";
+import { deleteUser, sendUserPasswordReset, setUserAccess, setUserCashAccess, setUserMachines } from "./actions";
 import { formatDateTime } from "@/lib/dates";
 
 export type UserRole = "admin" | "operator" | "franchisee";
@@ -13,6 +13,7 @@ export type UserRowData = {
   role: UserRole;
   employer_kind: EmployerKind;
   tenant_id: string | null;
+  cash_access: boolean;
   assigned_machine_ids: string[];
   last_sign_in_at?: string | null;
   isSelf: boolean;
@@ -28,6 +29,7 @@ export function UserRow({ user, tenants, machines, timeZone }: { user: UserRowDa
   const [employerKind, setEmployerKind] = useState<EmployerKind>(user.employer_kind);
   const [tenantId, setTenantId] = useState(user.tenant_id ?? "");
   const [machineIds, setMachineIds] = useState(user.assigned_machine_ids);
+  const [cashAccess, setCashAccess] = useState(user.cash_access);
 
   const run = (work: () => Promise<{ ok: boolean; error?: string }>, success: string) => {
     setError(null); setMessage(null);
@@ -51,6 +53,8 @@ export function UserRow({ user, tenants, machines, timeZone }: { user: UserRowDa
           {employerKind !== "softlife" && <select value={tenantId} onChange={(event) => setTenantId(event.target.value)} disabled={user.isSelf || pending} className={input}><option value="">Select employer</option>{tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select>}
           {!user.isSelf && <button disabled={pending} onClick={() => run(() => setUserAccess(user.id, role, employerKind, employerKind === "softlife" ? null : tenantId || null), "Access saved." )} className="text-xs font-bold text-terracotta">Save access</button>}
         </div>
+        <label className="mt-3 flex items-center gap-2 text-xs font-semibold text-cocoa"><input type="checkbox" checked={role === "admin" || cashAccess} disabled={role === "admin" || user.isSelf || pending} onChange={(event) => setCashAccess(event.target.checked)} className="accent-terracotta" />Cashbox access</label>
+        {role !== "admin" && !user.isSelf && <button disabled={pending} onClick={() => run(() => setUserCashAccess(user.id, cashAccess), "Cashbox access saved.")} className="mt-1 text-xs font-bold text-terracotta">Save cashbox access</button>}
         {role === "operator" && !user.isSelf && <details className="mt-3"><summary className="cursor-pointer text-xs font-semibold text-cocoa">Assigned machines ({machineIds.length})</summary><div className="mt-2 grid max-h-44 gap-1 overflow-y-auto sm:grid-cols-2">{machines.map((machine) => <label key={machine.id} className="flex items-center gap-2 text-xs text-taupe"><input type="checkbox" checked={machineIds.includes(machine.id)} onChange={(event) => setMachineIds((current) => event.target.checked ? [...current, machine.id] : current.filter((id) => id !== machine.id))} />{machine.name}</label>)}</div><button disabled={pending} onClick={() => run(() => setUserMachines(user.id, machineIds), "Assignments saved.")} className="mt-2 text-xs font-bold text-terracotta">Save assignments</button></details>}
       </td>
       <td className="px-4 py-3 text-right">

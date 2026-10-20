@@ -12,6 +12,7 @@ import { getSessionProfile } from "@/lib/auth/session";
 import { DismissAlertButton } from "@/components/DismissAlertButton";
 import { getPasteurizationAlertSettings } from "@/lib/data/pasteurization";
 import { PasteurizationManager } from "./PasteurizationManager";
+import { getActiveCashboxAlerts } from "@/lib/data/cashboxes";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
   const pasteurization = adminData?.[3] ?? { schedules: [], suggestions: [] };
   const requestedPasteurizationMachine = typeof params.pasteurizationMachine === "string" ? params.pasteurizationMachine : undefined;
   const defaultPasteurizationMachine = machines.some((machine) => machine.id === requestedPasteurizationMachine) ? requestedPasteurizationMachine : undefined;
+  const cashboxAlerts = session ? await getActiveCashboxAlerts(session) : [];
   return (
     <div>
       <header className="mb-8">
@@ -54,6 +56,8 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
         schedules={pasteurization.schedules} suggestions={pasteurization.suggestions} timeZone={tz} today={ymd(new Date(), tz)}
         defaultMachineId={defaultPasteurizationMachine}
       />}
+
+      {isAdmin && cashboxAlerts.length > 0 && <section className="mb-8"><h2 className="mb-3 font-display text-xl font-bold text-cocoa">Cashbox alerts</h2><div className="space-y-3">{cashboxAlerts.map((alert) => <article key={alert.id} className={`rounded-2xl border bg-white p-5 ${alert.severity === "critical" ? "border-danger/30" : "border-warning/30"}`}><div className="flex flex-wrap items-center gap-2"><span className={`text-xs font-bold ${alert.severity === "critical" ? "text-danger" : "text-warning"}`}>{alert.severity === "critical" ? "Critical" : "Warning"}</span>{alert.deviceImei ? <Link href={`/machines/${alert.deviceImei}`} className="text-xs font-semibold text-terracotta hover:underline">· {alert.machineName}</Link> : <span className="text-xs text-taupe">· {alert.machineName}</span>}</div><h3 className="mt-1.5 font-display text-lg font-bold text-cocoa">{alert.title}</h3><p className="mt-1 text-sm text-cocoa">{alert.message}</p><p className="mt-2 text-xs text-taupe">{formatDateTime(alert.createdAt, tz)}</p></article>)}</div></section>}
 
       <h2 className="mb-3 font-display text-xl font-bold text-cocoa">Active alerts</h2>
       <p className="mb-4 rounded-xl border border-sage/25 bg-sage/5 px-4 py-3 text-xs text-cocoa">Machine alerts resolve automatically after a new sync confirms recovery. You can also dismiss an alert after reviewing it; if telemetry still reports the condition, a future check can create a new alert.</p>

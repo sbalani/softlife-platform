@@ -51,6 +51,17 @@ export async function persistMobileActionReport(s: SupabaseClient, session: Mobi
     if (incidentError) throw incidentError;
     if ((incidents ?? []).some((incident) => incident.source_kind === "alert" && !incident.source_alert_resolved_at)) throw new Error("Telemetry still reports one or more incident alerts as active");
   }
+  const rawCashbox = record.cashbox && typeof record.cashbox === "object" ? record.cashbox as Record<string, unknown> : null;
+  const withdrawalCents = rawCashbox ? Number(rawCashbox.withdrawal_cents) : null;
+  const physicalRemainderCents = rawCashbox ? Number(rawCashbox.physical_remainder_cents) : null;
+  if (rawCashbox && (!Number.isSafeInteger(withdrawalCents) || withdrawalCents! < 0 || !Number.isSafeInteger(physicalRemainderCents) || physicalRemainderCents! < 0)) {
+    throw new Error("Invalid cash reconciliation");
+  }
+  const cashbox = rawCashbox ? {
+    withdrawal_cents: withdrawalCents,
+    physical_remainder_cents: physicalRemainderCents,
+    discrepancy_reason: String(rawCashbox.discrepancy_reason ?? "").trim().slice(0, 500) || null,
+  } : null;
   const mobilePayload = {
     client_uuid: clientUuid, machine_id: machineId, occurred_at: new Date(occurredAt).toISOString(), status,
     revision: expectedRevision, action_kind: actionKind, action_modes: actionModes, notes,
@@ -65,8 +76,9 @@ export async function persistMobileActionReport(s: SupabaseClient, session: Mobi
       ...(line.left_unfinished_bottle === true ? { left_unfinished_bottle: true } : {}),
     })) : [],
     incident_ids: incidentIds,
+    cashbox,
   };
-  const { data, error } = await s.rpc("record_revisioned_service_action_report", {
+  const { data, error } = await s.rpc("record_revisioned_service_action_report_v2", {
     p_client_uuid: clientUuid, p_machine_id: machineId, p_operator_id: session.id,
     p_actor_id: session.id,
     p_occurred_at: new Date(occurredAt).toISOString(), p_status: status,
@@ -75,6 +87,7 @@ export async function persistMobileActionReport(s: SupabaseClient, session: Mobi
     p_source: "mobile", p_expected_revision: expectedRevision, p_draft_payload: mobilePayload,
     p_incident_ids: incidentIds,
     p_action_modes: actionModes,
+    p_cashbox: cashbox,
   });
   if (error) throw error;
   return data as { id: string; status: string; provenance_status: string; revision: number; projection_error?: string | null };

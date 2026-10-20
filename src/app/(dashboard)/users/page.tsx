@@ -29,7 +29,7 @@ export default async function UsersPage() {
   if (isSupabaseConfigured()) {
     const s = await createServiceClient();
     const [{ data }, { data: machineRows }, { data: assignmentRows }, authLastSignIns] = await Promise.all([
-      s.from("profiles").select("id,email,full_name,role,employer_kind,tenant_id").order("email"),
+      s.from("profiles").select("id,email,full_name,role,employer_kind,tenant_id,cash_access").order("email"),
       s.from("machines").select("id,name,display_name").order("name"),
       s.from("user_machine_assignments").select("user_id,machine_id").lte("starts_at", new Date().toISOString()).or(`ends_at.is.null,ends_at.gte.${new Date().toISOString()}`),
       getAuthLastSignIns(s),
@@ -43,6 +43,7 @@ export default async function UsersPage() {
       role: (["admin", "franchisee"].includes(u.role as string) ? u.role : "operator") as UserRowData["role"],
       employer_kind: (["franchisee", "contractor"].includes(u.employer_kind as string) ? u.employer_kind : "softlife") as UserRowData["employer_kind"],
       tenant_id: (u.tenant_id as string) ?? null,
+      cash_access: u.role === "admin" || u.cash_access === true,
       assigned_machine_ids: assignments.filter((assignment) => assignment.user_id === u.id).map((assignment) => assignment.machine_id),
       last_sign_in_at: authLastSignIns.has(u.id as string) ? authLastSignIns.get(u.id as string) ?? null : undefined,
       isSelf: u.id === session.id,

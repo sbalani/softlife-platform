@@ -35,6 +35,11 @@ export type MachineConfig = {
   displayName: string | null;
   odooWarehouseId: number | null;
   deployed: boolean;
+  cashTrackingEnabled: boolean;
+  cashAnchorBalanceCents: number | null;
+  cashAnchorAt: string | null;
+  cashExpectedCents: number | null;
+  cashLedger: { id: string; entryType: string; amountCents: number; occurredAt: string }[];
   defrostSchedule: { enabled: boolean; localStartTime: string; defrostMinutes: number; requiresIntervention: boolean } | null;
   latestDefrostRun: { state: string; scheduledFor: string; lastFormationPct: number | null; failureDetail: string | null } | null;
   defrostRuns: DefrostRunSummary[];
@@ -58,7 +63,7 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
     const s = await createServiceClient();
     const { data: m } = await s
       .from("machines")
-      .select("id,name,location,location_override,latitude,longitude,base_product_id,profile,last_full_clean_date,payment_model,customer_id,nayax_id,display_name,odoo_warehouse_id,deployed,created_at")
+      .select("id,name,location,location_override,latitude,longitude,base_product_id,profile,last_full_clean_date,payment_model,customer_id,nayax_id,display_name,odoo_warehouse_id,deployed,cash_tracking_enabled,created_at")
       .eq("device_imei", imei)
       .maybeSingle();
     const machine = m as Record<string, unknown> | null;
@@ -72,24 +77,34 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
     let defrostSchedule: MachineConfig["defrostSchedule"] = null;
     let latestDefrostRun: MachineConfig["latestDefrostRun"] = null;
     if (machine?.id) {
-      const [ingredientResult, scheduleResult, runResult, interventionAlertResult, warehouseAssignmentResult] = await Promise.all([
+      const [ingredientResult, scheduleResult, runResult, interventionAlertResult, warehouseAssignmentResult, cashAccountResult, cashLedgerResult] = await Promise.all([
         s.from("machine_ingredients").select("position,product_id,product_type,current_lot_name,last_loaded_date").eq("machine_id", machine.id as string),
         s.from("machine_defrost_schedules").select("enabled,local_start_time,defrost_seconds,requires_intervention").eq("machine_id", machine.id as string).maybeSingle(),
         s.from("machine_defrost_runs").select("id,state,trigger_kind,scheduled_for,started_at,completed_at,next_action_at,last_formation_pct,refrigeration_attempts,sales_attempts,failure_detail,outcome").eq("machine_id", machine.id as string).order("created_at", { ascending: false }).limit(10),
         s.from("alerts").select("id").eq("machine_id", machine.id as string).eq("type", "defrost_automation_failed").is("resolved_at", null).limit(1),
         s.from("machine_warehouse_assignments").select("id,odoo_warehouse_id,valid_from,valid_to,odoo_warehouses(name)").eq("machine_id", machine.id as string).order("valid_from"),
+        s.from("machine_cash_accounts").select("anchor_balance_cents,anchor_at,disabled_at").eq("machine_id", machine.id as string).maybeSingle(),
+        s.from("machine_cash_ledger").select("id,entry_type,amount_cents,occurred_at").eq("machine_id", machine.id as string).order("occurred_at", { ascending: false }).order("created_at", { ascending: false }).limit(20),
       ]);
       if (ingredientResult.error) throw ingredientResult.error;
       if (scheduleResult.error) throw scheduleResult.error;
       if (runResult.error) throw runResult.error;
       if (interventionAlertResult.error) throw interventionAlertResult.error;
       if (warehouseAssignmentResult.error) throw warehouseAssignmentResult.error;
+      if (cashAccountResult.error) throw cashAccountResult.error;
+      if (cashLedgerResult.error) throw cashLedgerResult.error;
       const { data: ings } = ingredientResult;
       const { data: schedule } = scheduleResult;
       const runRows = (runResult.data as Record<string, unknown>[]) ?? [];
       ingredients = (ings as MachineConfig["ingredients"]) ?? [];
       if (schedule) defrostSchedule = { enabled: Boolean(schedule.enabled), localStartTime: String(schedule.local_start_time).slice(0, 5), defrostMinutes: Number(schedule.defrost_seconds) / 60, requiresIntervention: Boolean(schedule.requires_intervention) || Boolean(interventionAlertResult.data?.length) };
       const run = runRows[0];
+      let cashExpectedCents: number | null = null;
+      if (machine.cash_tracking_enabled === true && !cashAccountResult.data?.disabled_at) {
+        const { data: expected, error: expectedError } = await s.rpc("machine_cash_expected_cents", { p_machine_id: machine.id as string, p_at: new Date().toISOString() });
+        if (expectedError) throw expectedError;
+        cashExpectedCents = expected == null ? null : Number(expected);
+      }
       if (run) latestDefrostRun = { state: String(run.state), scheduledFor: String(run.scheduled_for), lastFormationPct: run.last_formation_pct == null ? null : Number(run.last_formation_pct), failureDetail: (run.failure_detail as string) ?? null };
       const defrostRuns: DefrostRunSummary[] = runRows.map((row) => ({
         id: String(row.id), state: String(row.state), triggerKind: String(row.trigger_kind), scheduledFor: String(row.scheduled_for),
@@ -106,6 +121,11 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
         customerId: (machine?.customer_id as string) ?? null, nayaxId: (machine?.nayax_id as string) ?? null,
         displayName: (machine?.display_name as string) ?? null, odooWarehouseId: (machine?.odoo_warehouse_id as number) ?? null,
         deployed: machine?.deployed !== false, defrostSchedule, latestDefrostRun, defrostRuns,
+        cashTrackingEnabled: machine?.cash_tracking_enabled === true && !cashAccountResult.data?.disabled_at,
+        cashAnchorBalanceCents: cashAccountResult.data?.anchor_balance_cents == null ? null : Number(cashAccountResult.data.anchor_balance_cents),
+        cashAnchorAt: (cashAccountResult.data?.anchor_at as string | null) ?? null,
+        cashExpectedCents,
+        cashLedger: ((cashLedgerResult.data as { id: string; entry_type: string; amount_cents: number; occurred_at: string }[]) ?? []).map((entry) => ({ id: entry.id, entryType: entry.entry_type, amountCents: Number(entry.amount_cents), occurredAt: entry.occurred_at })),
         odooWarehouses: (warehouseRows as OdooWarehouseOpt[]) ?? [],
         warehouseAssignments: (warehouseAssignmentResult.data as unknown as Record<string, unknown>[] ?? []).map((row) => ({
           id: String(row.id), odooWarehouseId: Number(row.odoo_warehouse_id),
@@ -133,6 +153,11 @@ export async function getMachineConfig(imei: string): Promise<MachineConfig | nu
       displayName: (machine?.display_name as string) ?? null,
       odooWarehouseId: (machine?.odoo_warehouse_id as number) ?? null,
       deployed: machine?.deployed !== false,
+      cashTrackingEnabled: machine?.cash_tracking_enabled === true,
+      cashAnchorBalanceCents: null,
+      cashAnchorAt: null,
+      cashExpectedCents: null,
+      cashLedger: [],
       defrostSchedule,
       latestDefrostRun,
       defrostRuns: [],

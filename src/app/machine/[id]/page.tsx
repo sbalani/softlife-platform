@@ -6,6 +6,7 @@ import { formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { ActionReportForm } from "@/components/ActionReportForm";
 import { getIncidents } from "@/lib/data/incidents";
+import { getCashboxMachineSummaries } from "@/lib/data/cashboxes";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,7 @@ export default async function MachineServicePage({ params }: { params: Promise<{
   if (!session) redirect(`/login?next=${encodeURIComponent(`/machine/${id}`)}`);
   const [machine, tz, incidents] = await Promise.all([getMachineService(id, session), getDisplayTimezone(), getIncidents(session, { machineIds: [id], status: "open" })]);
   if (!machine) notFound();
+  const cashSummary = (await getCashboxMachineSummaries(session, [machine.id])).get(machine.id);
   const appUrl = `softlife-haccp:///machine/${encodeURIComponent(id)}`;
 
   return (
@@ -29,7 +31,7 @@ export default async function MachineServicePage({ params }: { params: Promise<{
           <div className="mt-4 flex flex-wrap gap-3"><a href={appUrl} className="rounded-lg bg-white px-4 py-2 text-sm font-bold text-cocoa">Open in SoftLife HACCP app</a>{session.role === "admin" && machine.imei && <Link href={`/machines/${machine.imei}`} className="rounded-lg border border-white/30 px-4 py-2 text-sm font-bold text-white">Machine dashboard</Link>}</div>
         </header>
         <ActionReportForm
-          machines={[{ id: machine.id, name: machine.name, warehouseId: machine.warehouseId }]}
+          machines={[{ id: machine.id, name: machine.name, warehouseId: machine.warehouseId, cashTrackingEnabled: Boolean(cashSummary), cashExpectedCents: cashSummary?.expectedCents ?? null }]}
           lots={machine.lots.map((lot) => ({
             odooId: lot.odoo_id,
             name: lot.name,

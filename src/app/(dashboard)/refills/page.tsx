@@ -12,6 +12,8 @@ import { ActionReportStockRetry } from "@/components/ActionReportStockRetry";
 import { getIncidents } from "@/lib/data/incidents";
 import { actionReportCalendarState } from "@/lib/action-report-calendar";
 import { ActionReportCalendar } from "@/components/ActionReportCalendar";
+import { getCashboxMachineSummaries } from "@/lib/data/cashboxes";
+import { formatEuroCents } from "@/lib/cashbox";
 
 export const dynamic = "force-dynamic";
 
@@ -38,17 +40,19 @@ export default async function RefillsPage({ searchParams }: { searchParams: Prom
     actorId: session?.role === "admin" ? undefined : session?.id,
     operatorId: session?.role === "operator" ? session.id : undefined,
   };
-  const [lots, history, calendarReports, tz, requestedDraft, incidents] = await Promise.all([
+  const [lots, history, calendarReports, tz, requestedDraft, incidents, cashSummaries] = await Promise.all([
     getActionReportLots(warehouseIds),
     getActionReportHistory({
       ...reportScope,
       canViewIncidents: session?.role === "admin" || session?.role === "franchisee",
       incidentTenantId: session?.role === "franchisee" ? session.tenant_id ?? undefined : undefined,
+      canViewCash: session?.cash_access === true,
     }),
     getActionReportCalendar(reportScope, calendarState.rangeFrom, calendarState.rangeTo),
     getDisplayTimezone(),
-    draftId ? getActionReportDraft(draftId, tenantId, session?.role === "admin" ? undefined : session?.id) : Promise.resolve(null),
+    draftId ? getActionReportDraft(draftId, tenantId, session?.role === "admin" ? undefined : session?.id, session?.cash_access === true) : Promise.resolve(null),
     session ? getIncidents(session, { machineIds: machines.map((machine) => machine.id), status: "open" }) : Promise.resolve([]),
+    session ? getCashboxMachineSummaries(session, machines.map((machine) => machine.id)) : Promise.resolve(new Map()),
   ]);
   const draft = requestedDraft && machines.some((machine) => machine.id === requestedDraft.machineId) ? requestedDraft : null;
   const requestedIncident = incidents.find((incident) => incident.id === requestedIncidentId);
@@ -67,7 +71,7 @@ export default async function RefillsPage({ searchParams }: { searchParams: Prom
         <h2 className="mb-4 font-display text-lg font-bold text-cocoa">{draft ? "Resume draft" : calendarState.selectedDay ? `New report · ${calendarState.selectedDay}` : "New report"}</h2>
         <ActionReportForm
           key={draft?.id ?? `new:${calendarState.selectedDay ?? ""}:${requestedMachineId ?? ""}:${requestedIncidentId ?? ""}`}
-          machines={machines.map((machine) => ({ id: machine.id, name: machine.name, warehouseId: warehouseByMachine.get(machine.id) ?? null }))}
+          machines={machines.map((machine) => ({ id: machine.id, name: machine.name, warehouseId: warehouseByMachine.get(machine.id) ?? null, cashTrackingEnabled: cashSummaries.has(machine.id), cashExpectedCents: cashSummaries.get(machine.id)?.expectedCents ?? null }))}
           lots={lots}
           initialEventTime={calendarState.initialEventTime}
           initialDraft={draft}
@@ -105,6 +109,7 @@ export default async function RefillsPage({ searchParams }: { searchParams: Prom
                   {r.refillLines.length === 0 && <span className="text-xs text-taupe">{r.notes ?? "No refill lines."}</span>}
                 </div>
                 {r.stockSnapshot && <details className="mt-3 rounded-lg bg-sage/5 px-3 py-2"><summary className="cursor-pointer text-xs font-bold text-sage">Reconstructed stock at refill · {r.stockSnapshot.items.length} items · observed {formatDateTime(r.stockSnapshot.capturedAt, tz)} · {r.stockSnapshot.items.every((item) => item.calculationComplete) ? "calculated" : "incomplete"}</summary><div className="mt-2 flex flex-wrap gap-2">{r.stockSnapshot.items.map((item) => <span key={`${item.menuKind}:${item.position}`} className="rounded-lg bg-white px-2.5 py-1 text-xs text-cocoa">{item.goodsName || `${item.menuKind} ${item.position}`} · {item.calculationComplete ? <>at refill {item.stockAtAction} · observed {item.observedStock} + {item.consumedSinceAction} sold</> : <>calculation incomplete ({item.incompleteReason}) · observed {item.observedStock ?? "unreadable"}</>}</span>)}</div></details>}
+                {r.cashbox && <div className="mt-3 rounded-lg border border-cocoa/10 bg-sand/30 px-3 py-2 text-xs text-cocoa"><span className="font-bold">Cashbox</span> · expected {formatEuroCents(r.cashbox.expectedBeforeCents)} · withdrawn {formatEuroCents(r.cashbox.withdrawalCents)} · remaining {formatEuroCents(r.cashbox.physicalRemainderCents)} · discrepancy {formatEuroCents(r.cashbox.discrepancyCents)}{r.cashbox.discrepancyReason ? ` · ${r.cashbox.discrepancyReason}` : ""}</div>}
                 {r.status === "confirmed" && r.actionModes.includes("refill") && !r.stockSnapshot && (r.canRetryStockSnapshot ? <ActionReportStockRetry reportId={r.id} /> : <p className="mt-3 rounded-lg bg-warning/10 px-3 py-2 text-xs font-semibold text-warning">This confirmed refill has no menu-stock observation.</p>)}
                 {r.status === "draft" && <div className="mt-3"><Link href={`/refills?draft=${r.id}#action-report-form`} className="text-sm font-bold text-terracotta hover:underline">Resume draft</Link></div>}
               </article>

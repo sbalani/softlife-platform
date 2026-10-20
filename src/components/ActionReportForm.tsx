@@ -12,8 +12,9 @@ import { ActionReportVoice } from "@/components/ActionReportVoice";
 import { ACTION_REPORT_MODES, initialActionReportModes, type ActionReportMode } from "@/lib/action-report-modes";
 import { createClient } from "@/lib/supabase/client";
 import { DEFAULT_TZ, isoToLocalDateTime, localDateTimeToUtc } from "@/lib/dates";
+import { cashDiscrepancyCents, formatEuroCents, parseEuroCents } from "@/lib/cashbox";
 
-export type ActionReportMachine = { id: string; name: string; warehouseId: number | null };
+export type ActionReportMachine = { id: string; name: string; warehouseId: number | null; cashTrackingEnabled?: boolean; cashExpectedCents?: number | null };
 export type ActionReportLot = {
   odooId: number;
   name: string;
@@ -78,6 +79,10 @@ export function ActionReportForm({
   const [lines, setLines] = useState<LineDraft[]>(() => initialDraft?.lines.length ? initialDraft.lines.map((line) => ({ key: crypto.randomUUID(), lotId: line.odooLotId ? String(line.odooLotId) : "", lotCode: line.lotCode, productName: line.productName, quantity: line.quantity, unit: line.unit, finishedBottle: line.finishedBottle, leftUnfinishedBottle: line.leftUnfinishedBottle })) : [newLine()]);
   const [photos, setPhotos] = useState<StagedPhoto[]>([]);
   const [selectedIncidentIds, setSelectedIncidentIds] = useState(() => initialDraft?.incidentIds ?? initialIncidentIds);
+  const [cashboxIncluded, setCashboxIncluded] = useState(initialDraft?.cashbox !== null && initialDraft?.cashbox !== undefined);
+  const [cashWithdrawal, setCashWithdrawal] = useState(() => initialDraft?.cashbox ? (initialDraft.cashbox.withdrawalCents / 100).toFixed(2) : "0.00");
+  const [cashPhysicalRemainder, setCashPhysicalRemainder] = useState(() => initialDraft?.cashbox ? (initialDraft.cashbox.physicalRemainderCents / 100).toFixed(2) : "0.00");
+  const [cashDiscrepancyReason, setCashDiscrepancyReason] = useState(initialDraft?.cashbox?.discrepancyReason ?? "");
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoMessage, setPhotoMessage] = useState<string | null>(null);
   const [stockMessage, setStockMessage] = useState<string | null>(null);
@@ -89,6 +94,10 @@ export function ActionReportForm({
   const hasCleaning = modes.includes("cleaning");
   const hasRefill = modes.includes("refill");
   const hasOther = modes.includes("other");
+  const cashWithdrawalCents = parseEuroCents(cashWithdrawal);
+  const cashPhysicalRemainderCents = parseEuroCents(cashPhysicalRemainder);
+  const cashDiscrepancy = machine?.cashExpectedCents != null && cashWithdrawalCents != null && cashPhysicalRemainderCents != null
+    ? cashDiscrepancyCents(machine.cashExpectedCents, cashWithdrawalCents, cashPhysicalRemainderCents) : null;
   const toggleMode = (mode: ActionReportMode) => {
     setModes((current) => current.includes(mode) ? current.filter((item) => item !== mode) : [...current, mode]);
     if (mode === "refill" && !hasRefill && lines.length === 0) setLines([newLine()]);
@@ -211,7 +220,7 @@ export function ActionReportForm({
               name="machine_id"
               value={machineId}
               disabled={pending || result?.status === "confirmed"}
-              onChange={(event) => { setMachineId(event.target.value); setLines([newLine()]); setPhotos([]); setSelectedIncidentIds([]); }}
+              onChange={(event) => { setMachineId(event.target.value); setLines([newLine()]); setPhotos([]); setSelectedIncidentIds([]); setCashboxIncluded(false); }}
               className={`w-full ${input}`}
               required
             >
@@ -265,6 +274,18 @@ export function ActionReportForm({
       )}
       {unavailableSelectedIncidentIds.map((id) => <input key={id} type="hidden" name="incident_ids" value={id} />)}
       {unavailableSelectedIncidentIds.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-lg bg-warning/10 px-3 py-2 text-xs font-semibold text-warning"><span>A previously selected incident is no longer available.</span><button type="button" onClick={() => setSelectedIncidentIds((current) => current.filter((id) => !unavailableSelectedIncidentIds.includes(id)))} className="font-bold text-terracotta underline">Remove unavailable selection</button></div>}
+
+      {machine?.cashTrackingEnabled && (
+        <section className="rounded-xl border border-cocoa/20 bg-sand/30 p-4">
+          <label className="flex cursor-pointer items-start gap-3"><input type="checkbox" name="cashbox_included" checked={cashboxIncluded} onChange={(event) => setCashboxIncluded(event.target.checked)} disabled={pending || result?.status === "confirmed"} className="mt-1 accent-terracotta" /><span><span className="block font-display font-bold text-cocoa">Cashbox collection and count</span><span className="text-xs text-taupe">Expected cash now: {machine.cashExpectedCents == null ? "unavailable" : formatEuroCents(machine.cashExpectedCents)}. The server recalculates this at confirmation time.</span></span></label>
+          {cashboxIncluded && <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <label><span className={label}>Amount withdrawn</span><input name="cash_withdrawal" inputMode="decimal" value={cashWithdrawal} onChange={(event) => setCashWithdrawal(event.target.value)} disabled={pending || result?.status === "confirmed"} className={`w-full ${input}`} required /></label>
+            <label><span className={label}>Physical cash remaining</span><input name="cash_physical_remainder" inputMode="decimal" value={cashPhysicalRemainder} onChange={(event) => setCashPhysicalRemainder(event.target.value)} disabled={pending || result?.status === "confirmed"} className={`w-full ${input}`} required /></label>
+            <div className="rounded-lg bg-white px-3 py-2 text-sm text-cocoa"><span className="block text-[11px] font-bold uppercase tracking-wide text-taupe">Calculated discrepancy</span>{cashDiscrepancy == null ? "Enter valid amounts" : formatEuroCents(cashDiscrepancy)}</div>
+            <label><span className={label}>Discrepancy reason {cashDiscrepancy !== null && Math.abs(cashDiscrepancy) >= 1000 ? "· required" : "· optional"}</span><input name="cash_discrepancy_reason" maxLength={500} value={cashDiscrepancyReason} onChange={(event) => setCashDiscrepancyReason(event.target.value)} required={cashDiscrepancy !== null && Math.abs(cashDiscrepancy) >= 1000} className={`w-full ${input}`} /></label>
+          </div>}
+        </section>
+      )}
 
       {hasCleaning && (
         <section className="rounded-xl border border-line bg-cream/40 p-4">

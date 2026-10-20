@@ -10,6 +10,7 @@ import { actionReportExtractionSchema } from "@/lib/action-report-ai-schema";
 import { captureActionReportStockSnapshot } from "@/lib/action-report-stock";
 import { legacyKindFromModes, modesFromLegacyKind, parseActionReportModes } from "@/lib/action-report-modes";
 import { isValidBottleQuantity } from "@/lib/action-report-refills";
+import { parseEuroCents } from "@/lib/cashbox";
 
 export type ActionReportResult = {
   ok: boolean;
@@ -54,6 +55,16 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
   const bucketValue = String(formData.get("water_bucket_count") ?? "");
   const waterBucketCount = bucketValue === "" ? null : Number(bucketValue);
   const notes = String(formData.get("notes") ?? "").trim().slice(0, 5000);
+  const cashboxIncluded = formData.get("cashbox_included") === "on";
+  const cashWithdrawalCents = cashboxIncluded ? parseEuroCents(formData.get("cash_withdrawal")) : null;
+  const cashPhysicalRemainderCents = cashboxIncluded ? parseEuroCents(formData.get("cash_physical_remainder")) : null;
+  const cashDiscrepancyReason = String(formData.get("cash_discrepancy_reason") ?? "").trim().slice(0, 500) || null;
+  if (cashboxIncluded && (cashWithdrawalCents === null || cashPhysicalRemainderCents === null)) return { ok: false, error: "Enter valid non-negative cash amounts with at most two decimals." };
+  const cashbox = cashboxIncluded ? {
+    withdrawal_cents: cashWithdrawalCents!,
+    physical_remainder_cents: cashPhysicalRemainderCents!,
+    discrepancy_reason: cashDiscrepancyReason,
+  } : null;
   if (status === "confirmed" && hasCleaning && !["yes", "no"].includes(materialValue)) return { ok: false, error: "Confirm whether cleaning material was used." };
   if (hasCleaning && waterBucketCount !== null && (!Number.isInteger(waterBucketCount) || waterBucketCount < 0 || waterBucketCount > 20)) {
     return { ok: false, error: "Water buckets must be a whole number from 0 to 20." };
@@ -128,6 +139,7 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
         water_buckets: hasCleaning ? waterBucketCount : null,
       },
       refill_lines: refillLines,
+      cashbox,
     };
     const reportArgs = {
       p_client_uuid: clientUuid,
@@ -146,7 +158,7 @@ async function submitActionReport(source: ReportSource, _previous: ActionReportR
       p_draft_payload: draftPayload,
       p_incident_ids: incidentIds,
     };
-    const { data, error } = await s.rpc("record_revisioned_service_action_report", reportArgs);
+    const { data, error } = await s.rpc("record_revisioned_service_action_report_v2", { ...reportArgs, p_cashbox: cashbox });
     if (error) return { ok: false, error: error.message };
 
     const result = data as { id: string; status: "draft" | "confirmed"; revision: number; provenance_status: string; projection_error?: string | null };
@@ -201,14 +213,16 @@ export async function applyActionReportAiProposal(_previous: ActionReportResult 
     const s = await createServiceClient();
     const report = await authorizedActionReport(s, actor, reportId, true);
     if (!report) return { ok: false, error: "Draft not found." };
-    const [{ data: job, error: jobError }, { data: currentLines, error: lineError }, { data: incidentLinks, error: incidentError }] = await Promise.all([
+    const [{ data: job, error: jobError }, { data: currentLines, error: lineError }, { data: incidentLinks, error: incidentError }, { data: cashReconciliation, error: cashError }] = await Promise.all([
       s.from("service_action_ai_jobs").select("id,status,extraction").eq("id", jobId).eq("report_id", reportId).maybeSingle(),
       s.from("service_action_refill_lines").select("quantity,unit,product_name,observed_lot_code,observed_odoo_lot_id,finished_bottle,left_unfinished_bottle,line_number").eq("report_id", reportId).order("line_number"),
       s.from("service_action_report_incidents").select("incident_id").eq("report_id", reportId),
+      s.from("service_action_cash_reconciliations").select("withdrawal_cents,physical_remainder_cents,discrepancy_reason").eq("report_id", reportId).maybeSingle(),
     ]);
     if (jobError) throw jobError;
     if (lineError) throw lineError;
     if (incidentError) throw incidentError;
+    if (cashError) throw cashError;
     if (!job || job.status !== "complete") return { ok: false, error: "AI extraction is not ready." };
     const extraction = actionReportExtractionSchema.parse(job.extraction);
     let refillLines = ((currentLines as Record<string, unknown>[]) ?? []).map((line) => ({ quantity: Number(line.quantity), unit: line.unit, product_name: line.product_name, lot_code: line.observed_lot_code, odoo_lot_id: line.observed_odoo_lot_id, ...(line.finished_bottle === true ? { finished_bottle: true } : {}), ...(line.left_unfinished_bottle === true ? { left_unfinished_bottle: true } : {}) }));
@@ -225,6 +239,11 @@ export async function applyActionReportAiProposal(_previous: ActionReportResult 
     const hasCleaning = actionModes.includes("cleaning");
     const aiNotes = [extraction.notes, ...extraction.otherActions].filter(Boolean).join("\n");
     const notes = [report.notes, aiNotes].filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join("\n") || null;
+    const cashbox = cashReconciliation ? {
+      withdrawal_cents: Number(cashReconciliation.withdrawal_cents),
+      physical_remainder_cents: Number(cashReconciliation.physical_remainder_cents),
+      discrepancy_reason: cashReconciliation.discrepancy_reason,
+    } : null;
     const draftPayload = {
       client_uuid: report.client_uuid,
       machine_id: report.machine_id,
@@ -238,8 +257,9 @@ export async function applyActionReportAiProposal(_previous: ActionReportResult 
         water_buckets: hasCleaning ? report.water_bucket_count ?? extraction.cleaning.waterBucketCount : null,
       },
       refill_lines: actionModes.includes("refill") ? refillLines : [],
+      cashbox,
     };
-    const { error } = await s.rpc("record_revisioned_service_action_report", {
+    const { error } = await s.rpc("record_revisioned_service_action_report_v2", {
       p_client_uuid: report.client_uuid,
       p_machine_id: report.machine_id,
       p_operator_id: report.operator_id,
@@ -255,6 +275,7 @@ export async function applyActionReportAiProposal(_previous: ActionReportResult 
       p_expected_revision: report.revision,
       p_draft_payload: draftPayload,
       p_incident_ids: (incidentLinks ?? []).map((link) => link.incident_id),
+      p_cashbox: cashbox,
     });
     if (error) throw error;
     const { count: openQuestions, error: questionError } = await s.from("service_action_questions").select("id", { count: "exact", head: true }).eq("ai_job_id", jobId).eq("status", "open");

@@ -13,7 +13,7 @@ export async function getApiSession(req: Request): Promise<MobileSession | null>
   });
   const { data: { user }, error } = await auth.auth.getUser(token);
   if (error || !user) return null;
-  const { data: profile, error: profileError } = await (await createServiceClient()).from("profiles").select("role,tenant_id,employer_kind,scope_version").eq("id", user.id).maybeSingle();
+  const { data: profile, error: profileError } = await (await createServiceClient()).from("profiles").select("role,tenant_id,employer_kind,scope_version,cash_access").eq("id", user.id).maybeSingle();
   if (profileError || !profile) return null;
   const role: SessionProfile["role"] = normalizeMobileRole(profile.role);
   const employerKind = ["softlife", "franchisee", "contractor"].includes(String(profile.employer_kind))
@@ -25,6 +25,6 @@ export async function getApiSession(req: Request): Promise<MobileSession | null>
     tenantId: (profile.tenant_id as string) ?? null,
     employerKind,
     scopeVersion: Number(profile.scope_version ?? 1),
-    capabilities: MOBILE_CAPABILITIES[role],
+    capabilities: [...MOBILE_CAPABILITIES[role], ...(role === "admin" || profile.cash_access === true ? ["cashbox.write" as const] : [])],
   };
 }

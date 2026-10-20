@@ -17,6 +17,7 @@ export type ActionReportHistoryItem = {
   stockSnapshot: { capturedAt: string; status: string; items: { menuKind: string; position: string; goodsName: string | null; observedStock: number | null; consumedSinceAction: number; stockAtAction: number | null; calculationComplete: boolean; incompleteReason: string | null }[] } | null;
   canRetryStockSnapshot: boolean;
   incidents: { id: string; title: string }[];
+  cashbox: { expectedBeforeCents: number; withdrawalCents: number; physicalRemainderCents: number; discrepancyCents: number; discrepancyReason: string | null } | null;
 };
 
 export type ActionReportLotOption = {
@@ -40,6 +41,7 @@ export type ActionReportDraft = {
   waterBucketCount: number | null;
   lines: { odooLotId: number | null; lotCode: string; productName: string; quantity: number; unit: string; finishedBottle: boolean; leftUnfinishedBottle: boolean }[];
   incidentIds: string[];
+  cashbox: { withdrawalCents: number; physicalRemainderCents: number; discrepancyReason: string } | null;
 };
 
 export type ActionReportCalendarItem = {
@@ -102,11 +104,11 @@ export async function getActionReportLots(warehouseIds: number[]): Promise<Actio
     .map((lot) => ({ odooId: lot.odooId, name: lot.name, productName: lot.productName, available: lot.available, warehouseId: lot.warehouseId }));
 }
 
-export async function getActionReportHistory(filters: { machineIds?: string[]; tenantId?: string; actorId?: string; operatorId?: string; canViewIncidents?: boolean; incidentTenantId?: string }): Promise<ActionReportHistoryItem[]> {
+export async function getActionReportHistory(filters: { machineIds?: string[]; tenantId?: string; actorId?: string; operatorId?: string; canViewIncidents?: boolean; incidentTenantId?: string; canViewCash?: boolean }): Promise<ActionReportHistoryItem[]> {
   if (!isSupabaseConfigured() || (!filters.tenantId && filters.machineIds?.length === 0)) return [];
   const s = await createServiceClient();
   let query = s.from("service_action_reports")
-    .select("id,machine_id,operator_id,action_kind,action_modes,occurred_at,status,provenance_status,notes,machines(name,display_name),service_action_refill_lines(quantity,inventory_quantity,unit,observed_lot_code,product_name,finished_bottle,left_unfinished_bottle,provenance_status),service_action_stock_snapshots(device_imei,captured_at,status,service_action_stock_snapshot_items(menu_kind,position,goods_name_raw,stock_count)),service_action_report_incidents(incidents(id,title,assigned_tenant_id))")
+    .select("id,machine_id,operator_id,action_kind,action_modes,occurred_at,status,provenance_status,notes,machines(name,display_name),service_action_refill_lines(quantity,inventory_quantity,unit,observed_lot_code,product_name,finished_bottle,left_unfinished_bottle,provenance_status),service_action_stock_snapshots(device_imei,captured_at,status,service_action_stock_snapshot_items(menu_kind,position,goods_name_raw,stock_count)),service_action_report_incidents(incidents(id,title,assigned_tenant_id)),service_action_cash_reconciliations(expected_before_cents,withdrawal_cents,physical_remainder_cents,discrepancy_cents,discrepancy_reason,status)")
     .order("occurred_at", { ascending: false }).limit(50);
   if (filters.operatorId) query = query.eq("operator_id", filters.operatorId);
   if (filters.tenantId) query = query.eq("tenant_id", filters.tenantId);
@@ -156,6 +158,8 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
     const snapshotRelation = row.service_action_stock_snapshots as Record<string, unknown> | Record<string, unknown>[] | null;
     const snapshot = Array.isArray(snapshotRelation) ? snapshotRelation[0] : snapshotRelation;
     const snapshotItems = (snapshot?.service_action_stock_snapshot_items as Record<string, unknown>[]) ?? [];
+    const cashRelation = row.service_action_cash_reconciliations as Record<string, unknown> | Record<string, unknown>[] | null;
+    const cash = Array.isArray(cashRelation) ? cashRelation[0] : cashRelation;
     const reconstructionOrders: StockReconstructionOrder[] = orderRows.filter((order) => order.machine_id === row.machine_id).map((order) => ({
       orderTime: order.order_time as string,
       orderState: String(order.order_state ?? ""),
@@ -205,6 +209,11 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
       } : null,
       canRetryStockSnapshot: !filters.actorId || row.operator_id === filters.actorId,
       incidents: filters.canViewIncidents ? ((row.service_action_report_incidents as { incidents: { id: string; title: string; assigned_tenant_id: string | null } | null }[]) ?? []).flatMap((link) => link.incidents && (!filters.incidentTenantId || link.incidents.assigned_tenant_id === filters.incidentTenantId) ? [{ id: link.incidents.id, title: link.incidents.title }] : []) : [],
+      cashbox: filters.canViewCash && cash?.status === "confirmed" ? {
+        expectedBeforeCents: Number(cash.expected_before_cents), withdrawalCents: Number(cash.withdrawal_cents),
+        physicalRemainderCents: Number(cash.physical_remainder_cents), discrepancyCents: Number(cash.discrepancy_cents),
+        discrepancyReason: (cash.discrepancy_reason as string | null) ?? null,
+      } : null,
     };
   });
 
@@ -254,6 +263,7 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
       stockSnapshot: null,
       canRetryStockSnapshot: false,
       incidents: [],
+      cashbox: null,
     };
   });
   const legacyCleanings: ActionReportHistoryItem[] = ((cleanings as Record<string, unknown>[]) ?? []).map((row) => {
@@ -271,17 +281,18 @@ export async function getActionReportHistory(filters: { machineIds?: string[]; t
       stockSnapshot: null,
       canRetryStockSnapshot: false,
       incidents: [],
+      cashbox: null,
     };
   });
   return [...canonical, ...legacyRefills, ...legacyCleanings]
     .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt)).slice(0, 50);
 }
 
-export async function getActionReportDraft(id: string, tenantId?: string, actorId?: string): Promise<ActionReportDraft | null> {
+export async function getActionReportDraft(id: string, tenantId?: string, actorId?: string, canViewCash = false): Promise<ActionReportDraft | null> {
   if (!isSupabaseConfigured() || !/^[0-9a-f-]{36}$/i.test(id)) return null;
   const s = await createServiceClient();
   let query = s.from("service_action_reports")
-    .select("id,revision,client_uuid,machine_id,occurred_at,action_kind,action_modes,notes,cleaning_material_used,water_bucket_count,service_action_refill_lines(odoo_lot_id:observed_odoo_lot_id,lot_code:observed_lot_code,product_name,quantity,unit,finished_bottle,left_unfinished_bottle,line_number),service_action_report_incidents(incident_id)")
+    .select("id,revision,client_uuid,machine_id,occurred_at,action_kind,action_modes,notes,cleaning_material_used,water_bucket_count,service_action_refill_lines(odoo_lot_id:observed_odoo_lot_id,lot_code:observed_lot_code,product_name,quantity,unit,finished_bottle,left_unfinished_bottle,line_number),service_action_report_incidents(incident_id),service_action_cash_reconciliations(withdrawal_cents,physical_remainder_cents,discrepancy_reason,status)")
     .eq("id", id).eq("status", "draft");
   if (tenantId) query = query.eq("tenant_id", tenantId);
   if (actorId) query = query.eq("operator_id", actorId);
@@ -291,6 +302,8 @@ export async function getActionReportDraft(id: string, tenantId?: string, actorI
   const row = data as Record<string, unknown>;
   const lines = ((row.service_action_refill_lines as Record<string, unknown>[]) ?? [])
     .sort((a, b) => Number(a.line_number) - Number(b.line_number));
+  const cashRelation = row.service_action_cash_reconciliations as Record<string, unknown> | Record<string, unknown>[] | null;
+  const cash = Array.isArray(cashRelation) ? cashRelation[0] : cashRelation;
   return {
     id: row.id as string,
     revision: Number(row.revision),
@@ -312,5 +325,9 @@ export async function getActionReportDraft(id: string, tenantId?: string, actorI
       leftUnfinishedBottle: line.left_unfinished_bottle === true,
     })),
     incidentIds: ((row.service_action_report_incidents as { incident_id: string }[]) ?? []).map((link) => link.incident_id),
+    cashbox: canViewCash && cash ? {
+      withdrawalCents: Number(cash.withdrawal_cents), physicalRemainderCents: Number(cash.physical_remainder_cents),
+      discrepancyReason: String(cash.discrepancy_reason ?? ""),
+    } : null,
   };
 }

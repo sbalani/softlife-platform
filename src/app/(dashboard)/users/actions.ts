@@ -168,3 +168,19 @@ export async function setUserMachines(userId: string, machineIds: string[]): Pro
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
+
+export async function setUserCashAccess(userId: string, enabled: boolean): Promise<UserResult> {
+  const { session, denied } = await requireAdmin();
+  if (denied) return denied;
+  if (userId === session!.id) return { ok: false, error: "Admins already have cashbox access." };
+  if (typeof enabled !== "boolean" || !/^[0-9a-f-]{36}$/i.test(userId)) return { ok: false, error: "Invalid cashbox access." };
+  try {
+    const s = await createServiceClient();
+    const { error } = await s.from("profiles").update({ cash_access: enabled }).eq("id", userId);
+    if (error) throw error;
+    revalidatePath("/users");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}

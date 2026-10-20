@@ -274,7 +274,7 @@ export default async function MachineDetailPage({
         <h2 className="mb-4 font-display text-lg font-bold text-cocoa">Configuration &amp; control</h2>
         {config ? (
           <>
-            <MachineConfigForm config={config} imei={imei} today={defaultTo} lastCleanDate={config.lastFullClean ? ymd(new Date(config.lastFullClean), tz) : ""} />
+            <MachineConfigForm config={config} imei={imei} today={defaultTo} lastCleanDate={config.lastFullClean ? ymd(new Date(config.lastFullClean), tz) : ""} timeZone={tz} />
             {config.machineId && <WarehouseAssignmentPeriods config={config} imei={imei} today={defaultTo} />}
             {config.machineId && config.defrostSchedule && <DefrostRunPanel machineId={config.machineId} machineName={config.displayName || config.name} imei={imei} deployed={config.deployed} online={online} statusCurrent={statusCurrent} refrigerationValue={refrigerationValue} defrostValue={physicalDefrostValue} formationPct={formationPct} operatingValue={operatingValue} durationMinutes={config.defrostSchedule.defrostMinutes} requiresIntervention={config.defrostSchedule.requiresIntervention} runs={config.defrostRuns} />}
             {config.machineId && (

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildFiscalInvoiceConfirmationPayload,
+  buildFiscalInvoiceDraftBatches,
   buildFiscalInvoiceDraftPayload,
   canonicalFiscalPayload,
   fiscalCalendarMonth,
@@ -154,6 +155,63 @@ test("allows reviewed report age but blocks incapable, refund-warning, empty, an
   });
   assert(empty.blockers.some((message) => message.includes("no eligible")));
   assert.throws(() => buildFiscalInvoiceConfirmationPayload(3, Array.from({ length: 501 }, (_, index) => ({ platform_invoice_id: String(index), odoo_move_id: index + 1, invoice_payload_sha256: "a".repeat(64) }))), /between 1 and 500/);
+});
+
+test("splits one frozen source into deterministic connector-sized draft batches", () => {
+  const source = draft();
+  assert(source.payload);
+  const reportPayload = {
+    contract_version: 1, checked_at: "2026-09-29T12:00:00Z",
+    capabilities: { fiscal_invoice_draft_creation: 1, fiscal_invoice_bulk_confirmation: 1, fiscal_zero_value_invoices: 2 },
+    company: { odoo_id: 3, country_code: "ES", currency: "EUR" }, journal: { code: "VEND" },
+    customer: { odoo_id: 722 },
+    tax: { odoo_id: 41, rate: 10, country_code: "ES", type_tax_use: "sale", amount_type: "percent", price_include: true },
+  };
+  const items = Array.from({ length: 1201 }, (_, index) => ({
+    ...item,
+    id: `item-${index}`,
+    order_id: `order-${index}`,
+    order_code: `SALE-${String(index).padStart(4, "0")}`,
+  }));
+  const ids = items.map((_value, index) => `invoice-${index}`);
+  const result = buildFiscalInvoiceDraftBatches({
+    now: Date.parse("2026-09-29T13:00:00Z"),
+    report: { id: "report", checked_at: reportPayload.checked_at, accepted: true, payload_sha256: sha256(reportPayload), payload: reportPayload },
+    currency: "EUR", journalCode: "VEND", customerOdooId: 722, items, platformInvoiceIds: ids,
+  });
+  assert.deepEqual(result.blockers, []);
+  assert.deepEqual(result.batches.map((batch) => batch.payload.invoices.length), [500, 500, 201]);
+  assert.deepEqual(result.batches.map((batch) => batch.sequence), [1, 2, 3]);
+  assert.equal(result.batches[1].payload.invoices[0].platform_invoice_id, "invoice-500");
+  assert.equal(result.batches[2].payload.invoices.at(-1)?.reference, "PAY-1");
+  for (const batch of result.batches) assert.equal(batch.payloadSha256, sha256(batch.payload));
+});
+
+test("does not return partial draft batches when shared configuration is invalid", () => {
+  const result = buildFiscalInvoiceDraftBatches({
+    now: Date.now(), report: { id: "report", checked_at: new Date().toISOString(), accepted: false, payload_sha256: "a".repeat(64), payload: {} },
+    currency: "EUR", journalCode: "VEND", customerOdooId: 722,
+    items: Array.from({ length: 501 }, (_, index) => ({ ...item, id: `item-${index}`, order_id: `order-${index}` })),
+    platformInvoiceIds: Array.from({ length: 501 }, (_, index) => `invoice-${index}`),
+  });
+  assert.equal(result.batches.length, 0);
+  assert(result.blockers.length > 0);
+});
+
+test("keeps the complete job bounded while retaining the 500-request limit", () => {
+  const reportPayload = {
+    checked_at: new Date().toISOString(), capabilities: { fiscal_invoice_draft_creation: 1, fiscal_invoice_bulk_confirmation: 1 },
+    company: { odoo_id: 3, country_code: "ES", currency: "EUR" }, journal: { code: "VEND" },
+    customer: { odoo_id: 722 }, tax: { odoo_id: 41, rate: 10, country_code: "ES", type_tax_use: "sale", amount_type: "percent", price_include: true },
+  };
+  const items = Array.from({ length: 50_001 }, (_, index) => ({ ...item, id: `item-${index}`, order_id: `order-${index}` }));
+  const result = buildFiscalInvoiceDraftBatches({
+    now: Date.now(), report: { id: "report", checked_at: reportPayload.checked_at, accepted: true, payload_sha256: sha256(reportPayload), payload: reportPayload },
+    currency: "EUR", journalCode: "VEND", customerOdooId: 722, items,
+    platformInvoiceIds: items.map((_value, index) => `invoice-${index}`),
+  });
+  assert.equal(result.batches.length, 0);
+  assert(result.blockers.some((blocker) => blocker.includes("50,000")));
 });
 
 test("validates exact draft and confirmation response coverage", () => {

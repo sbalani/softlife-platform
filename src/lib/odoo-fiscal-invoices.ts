@@ -49,6 +49,12 @@ export type FiscalInvoiceDraftPayload = {
   invoices: FiscalInvoice[];
 };
 
+export type FiscalInvoiceDraftBatch = {
+  sequence: number;
+  payload: FiscalInvoiceDraftPayload;
+  payloadSha256: string;
+};
+
 type ConfigurationReport = {
   id: string;
   checked_at: string;
@@ -145,6 +151,41 @@ export function buildFiscalInvoiceDraftPayload(input: {
     invoices,
   };
   return { blockers, payload, payloadSha256: sha256(payload) };
+}
+
+export function buildFiscalInvoiceDraftBatches(input: {
+  now: number;
+  report: ConfigurationReport;
+  currency: string;
+  journalCode: string;
+  customerOdooId: number;
+  items: FiscalInvoiceSourceItem[];
+  platformInvoiceIds: string[];
+}) {
+  if (!input.items.length) {
+    const result = buildFiscalInvoiceDraftPayload(input);
+    return { blockers: result.blockers, batches: [] as FiscalInvoiceDraftBatch[] };
+  }
+  if (input.items.length > 50_000) {
+    return { blockers: ["A fiscal invoice job cannot contain more than 50,000 sales."], batches: [] as FiscalInvoiceDraftBatch[] };
+  }
+  if (input.platformInvoiceIds.length !== input.items.length || new Set(input.platformInvoiceIds).size !== input.items.length) {
+    return { blockers: ["Every sale requires one unique platform invoice ID."], batches: [] as FiscalInvoiceDraftBatch[] };
+  }
+  const batches: FiscalInvoiceDraftBatch[] = [];
+  const blockers = new Set<string>();
+  for (let offset = 0; offset < input.items.length; offset += 500) {
+    const result = buildFiscalInvoiceDraftPayload({
+      ...input,
+      items: input.items.slice(offset, offset + 500),
+      platformInvoiceIds: input.platformInvoiceIds.slice(offset, offset + 500),
+    });
+    for (const blocker of result.blockers) blockers.add(blocker);
+    if (result.payload && result.payloadSha256) {
+      batches.push({ sequence: batches.length + 1, payload: result.payload, payloadSha256: result.payloadSha256 });
+    }
+  }
+  return { blockers: [...blockers], batches: blockers.size ? [] : batches };
 }
 
 export function buildFiscalInvoiceConfirmationPayload(companyOdooId: number, documents: {

@@ -2,43 +2,37 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { enqueueFiscalInvoiceConfirmation, retryFiscalInvoiceDraftBatch } from "./odoo-fiscal-invoice-requests.ts";
-import { sha256 } from "../odoo-sync-contract.ts";
 
-test("confirmation adapter sends the exact selected IDs and trusted document payload", async () => {
+test("confirmation adapter builds trusted payloads for every unfinished internal batch", async () => {
   const ids = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"];
   const calls: { name: string; args: Record<string, unknown> }[] = [];
   const documents = ids.map((id, index) => ({
-    id, batch_id: "33333333-3333-4333-8333-333333333333", status: "draft",
+    id, status: "draft",
     odoo_move_id: 90 + index, invoice_payload_sha256: String(index + 1).repeat(64),
   }));
   const client = {
     from(table: string) {
-      if (table === "fiscal_invoice_batches") return { select: () => ({ eq: () => ({ single: async () => ({ data: { id: "batch", status: "draft_ready", payload: { company: { odoo_id: 3 } } }, error: null }) }) }) };
-      return { select: () => ({ in: (_column: string, selected: string[]) => {
-        assert.deepEqual(selected, ids);
-        return { order: async () => ({ data: documents, error: null }) };
-      } }) };
+      if (table === "fiscal_invoice_batches") return { select: () => ({ eq: () => ({ neq: () => ({ order: async () => ({ data: [{ id: "batch", batch_sequence: 1, status: "draft_ready", payload: { company: { odoo_id: 3 } } }], error: null }) }) }) }) };
+      return { select: () => ({ eq: () => ({ eq: () => ({ order: async () => ({ data: documents, error: null }) }) }) }) };
     },
     async rpc(name: string, args: Record<string, unknown>) {
       calls.push({ name, args });
-      return { data: { batch_id: args.p_batch_id, request_id: "request", document_count: 2 }, error: null };
+      return { data: { job_id: args.p_job_id, request_id: "request", document_count: 2, batch_count: 1 }, error: null };
     },
   } as unknown as SupabaseClient;
-  await enqueueFiscalInvoiceConfirmation(client, { batchId: "33333333-3333-4333-8333-333333333333", documentIds: ids, requestedBy: "actor" });
-  assert.equal(calls[0].name, "queue_fiscal_invoice_confirmation");
-  assert.deepEqual(calls[0].args.p_document_ids, ids);
-  const payload = calls[0].args.p_payload as Record<string, unknown>;
-  assert.equal(calls[0].args.p_payload_sha256, sha256(payload));
-  assert.deepEqual((payload.invoices as Record<string, unknown>[]).map((invoice) => invoice.platform_invoice_id), ids);
+  await enqueueFiscalInvoiceConfirmation(client, { jobId: "33333333-3333-4333-8333-333333333333", requestedBy: "actor" });
+  assert.equal(calls[0].name, "queue_fiscal_invoice_job_confirmation");
+  const batches = calls[0].args.p_batches as { payload: { invoices: Record<string, unknown>[] } }[];
+  assert.deepEqual(batches[0].payload.invoices.map((invoice) => invoice.platform_invoice_id), ids);
 });
 
-test("draft retry adapter delegates only batch and actor to the retry RPC", async () => {
+test("draft retry adapter delegates only job and actor to the retry RPC", async () => {
   const calls: unknown[] = [];
   const client = { rpc: async (name: string, args: unknown) => {
     calls.push([name, args]);
-    return { data: { batch_id: "batch", request_id: "request", document_count: 3 }, error: null };
+    return { data: { job_id: "job", batch_id: "batch", request_id: "request", document_count: 3 }, error: null };
   } } as unknown as SupabaseClient;
-  const result = await retryFiscalInvoiceDraftBatch(client, { batchId: "batch", requestedBy: "actor" });
-  assert.deepEqual(result, { batch_id: "batch", request_id: "request", document_count: 3 });
-  assert.deepEqual(calls, [["retry_fiscal_invoice_draft_batch", { p_batch_id: "batch", p_requested_by: "actor" }]]);
+  const result = await retryFiscalInvoiceDraftBatch(client, { jobId: "job", requestedBy: "actor" });
+  assert.deepEqual(result, { job_id: "job", batch_id: "batch", request_id: "request", document_count: 3 });
+  assert.deepEqual(calls, [["retry_fiscal_invoice_draft_job", { p_job_id: "job", p_requested_by: "actor" }]]);
 });

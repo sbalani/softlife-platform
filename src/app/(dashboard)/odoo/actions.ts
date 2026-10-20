@@ -68,7 +68,7 @@ export async function requestFiscalInvoiceDrafts(_state: OdooActionResult | null
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(preflightRunId)) throw new Error("A valid selected preflight is required.");
     const result = await enqueueFiscalInvoiceDraftBatch(s, { preflightRunId, requestedBy: actor.id });
     revalidatePath("/odoo");
-    return { ok: true, message: `Queued ${result.document_count} customer invoice draft${result.document_count === 1 ? "" : "s"}; skipped ${result.skipped_blocked} blocked, ${result.skipped_excluded} excluded, and ${result.skipped_refund_review} refund-review sale${result.skipped_refund_review === 1 ? "" : "s"}.` };
+    return { ok: true, message: `Created one invoice job for ${result.document_count} customer drafts in ${result.batch_count} internal batch${result.batch_count === 1 ? "" : "es"}; skipped ${result.skipped_blocked} blocked, ${result.skipped_excluded} excluded, and ${result.skipped_refund_review} refund-review sale${result.skipped_refund_review === 1 ? "" : "s"}.` };
   } catch (error) { return actionError(error); }
 }
 
@@ -80,12 +80,11 @@ export async function requestFiscalInvoiceConfirmation(_state: OdooActionResult 
     if (String(fd.get("confirmation_acknowledgement") ?? "") !== "post_selected_odoo_invoices") {
       throw new Error("Acknowledge posting the selected customer invoices in Odoo.");
     }
-    const batchId = String(fd.get("batch_id") ?? "");
-    const documentIds = fd.getAll("document_id").map(String);
-    if (!/^[0-9a-f-]{36}$/i.test(batchId) || documentIds.some((id) => !/^[0-9a-f-]{36}$/i.test(id))) throw new Error("Invalid invoice selection.");
-    const result = await enqueueFiscalInvoiceConfirmation(s, { batchId, documentIds, requestedBy: actor.id });
+    const jobId = String(fd.get("job_id") ?? "");
+    if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw new Error("Invalid invoice job.");
+    const result = await enqueueFiscalInvoiceConfirmation(s, { jobId, requestedBy: actor.id });
     revalidatePath("/odoo");
-    return { ok: true, message: `Queued confirmation for ${result.document_count} selected invoice${result.document_count === 1 ? "" : "s"}.` };
+    return { ok: true, message: `Queued confirmation for ${result.document_count} invoices in ${result.batch_count} sequential batch${result.batch_count === 1 ? "" : "es"}.` };
   } catch (error) { return actionError(error); }
 }
 
@@ -97,9 +96,9 @@ export async function retryFiscalInvoiceDrafts(_state: OdooActionResult | null, 
     if (String(fd.get("retry_acknowledgement") ?? "") !== "retry_exact_invoice_drafts") {
       throw new Error("Acknowledge retrying the exact frozen Odoo draft payload.");
     }
-    const batchId = String(fd.get("batch_id") ?? "");
-    if (!/^[0-9a-f-]{36}$/i.test(batchId)) throw new Error("A valid failed invoice batch is required.");
-    const result = await retryFiscalInvoiceDraftBatch(s, { batchId, requestedBy: actor.id });
+    const jobId = String(fd.get("job_id") ?? "");
+    if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw new Error("A valid failed invoice job is required.");
+    const result = await retryFiscalInvoiceDraftBatch(s, { jobId, requestedBy: actor.id });
     revalidatePath("/odoo");
     return { ok: true, message: `Retried the frozen payload for ${result.document_count} invoice draft${result.document_count === 1 ? "" : "s"}.` };
   } catch (error) { return actionError(error); }

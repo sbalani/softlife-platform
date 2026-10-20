@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceClient, isSupabaseConfigured } from "../supabase/server";
 import {
-  buildFiscalInvoiceDraftPayload,
+  buildFiscalInvoiceDraftBatches,
   fiscalCalendarMonth,
   isFiscalCalendarMonth,
   type FiscalCalendarSpan,
@@ -29,6 +29,8 @@ export type FiscalInvoiceDocumentAdmin = {
 };
 
 export type FiscalInvoiceBatchAdmin = FiscalCalendarSpan & {
+  job_id: string;
+  batch_sequence: number;
   preflight_run_id: string;
   period_from: string;
   period_to: string;
@@ -47,8 +49,23 @@ export type FiscalInvoiceBatchAdmin = FiscalCalendarSpan & {
   };
 };
 
+export type FiscalInvoiceJobAdmin = FiscalCalendarSpan & {
+  preflight_run_id: string;
+  requested_at: string;
+  completed_at: string | null;
+  error: string | null;
+  execution_decisions: FiscalInvoiceBatchAdmin["execution_decisions"];
+  document_count: number;
+  draft_count: number;
+  posted_count: number;
+  gross_cents: number;
+  internal_batch_count: number;
+  completed_internal_batch_count: number;
+};
+
 export type FiscalInvoiceAdminData = {
   available: boolean;
+  jobs: FiscalInvoiceJobAdmin[];
   batches: FiscalInvoiceBatchAdmin[];
   documents: FiscalInvoiceDocumentAdmin[];
 };
@@ -62,9 +79,11 @@ export type FiscalInvoiceQueuePreview = {
   skippedBlocked: number;
   skippedExcluded: number;
   skippedRefundReview: number;
+  internalBatchCount: number;
+  internalBatchSizes: number[];
 };
 
-const EMPTY: FiscalInvoiceAdminData = { available: false, batches: [], documents: [] };
+const EMPTY: FiscalInvoiceAdminData = { available: false, jobs: [], batches: [], documents: [] };
 const DOCUMENT_COLUMNS = "id,batch_id,invoice_date,order_code,reference,currency,gross_cents,tax_base_cents,vat_cents,status,odoo_move_id,odoo_state,odoo_name,invoice_payload_sha256";
 
 function records(value: unknown): Record<string, unknown>[] {
@@ -80,16 +99,34 @@ function throwFiscalQueueError(error: { code?: string; message?: string }): neve
 async function loadAdminDocuments(s: SupabaseClient, batchIds: string[]) {
   const documents: Record<string, unknown>[] = [];
   for (let batchOffset = 0; batchOffset < batchIds.length; batchOffset += 50) {
-    for (let rowOffset = 0; ; rowOffset += 1000) {
+    for (let rowOffset = 0; documents.length < 1000; rowOffset += 1000) {
+      const remaining = 1000 - documents.length;
       const result = await s.from("fiscal_invoice_documents").select(DOCUMENT_COLUMNS)
-        .in("batch_id", batchIds.slice(batchOffset, batchOffset + 50)).order("invoice_date", { ascending: false }).order("id").range(rowOffset, rowOffset + 999);
+        .in("batch_id", batchIds.slice(batchOffset, batchOffset + 50)).order("invoice_date", { ascending: false }).order("id").range(rowOffset, rowOffset + remaining - 1);
       if (result.error) throw result.error;
       const page = records(result.data);
       documents.push(...page);
+      if (page.length < remaining) break;
+    }
+    if (documents.length >= 1000) break;
+  }
+  return documents.sort((left, right) => String(right.invoice_date).localeCompare(String(left.invoice_date)) || String(left.id).localeCompare(String(right.id)));
+}
+
+async function loadAdminBatches(s: SupabaseClient, jobIds: string[]) {
+  const batches: Record<string, unknown>[] = [];
+  for (let jobOffset = 0; jobOffset < jobIds.length; jobOffset += 50) {
+    for (let rowOffset = 0; ; rowOffset += 1000) {
+      const result = await s.from("fiscal_invoice_batches")
+        .select("id,job_id,batch_sequence,preflight_run_id,period_from,period_to,local_date_from,local_date_to,status,payload_sha256,execution_decisions,requested_at,draft_completed_at,completed_at,error")
+        .in("job_id", jobIds.slice(jobOffset, jobOffset + 50)).order("job_id").order("batch_sequence").range(rowOffset, rowOffset + 999);
+      if (result.error) throw result.error;
+      const page = records(result.data);
+      batches.push(...page);
       if (page.length < 1000) break;
     }
   }
-  return documents.sort((left, right) => String(right.invoice_date).localeCompare(String(left.invoice_date)) || String(left.id).localeCompare(String(right.id)));
+  return batches;
 }
 
 async function loadPreflightRows(s: SupabaseClient, runId: string) {
@@ -132,7 +169,6 @@ async function loadFiscalInvoiceSource(s: SupabaseClient, preflightRunId: string
   }));
   const skippedRefundReview = allItems.filter((item) => item.refund_required).length;
   const items = allItems.filter((item) => !item.refund_required);
-  if (items.length > 500) throw new Error(`This run has ${items.length} invoiceable sales; the connector limit is 500. Freeze smaller non-overlapping date ranges.`);
   if (!items.length) throw new Error("No invoiceable sales remain after blocked, excluded, and refund-review rows are skipped.");
   const report = reportResult.data as Record<string, unknown>;
   const settings = settingsResult.data as Record<string, unknown>;
@@ -149,43 +185,51 @@ async function loadFiscalInvoiceSource(s: SupabaseClient, preflightRunId: string
 export async function enqueueFiscalInvoiceDraftBatch(s: SupabaseClient, input: { preflightRunId: string; requestedBy: string }) {
   const source = await loadFiscalInvoiceSource(s, input.preflightRunId);
   const platformInvoiceIds = source.items.map(() => randomUUID());
-  const built = buildFiscalInvoiceDraftPayload({
+  const built = buildFiscalInvoiceDraftBatches({
     now: Date.now(), report: source.report, currency: String(source.run.currency),
     journalCode: String(source.settings.journal_code), customerOdooId: Number(source.settings.customer_odoo_id),
     items: source.items, platformInvoiceIds,
   });
-  if (!built.payload || !built.payloadSha256) throw new Error(built.blockers[0] ?? "Fiscal invoice draft creation is blocked.");
-  const taxId = built.payload.tax.odoo_tax_id;
-  const documents = source.items.map((item, index) => ({
-    platform_invoice_id: platformInvoiceIds[index], preflight_item_id: item.id,
-    invoice_payload: built.payload!.invoices[index], invoice_payload_sha256: built.payload!.invoices[index].invoice_payload_sha256,
-    odoo_tax_id: taxId, reference: built.payload!.invoices[index].reference,
+  if (!built.batches.length) throw new Error(built.blockers[0] ?? "Fiscal invoice draft creation is blocked.");
+  const batches = built.batches.map((batch) => ({
+    sequence: batch.sequence,
+    payload: batch.payload,
+    payload_sha256: batch.payloadSha256,
+    documents: batch.payload.invoices.map((invoice, index) => {
+      const item = source.items[(batch.sequence - 1) * 500 + index];
+      return {
+        platform_invoice_id: invoice.platform_invoice_id, preflight_item_id: item.id,
+        invoice_payload: invoice, invoice_payload_sha256: invoice.invoice_payload_sha256,
+        odoo_tax_id: batch.payload.tax.odoo_tax_id, reference: invoice.reference,
+      };
+    }),
   }));
-  const { data, error } = await s.rpc("create_fiscal_invoice_draft_batch", {
+  const { data, error } = await s.rpc("create_fiscal_invoice_job", {
     p_preflight_run_id: source.run.id, p_configuration_report_id: source.report.id, p_requested_by: input.requestedBy,
-    p_payload: built.payload, p_payload_sha256: built.payloadSha256, p_documents: documents,
+    p_batches: batches,
   });
   if (error) throwFiscalQueueError(error);
-  return data as { batch_id: string; request_id: string; document_count: number; skipped_blocked: number; skipped_excluded: number; skipped_refund_review: number };
+  return data as { job_id: string; request_id: string; document_count: number; batch_count: number; skipped_blocked: number; skipped_excluded: number; skipped_refund_review: number };
 }
 
 export async function getFiscalInvoiceQueuePreview(preflightRunId: string): Promise<FiscalInvoiceQueuePreview> {
   const fallback: FiscalInvoiceQueuePreview = {
     runId: preflightRunId, queueable: false, blockers: [], warnings: [], invoiceCount: 0,
     skippedBlocked: 0, skippedExcluded: 0, skippedRefundReview: 0,
+    internalBatchCount: 0, internalBatchSizes: [],
   };
   if (!isSupabaseConfigured() || !process.env.SUPABASE_SERVICE_ROLE_KEY) return { ...fallback, blockers: ["Supabase is not configured."] };
   try {
     const s = await createServiceClient();
     const source = await loadFiscalInvoiceSource(s, preflightRunId);
     const platformInvoiceIds = source.items.map(() => randomUUID());
-    const built = buildFiscalInvoiceDraftPayload({
+    const built = buildFiscalInvoiceDraftBatches({
       now: Date.now(), report: source.report, currency: String(source.run.currency),
       journalCode: String(source.settings.journal_code), customerOdooId: Number(source.settings.customer_odoo_id),
       items: source.items, platformInvoiceIds,
     });
     const [overlapResult, activeRequestResult] = await Promise.all([
-      s.from("fiscal_invoice_batches").select("id,status,local_date_from,local_date_to")
+      s.from("fiscal_invoice_jobs").select("id,status,local_date_from,local_date_to")
         .lt("period_from", String(source.run.period_to)).gt("period_to", String(source.run.period_from))
         .neq("status", "cancelled").limit(1).maybeSingle(),
       s.from("odoo_sync_requests").select("id,status").eq("kind", "fiscal_invoice_draft_creation")
@@ -204,6 +248,8 @@ export async function getFiscalInvoiceQueuePreview(preflightRunId: string): Prom
       runId: preflightRunId, queueable: blockers.length === 0, blockers, warnings,
       invoiceCount: source.items.length, skippedBlocked: source.skippedBlocked,
       skippedExcluded: source.skippedExcluded, skippedRefundReview: source.skippedRefundReview,
+      internalBatchCount: built.batches.length,
+      internalBatchSizes: built.batches.map((batch) => batch.payload.invoices.length),
     };
   } catch (error) {
     return { ...fallback, blockers: [error instanceof Error ? error.message : String(error)] };
@@ -216,26 +262,32 @@ export async function getFiscalInvoiceAdminData(month: string): Promise<FiscalIn
     if (!isFiscalCalendarMonth(month)) throw new Error("Invalid fiscal calendar month.");
     const { first, last } = fiscalCalendarMonth(month, []);
     const s = await createServiceClient();
-    const columns = "id,preflight_run_id,period_from,period_to,local_date_from,local_date_to,status,payload_sha256,execution_decisions,requested_at,draft_completed_at,completed_at,error";
+    const jobColumns = "id,preflight_run_id,period_from,period_to,local_date_from,local_date_to,status,execution_decisions,requested_at,draft_completed_at,completed_at,error";
     const [calendarResult, actionableResult] = await Promise.all([
-      s.from("fiscal_invoice_batches").select(columns).lte("local_date_from", last).gte("local_date_to", first)
+      s.from("fiscal_invoice_jobs").select(jobColumns).lte("local_date_from", last).gte("local_date_to", first)
         .order("local_date_from").limit(100),
-      s.from("fiscal_invoice_batches").select(columns)
+      s.from("fiscal_invoice_jobs").select(jobColumns)
         .in("status", ["draft_pending", "draft_ready", "confirmation_pending", "confirmation_failed", "failed"])
         .order("requested_at", { ascending: false }).limit(50),
     ]);
     if (calendarResult.error) throw calendarResult.error;
     if (actionableResult.error) throw actionableResult.error;
-    const batchRows = new Map<string, Record<string, unknown>>();
-    for (const batch of [...records(calendarResult.data), ...records(actionableResult.data)]) batchRows.set(String(batch.id), batch);
-    const batches = [...batchRows.values()].map((batch): FiscalInvoiceBatchAdmin => ({
-      id: String(batch.id), preflight_run_id: String(batch.preflight_run_id), period_from: String(batch.period_from), period_to: String(batch.period_to),
-      local_date_from: String(batch.local_date_from), local_date_to: String(batch.local_date_to), status: String(batch.status),
-      payload_sha256: String(batch.payload_sha256), requested_at: String(batch.requested_at),
-      execution_decisions: (batch.execution_decisions && typeof batch.execution_decisions === "object" ? batch.execution_decisions : {}) as FiscalInvoiceBatchAdmin["execution_decisions"],
-      draft_completed_at: batch.draft_completed_at == null ? null : String(batch.draft_completed_at),
-      completed_at: batch.completed_at == null ? null : String(batch.completed_at), error: batch.error == null ? null : String(batch.error),
-    })).sort((left, right) => right.requested_at.localeCompare(left.requested_at));
+    const jobRows = new Map<string, Record<string, unknown>>();
+    for (const job of [...records(calendarResult.data), ...records(actionableResult.data)]) jobRows.set(String(job.id), job);
+    const rawJobs = [...jobRows.values()];
+    const jobIds = rawJobs.map((job) => String(job.id));
+    const [rawBatches, progressResult] = await Promise.all([
+      jobIds.length ? loadAdminBatches(s, jobIds) : Promise.resolve([]),
+      jobIds.length ? s.from("fiscal_invoice_job_progress").select("*").in("job_id", jobIds) : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (progressResult.error) throw progressResult.error;
+    const progressByJob = new Map(records(progressResult.data).map((progress) => [String(progress.job_id), progress]));
+    const batches = rawBatches.map((batch): FiscalInvoiceBatchAdmin => ({
+      id: String(batch.id), job_id: String(batch.job_id), batch_sequence: Number(batch.batch_sequence), preflight_run_id: String(batch.preflight_run_id),
+      period_from: String(batch.period_from), period_to: String(batch.period_to), local_date_from: String(batch.local_date_from), local_date_to: String(batch.local_date_to), status: String(batch.status),
+      payload_sha256: String(batch.payload_sha256), requested_at: String(batch.requested_at), execution_decisions: (batch.execution_decisions && typeof batch.execution_decisions === "object" ? batch.execution_decisions : {}) as FiscalInvoiceBatchAdmin["execution_decisions"],
+      draft_completed_at: batch.draft_completed_at == null ? null : String(batch.draft_completed_at), completed_at: batch.completed_at == null ? null : String(batch.completed_at), error: batch.error == null ? null : String(batch.error),
+    }));
     const documentRows = batches.length ? await loadAdminDocuments(s, batches.map((batch) => batch.id)) : [];
     const documents = documentRows.map((document): FiscalInvoiceDocumentAdmin => ({
       id: String(document.id), batch_id: String(document.batch_id), invoice_date: String(document.invoice_date),
@@ -245,7 +297,20 @@ export async function getFiscalInvoiceAdminData(month: string): Promise<FiscalIn
       odoo_state: document.odoo_state == null ? null : String(document.odoo_state), odoo_name: document.odoo_name == null ? null : String(document.odoo_name),
       invoice_payload_sha256: String(document.invoice_payload_sha256),
     }));
-    return { available: true, batches, documents };
+    const jobs = rawJobs.map((job): FiscalInvoiceJobAdmin => {
+      const childIds = new Set(batches.filter((batch) => batch.job_id === String(job.id)).map((batch) => batch.id));
+      const childBatches = batches.filter((batch) => childIds.has(batch.id));
+      const progress = progressByJob.get(String(job.id));
+      return {
+        id: String(job.id), preflight_run_id: String(job.preflight_run_id), local_date_from: String(job.local_date_from), local_date_to: String(job.local_date_to), status: String(job.status),
+        requested_at: String(job.requested_at), completed_at: job.completed_at == null ? null : String(job.completed_at), error: job.error == null ? null : String(job.error),
+        execution_decisions: (job.execution_decisions && typeof job.execution_decisions === "object" ? job.execution_decisions : {}) as FiscalInvoiceBatchAdmin["execution_decisions"],
+        document_count: Number(progress?.document_count ?? 0), draft_count: Number(progress?.draft_count ?? 0),
+        posted_count: Number(progress?.posted_count ?? 0), gross_cents: Number(progress?.gross_cents ?? 0), internal_batch_count: Number(progress?.internal_batch_count ?? childBatches.length),
+        completed_internal_batch_count: Number(progress?.completed_internal_batch_count ?? 0),
+      };
+    }).sort((left, right) => right.requested_at.localeCompare(left.requested_at));
+    return { available: true, jobs, batches, documents };
   } catch {
     return EMPTY;
   }

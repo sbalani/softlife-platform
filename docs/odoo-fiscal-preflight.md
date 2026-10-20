@@ -56,7 +56,7 @@ The income account and taxes are the effective values after product/category def
 
 An admin explicitly selects and acknowledges one immutable preflight. The displayed rows, CSV, execution preview, and queued source always use that same run ID. A run with sale-level blockers may execute its eligible non-refund rows; blocked, excluded, and refund-review counts are disclosed before queueing and stored in the immutable batch decision summary. The alternative is to stop, correct the source, and freeze a replacement run before creating any drafts.
 
-Global configuration blockers remain non-bypassable. The server also rejects no invoiceable sales, incompatible connector capabilities, missing or mismatched Odoo identifiers, more than 500 invoiceable sales, concurrent draft requests, duplicate source use, and overlapping invoice batches. Report age is shown as a warning at execution time because the exact accepted report identity and hash remain enforced. Client-supplied accounting configuration is never trusted.
+Global configuration blockers remain non-bypassable. The server also rejects no invoiceable sales, incompatible connector capabilities, missing or mismatched Odoo identifiers, more than 50,000 invoiceable sales, concurrent draft requests, duplicate source use, and overlapping invoice jobs. One immutable job partitions its sales deterministically into sequential connector requests of at most 500 invoices. Report age is shown as a warning at execution time because the exact accepted report identity and hash remain enforced. Client-supplied accounting configuration is never trusted.
 
 One eligible sale creates one `out_invoice` contract document and one durable `fiscal_invoice_documents` row. The platform UUID is the idempotency identity. Each invoice has one line containing the Odoo product, description, quantity, exact gross/base/VAT cents, and Odoo tax ID. The invoice SHA-256 is calculated over canonical JSON before `invoice_payload_sha256` is added; the outer SHA-256 covers the complete canonical payload.
 
@@ -105,10 +105,11 @@ Accepted confirmation results must exactly cover the request with matching ident
 
 ## Durability and connector behavior
 
-- `fiscal_invoice_batches` records source preflight/report IDs, UTC and inclusive local periods, status, queue IDs, frozen draft payload/hash, skipped-row decisions, errors, and audit timestamps.
+- `fiscal_invoice_jobs` reserves one source preflight and period, records skipped-row decisions, and aggregates draft/posting progress. Legacy completed batches are backfilled as one-batch jobs without changing their documents or Odoo identities.
+- `fiscal_invoice_batches` records ordered internal requests of at most 500 invoices, their frozen payload/hash, queue IDs, status, errors, and audit timestamps. Only the first request is initially released; successful callbacks release the next request transactionally.
 - `fiscal_invoice_documents` records immutable preflight item/order identity, platform UUID, source and invoice hashes, exact cents, Odoo product/tax/date/reference, and returned Odoo move state/name.
 - One source order can appear in only one fiscal invoice document.
-- A GiST exclusion constraint prevents overlapping timestamp periods for all non-cancelled batches. Failed batches retain their source reservation.
+- A GiST exclusion constraint prevents overlapping timestamp periods for all non-cancelled jobs. Failed jobs retain their source reservation.
 - Tables and transactional RPCs are service-role-only. Preflight immutability and existing v1 stock/remediation requests are unchanged.
 - Connector workers claim requests through `GET /api/internal/odoo/sync-requests` and complete the lease through `POST /api/internal/odoo/sync-requests/{requestId}/result`.
 - An identical callback with the same lease remains idempotent. Rejected connector results preserve the batch and record an actionable failed state/error.

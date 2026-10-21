@@ -18,6 +18,22 @@ export type FiscalSaleLinkPayload = {
   links: FiscalSaleLink[];
 };
 
+export function fiscalSaleLinkProductId(
+  frozenProductId: unknown,
+  frozenRecipeId: unknown,
+  confirmedMapping?: { recipeId: unknown; productId: unknown; bomId: unknown } | null,
+) {
+  const confirmed = confirmedMapping
+    && String(confirmedMapping.recipeId) === String(frozenRecipeId)
+    && Number.isInteger(Number(confirmedMapping.bomId))
+    && Number(confirmedMapping.bomId) > 0
+    ? confirmedMapping.productId
+    : null;
+  const value = frozenProductId == null ? confirmed : frozenProductId;
+  const productId = Number(value);
+  return Number.isInteger(productId) && productId > 0 ? productId : null;
+}
+
 export function validateFiscalSaleLinkResult(payload: FiscalSaleLinkPayload, result: Record<string, unknown>) {
   if (result.accepted !== true) return;
   if (!Array.isArray(result.links) || result.links.length !== payload.links.length) throw new Error("Fiscal sale-link result coverage is invalid");

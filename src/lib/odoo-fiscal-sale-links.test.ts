@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateFiscalSaleLinkResult, type FiscalSaleLinkPayload } from "./odoo-fiscal-sale-links.ts";
+import { fiscalSaleLinkProductId, validateFiscalSaleLinkResult, type FiscalSaleLinkPayload } from "./odoo-fiscal-sale-links.ts";
 
 const payload: FiscalSaleLinkPayload = {
   contract_version: 1,
@@ -17,6 +17,15 @@ const payload: FiscalSaleLinkPayload = {
     quantity: 1,
   }],
 };
+
+test("sale-link product uses the confirmed recipe mapping only when the frozen mapping is absent", () => {
+  const confirmed = { recipeId: "recipe-a", productId: 36130, bomId: 122 };
+  assert.equal(fiscalSaleLinkProductId(null, "recipe-a", confirmed), 36130);
+  assert.equal(fiscalSaleLinkProductId(42, "recipe-a", confirmed), 42);
+  assert.equal(fiscalSaleLinkProductId(null, "recipe-b", confirmed), null);
+  assert.equal(fiscalSaleLinkProductId(null, "recipe-a", { ...confirmed, bomId: 0 }), null);
+  assert.equal(fiscalSaleLinkProductId(null, "recipe-a", null), null);
+});
 
 test("fiscal sale-link result requires exact Odoo identities", () => {
   assert.doesNotThrow(() => validateFiscalSaleLinkResult(payload, {

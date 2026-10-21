@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceClient, isSupabaseConfigured } from "../supabase/server";
 import { fiscalCalendarMonth, isFiscalCalendarMonth } from "../odoo-fiscal-invoices.ts";
-import type { FiscalSaleLink, FiscalSaleLinkPayload } from "../odoo-fiscal-sale-links.ts";
+import { fiscalSaleLinkProductId, type FiscalSaleLink, type FiscalSaleLinkPayload } from "../odoo-fiscal-sale-links.ts";
 
 type SyncRequest = {
   id: string;
@@ -38,6 +38,10 @@ const EMPTY = (month: string): FiscalSaleLinkAdminData => ({
 
 function records(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row)) : [];
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
 function requestFromRow(row: Record<string, unknown> | null): SyncRequest | null {
@@ -103,7 +107,7 @@ async function buildFiscalSaleLinkData(s: SupabaseClient, month: string): Promis
   const [orders, memberships, resolutions] = await Promise.all([
     loadByChunks(s, "huaxin_orders", "id,odoo_warehouse_id_at_sale", "id", sourceOrderIds),
     loadByChunks(s, "manufacturing_period_export_orders", "export_id,order_id", "order_id", sourceOrderIds),
-    loadByChunks(s, "order_product_resolutions", "order_id,recipe_version_id,resolution_status", "order_id", sourceOrderIds),
+    loadByChunks(s, "order_product_resolutions", "order_id,recipe_version_id,resolution_status,recipe_versions(recipe_id,odoo_bom_id,recipes(id,odoo_finished_product_id))", "order_id", sourceOrderIds),
   ]);
   const exportIds = [...new Set(memberships.map((membership) => String(membership.export_id)))];
   const exports = await loadByChunks(s, "manufacturing_period_exports", "id,status,payload,odoo_result", "id", exportIds);
@@ -111,6 +115,7 @@ async function buildFiscalSaleLinkData(s: SupabaseClient, month: string): Promis
   const warehouseByOrder = new Map(orders.map((row) => [String(row.id), Number(row.odoo_warehouse_id_at_sale)]));
   const membershipsByOrder = new Map<string, Record<string, unknown>[]>();
   const recipesByOrder = new Map<string, Set<string>>();
+  const mappingByRecipeVersion = new Map<string, { recipeId: string; productId: number; bomId: number }>();
   for (const membership of memberships) {
     if (!completedExports.has(String(membership.export_id))) continue;
     const orderId = String(membership.order_id);
@@ -120,8 +125,16 @@ async function buildFiscalSaleLinkData(s: SupabaseClient, month: string): Promis
     if (resolution.resolution_status !== "resolved" || resolution.recipe_version_id == null) continue;
     const orderId = String(resolution.order_id);
     const versions = recipesByOrder.get(orderId) ?? new Set<string>();
-    versions.add(String(resolution.recipe_version_id));
+    const versionId = String(resolution.recipe_version_id);
+    versions.add(versionId);
     recipesByOrder.set(orderId, versions);
+    const version = record(resolution.recipe_versions);
+    const recipe = record(version?.recipes);
+    const productId = Number(recipe?.odoo_finished_product_id);
+    const bomId = Number(version?.odoo_bom_id);
+    if (Number.isInteger(productId) && productId > 0 && Number.isInteger(bomId) && bomId > 0) {
+      mappingByRecipeVersion.set(versionId, { recipeId: String(version?.recipe_id), productId, bomId });
+    }
   }
 
   const links: FiscalSaleLink[] = [];
@@ -161,7 +174,9 @@ async function buildFiscalSaleLinkData(s: SupabaseClient, month: string): Promis
     if (!exportWarehouse) { flag(label, "The completed production export has no frozen payload for the source warehouse.", `Completed export ${exportId.slice(0, 8)} has no frozen payload for warehouse ${warehouseId}.`); continue; }
     if (!exportRecipe) { flag(label, "The order's frozen recipe version is missing from its completed production export.", `Frozen recipe version ${recipeVersionId!.slice(0, 8)} is missing from completed export ${exportId.slice(0, 8)}.`); continue; }
     if (!Number.isInteger(Number(document.odoo_product_id)) || Number(document.odoo_product_id) <= 0) { flag(label, "The posted invoice has no valid Odoo product ID."); continue; }
-    if (Number(exportRecipe.odoo_finished_product_id) !== Number(document.odoo_product_id)) { flag(label, "The invoice product does not match the frozen production product.", `Invoice product ${document.odoo_product_id} does not match production product ${exportRecipe.odoo_finished_product_id}.`); continue; }
+    const confirmedMapping = mappingByRecipeVersion.get(recipeVersionId!);
+    const productionProductId = fiscalSaleLinkProductId(exportRecipe.odoo_finished_product_id, exportRecipe.recipe_id, confirmedMapping);
+    if (productionProductId !== Number(document.odoo_product_id)) { flag(label, "The invoice product does not match the verified production product.", `Invoice product ${document.odoo_product_id} does not match production product ${productionProductId ?? "unknown"}.`); continue; }
     if (invoiceLines.length !== 1) { flag(label, `The recorded invoice contains ${invoiceLines.length} product lines instead of exactly one.`); continue; }
     if (!Number.isInteger(quantity) || quantity <= 0) { flag(label, "The recorded invoice quantity is not a positive whole number."); continue; }
     if (!Number.isInteger(Number(document.odoo_move_id)) || Number(document.odoo_move_id) <= 0) { flag(label, "The posted invoice has no valid Odoo invoice ID."); continue; }

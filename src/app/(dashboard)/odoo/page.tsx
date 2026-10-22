@@ -14,12 +14,13 @@ import { getFiscalRemediationAdminData } from "@/lib/data/odoo-fiscal-remediatio
 import { FiscalRemediationPanel } from "./FiscalRemediationPanel";
 import { getSessionProfile } from "@/lib/auth/session";
 import { getFiscalInvoiceAdminData, getFiscalInvoiceQueuePreview } from "@/lib/data/odoo-fiscal-invoices";
-import { isFiscalCalendarMonth } from "@/lib/odoo-fiscal-invoices";
+import { fiscalCalendarMonth, isFiscalCalendarMonth } from "@/lib/odoo-fiscal-invoices";
 import { OdooAccordion } from "./OdooAccordion";
 import { getFiscalSaleLinkAdminData } from "@/lib/data/odoo-fiscal-sale-links";
 import { FiscalSaleLinkPanel } from "./FiscalSaleLinkPanel";
 import { getCustomerInvoiceRequestAdminData } from "@/lib/data/customer-invoice-requests";
 import { CustomerInvoiceRequestPanel } from "./CustomerInvoiceRequestPanel";
+import { FiscalMonthNavigator } from "./FiscalMonthNavigator";
 
 export const dynamic = "force-dynamic";
 
@@ -30,9 +31,11 @@ function isUnitStockUom(uom: string | null) {
 export default async function OdooPage({ searchParams }: { searchParams: Promise<{ fiscal_month?: string; fiscal_run?: string }> }) {
   const actor = await getSessionProfile();
   const { fiscal_month: fiscalMonth, fiscal_run: fiscalRun } = await searchParams;
-  const monthParts = new Intl.DateTimeFormat("en", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit" }).formatToParts(new Date());
-  const monthValues = new Map(monthParts.map((part) => [part.type, part.value]));
-  const selectedFiscalMonth = isFiscalCalendarMonth(fiscalMonth) ? fiscalMonth : `${monthValues.get("year")}-${monthValues.get("month")}`;
+  const currentMonthParts = new Intl.DateTimeFormat("en", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit" }).formatToParts(new Date());
+  const currentMonthValues = new Map(currentMonthParts.map((part) => [part.type, part.value]));
+  const previousMonth = new Date(Date.UTC(Number(currentMonthValues.get("year")), Number(currentMonthValues.get("month")) - 2, 1));
+  const defaultFiscalMonth = previousMonth.toISOString().slice(0, 7);
+  const selectedFiscalMonth = isFiscalCalendarMonth(fiscalMonth) ? fiscalMonth : defaultFiscalMonth;
   const [{ skus, source: skuSource }, { lots, source: lotSource }, production, fiscal, remediation, customerInvoiceRequests] = await Promise.all([
     getOdooSkus(),
     getOdooLots(),
@@ -58,15 +61,9 @@ export default async function OdooPage({ searchParams }: { searchParams: Promise
         </p>
       </header>
 
+      <FiscalMonthNavigator month={selectedFiscalMonth} calendar={fiscalCalendarMonth(selectedFiscalMonth, invoices.jobs)} selectedRunId={fiscalRun} />
+
       <StockSnapshotPanel snapshot={production.stockSnapshot} timeZone={tz} sourceWarehouseId={production.settings?.replenishment_source_odoo_warehouse_id ?? null} />
-
-      <FiscalPreflightPanel data={fiscal} invoices={invoices} queuePreview={queuePreview} timeZone={tz} calendarMonth={selectedFiscalMonth} />
-
-      {customerInvoiceRequests && <CustomerInvoiceRequestPanel {...customerInvoiceRequests} />}
-
-      {saleLinks && <FiscalSaleLinkPanel data={saleLinks} timeZone={tz} />}
-
-      {remediation && <FiscalRemediationPanel data={remediation} timeZone={tz} />}
 
       <OdooAccordion title="Production contract" description="Configure deterministic consumption, resolve unmatched sales, and freeze shared manufacturing runs." badge={<span className={`rounded-full px-3 py-1 text-xs font-bold ${production.available ? "bg-sage/15 text-sage" : "bg-warning/15 text-warning"}`}>{production.available ? "Contract ready" : "Migration pending"}</span>}>
         {!production.available ? <p className="rounded-xl bg-warning/10 px-4 py-3 text-sm text-warning">Apply the Odoo manufacturing contract migration before configuring production.</p> : (
@@ -110,12 +107,20 @@ export default async function OdooPage({ searchParams }: { searchParams: Promise
             </details>
 
             <div className="grid gap-4 lg:grid-cols-2">
-              <div className="rounded-xl border border-line p-4"><h3 className="text-sm font-bold text-cocoa">Pending sale resolution ({production.pending.length})</h3><div className="mt-3 max-h-80 space-y-2 overflow-auto">{production.pending.length ? production.pending.map((item) => <form action={resolveProductionLine} key={item.id} className="rounded-lg bg-cream/60 p-3"><input type="hidden" name="resolution_id" value={item.id} /><div className="mb-1 flex justify-between gap-2 text-xs"><span className="font-semibold text-cocoa">{item.raw_name || "Empty product name"}</span><span className="text-taupe">{item.order_code}</span></div><p className="mb-2 text-[10px] text-taupe">Normalized: {item.normalized_name || "—"} · {item.machine_name || "Unknown machine"} · {item.menu_kind || "unknown kind"}:{item.raw_position || "no position"}</p><div className="flex gap-2"><select name="choice" required className="min-w-0 flex-1 rounded border border-line px-2 py-1.5 text-xs"><option value="">Choose an explicit resolution</option><optgroup label="Canonical ingredient">{production.products.map((product) => <option key={product.id} value={`product:${product.id}`}>{product.name}</option>)}</optgroup><optgroup label="Complete recipe">{production.recipes.map((recipe) => <option key={recipe.id} value={`recipe:${recipe.id}`}>{recipe.name}</option>)}</optgroup><option value="ignored">Ignore with reason</option></select><button className="rounded bg-terracotta px-3 py-1.5 text-xs font-bold text-white">Resolve</button></div><input name="resolution_note" placeholder="Required reason when ignoring" className="mt-2 w-full rounded border border-line px-2 py-1.5 text-xs" /><p className="mt-1 text-[10px] text-warning">{item.problem_code?.replaceAll("_", " ")}</p></form>) : <p className="text-sm text-sage">No unresolved sale lines.</p>}</div></div>
+              <details className="rounded-xl border border-line p-4" open={production.pending.length > 0}><summary className="cursor-pointer text-sm font-bold text-cocoa">Pending sale resolution ({production.pending.length})</summary><div className="mt-3 max-h-80 space-y-2 overflow-auto">{production.pending.length ? production.pending.map((item) => <form action={resolveProductionLine} key={item.id} className="rounded-lg bg-cream/60 p-3"><input type="hidden" name="resolution_id" value={item.id} /><div className="mb-1 flex justify-between gap-2 text-xs"><span className="font-semibold text-cocoa">{item.raw_name || "Empty product name"}</span><span className="text-taupe">{item.order_code}</span></div><p className="mb-2 text-[10px] text-taupe">Normalized: {item.normalized_name || "—"} · {item.machine_name || "Unknown machine"} · {item.menu_kind || "unknown kind"}:{item.raw_position || "no position"}</p><div className="flex gap-2"><select name="choice" required className="min-w-0 flex-1 rounded border border-line px-2 py-1.5 text-xs"><option value="">Choose an explicit resolution</option><optgroup label="Canonical ingredient">{production.products.map((product) => <option key={product.id} value={`product:${product.id}`}>{product.name}</option>)}</optgroup><optgroup label="Complete recipe">{production.recipes.map((recipe) => <option key={recipe.id} value={`recipe:${recipe.id}`}>{recipe.name}</option>)}</optgroup><option value="ignored">Ignore with reason</option></select><button className="rounded bg-terracotta px-3 py-1.5 text-xs font-bold text-white">Resolve</button></div><input name="resolution_note" placeholder="Required reason when ignoring" className="mt-2 w-full rounded border border-line px-2 py-1.5 text-xs" /><p className="mt-1 text-[10px] text-warning">{item.problem_code?.replaceAll("_", " ")}</p></form>) : <p className="text-sm text-sage">No unresolved sale lines.</p>}</div></details>
               <ProductionRunsPanel runs={production.runs} timeZone={tz} recipes={production.recipes} warehouses={production.warehouses} />
             </div>
           </div>
         )}
       </OdooAccordion>
+
+      {customerInvoiceRequests && <CustomerInvoiceRequestPanel {...customerInvoiceRequests} />}
+
+      {remediation && <FiscalRemediationPanel data={remediation} timeZone={tz} />}
+
+      <FiscalPreflightPanel data={fiscal} invoices={invoices} queuePreview={queuePreview} timeZone={tz} calendarMonth={selectedFiscalMonth} />
+
+      {saleLinks && <FiscalSaleLinkPanel data={saleLinks} timeZone={tz} />}
 
       <OdooAccordion title={`SKUs (${skus.length})`} defaultOpen={false}>
         <div className="overflow-x-auto rounded-2xl border border-line bg-white">

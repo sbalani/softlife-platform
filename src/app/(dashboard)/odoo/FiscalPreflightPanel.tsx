@@ -1,6 +1,6 @@
 import type { FiscalPreflightAdminData } from "@/lib/data/odoo-fiscal";
 import type { FiscalInvoiceAdminData, FiscalInvoiceQueuePreview } from "@/lib/data/odoo-fiscal-invoices";
-import { fiscalCalendarMonth, isFiscalCalendarMonth } from "@/lib/odoo-fiscal-invoices";
+import { isFiscalCalendarMonth } from "@/lib/odoo-fiscal-invoices";
 import { OdooSaveForm } from "./OdooSaveForm";
 import { OdooAccordion } from "./OdooAccordion";
 import { cancelFailedFiscalInvoiceJob, prepareFiscalPreflight, requestFiscalInvoiceConfirmation, requestFiscalInvoiceDrafts, retryFiscalInvoiceDrafts } from "./actions";
@@ -9,29 +9,16 @@ function money(cents: number | undefined, currency = "EUR") {
   return new Intl.NumberFormat("en-IE", { style: "currency", currency }).format((cents ?? 0) / 100);
 }
 
-function currentMonth(timeZone: string) {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
-  const value = new Map(parts.map((part) => [part.type, part.value]));
-  const year = Number(value.get("year"));
-  const month = Number(value.get("month"));
-  const previous = new Date(Date.UTC(year, month - 2, 1));
-  const previousYear = previous.getUTCFullYear();
-  const previousMonth = previous.getUTCMonth() + 1;
-  const lastDay = new Date(Date.UTC(previousYear, previousMonth, 0)).getUTCDate();
-  const prefix = `${previousYear}-${String(previousMonth).padStart(2, "0")}`;
-  return { from: `${prefix}-01`, to: `${prefix}-${lastDay}` };
+function monthDateRange(month: string) {
+  const [year, value] = month.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(year, value, 0)).getUTCDate();
+  return { from: `${month}-01`, to: `${month}-${lastDay}` };
 }
 
 function statusStyle(status: string) {
   if (["ready", "eligible", "draft", "draft_ready", "completed", "posted"].includes(status)) return "bg-sage/15 text-sage";
   if (["excluded", "queued", "draft_pending", "confirmation_pending"].includes(status)) return "bg-taupe/10 text-taupe";
   return "bg-danger/10 text-danger";
-}
-
-function shiftMonth(month: string, delta: number) {
-  const [year, value] = month.split("-").map(Number);
-  const date = new Date(Date.UTC(year, value - 1 + delta, 1));
-  return date.toISOString().slice(0, 7);
 }
 
 function sourceText(value: unknown) {
@@ -46,11 +33,10 @@ export function FiscalPreflightPanel({ data, invoices, queuePreview, timeZone, c
   timeZone: string;
   calendarMonth?: string;
 }) {
-  const defaults = currentMonth("Europe/Madrid");
   const selected = data.selectedRun;
   const summary = selected?.summary;
-  const month = isFiscalCalendarMonth(calendarMonth) ? calendarMonth : defaults.from.slice(0, 7);
-  const calendar = fiscalCalendarMonth(month, invoices.jobs);
+  const month = isFiscalCalendarMonth(calendarMonth) ? calendarMonth : new Date().toISOString().slice(0, 7);
+  const defaults = monthDateRange(month);
   return (
     <OdooAccordion title="Fiscal invoicing" description="Freeze completed sales. Legacy periods create one draft per sale; post-cutover months create requested invoices plus one consolidated remainder invoice." badge={<span className={`rounded-full px-3 py-1 text-xs font-bold ${data.available && invoices.available ? "bg-sage/15 text-sage" : "bg-warning/15 text-warning"}`}>{data.available && invoices.available ? "Execution contract ready" : "Migration pending"}</span>}>
       {!data.available || !data.settings ? <p className="rounded-xl bg-warning/10 px-4 py-3 text-sm text-warning">Apply the fiscal preflight migration before running this control.</p> : <div className="space-y-5">
@@ -64,7 +50,7 @@ export function FiscalPreflightPanel({ data, invoices, queuePreview, timeZone, c
         </div>
 
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)]">
-          <OdooSaveForm action={prepareFiscalPreflight} className="rounded-xl border border-line p-4">
+          <OdooSaveForm key={month} action={prepareFiscalPreflight} className="rounded-xl border border-line p-4">
             <input type="hidden" name="fiscal_month" value={month} />
             <h3 className="text-sm font-bold text-cocoa">Freeze a date range</h3>
             <p className="mt-1 text-[11px] text-taupe">Madrid-local days are converted to an exact half-open UTC period, including daylight-saving changes.</p>
@@ -101,11 +87,13 @@ export function FiscalPreflightPanel({ data, invoices, queuePreview, timeZone, c
             <div className="rounded-xl bg-cream p-3"><span className="block text-taupe">VAT</span><strong className="text-lg text-cocoa">{money(summary.vat_cents, selected.currency)}</strong></div>
           </div>
           {selected.global_findings.length > 0 && <div className="rounded-xl border border-line p-3">{selected.global_findings.map((finding) => <p key={`${finding.severity}:${finding.code}`} className={`text-xs ${finding.severity === "blocker" ? "text-danger" : finding.severity === "warning" ? "text-warning" : "text-taupe"}`}>{finding.message}</p>)}</div>}
-          <div className="overflow-x-auto rounded-xl border border-line">
-            <table className="min-w-full text-left text-xs"><thead className="bg-sand uppercase text-taupe"><tr><th className="px-3 py-2">Sale</th><th>Product</th><th>Status</th><th>Gross</th><th>VAT</th><th>Findings</th></tr></thead><tbody className="divide-y divide-line">{data.selectedItems.map((item) => <tr key={item.order_id}><td className="px-3 py-2 text-cocoa"><strong>{item.order_code}</strong><span className="block text-[10px] text-taupe">{item.operation_local_date ?? "No date"} · {item.payment_reference ?? item.order_id.slice(0, 8)}</span></td><td className="pr-3 text-cocoa">{item.description ?? "Unresolved"}<span className="block text-[10px] text-taupe">{item.odoo_product_id ? `Odoo ${item.odoo_product_id}` : "No Odoo product"}</span></td><td className="pr-3"><span className={`rounded-full px-2 py-1 font-bold ${statusStyle(item.status)}`}>{item.status}</span></td><td className="pr-3 text-cocoa">{item.gross_cents == null ? "-" : money(item.gross_cents, selected.currency)}</td><td className="pr-3 text-cocoa">{item.vat_cents == null ? "-" : money(item.vat_cents, selected.currency)}</td><td className="max-w-sm py-2 pr-3 text-[10px] text-taupe"><p>{item.findings.map((finding) => finding.message).join(" ") || "No sale-level findings."}</p><details className="mt-1"><summary className="cursor-pointer font-semibold text-terracotta">Source details</summary><dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5"><dt>Payment</dt><dd>{sourceText(item.source_snapshot.pay_type_raw)}</dd><dt>Raw price</dt><dd>{sourceText(item.source_snapshot.price)}</dd><dt>Units</dt><dd>{sourceText(item.source_snapshot.nums)}</dd><dt>State</dt><dd>{sourceText(item.source_snapshot.order_state)} / {sourceText(item.source_snapshot.status_code)}</dd><dt>Machine</dt><dd>{sourceText(item.source_snapshot.machine_id)}</dd><dt>IMEI</dt><dd>{sourceText(item.source_snapshot.device_imei)}</dd><dt>Refund</dt><dd>{sourceText(item.source_snapshot.refund_status)}</dd><dt>Products</dt><dd className="break-all">{sourceText(item.source_snapshot.products)}</dd></dl></details></td></tr>)}</tbody></table>
-            {!data.selectedItems.length && <p className="p-4 text-sm text-taupe">This run contains no sales in the selected period.</p>}
-            {summary.selected_orders > data.selectedItems.length && <p className="p-3 text-[10px] text-warning">Showing the first {data.selectedItems.length} rows. The CSV includes every frozen row.</p>}
-          </div>
+          <details className="rounded-xl border border-line" open={summary.blocked_orders > 0}>
+            <summary className="cursor-pointer px-3 py-2 text-xs font-bold text-cocoa">Frozen sales ({summary.selected_orders})</summary>
+            <div className="overflow-x-auto border-t border-line"><table className="min-w-full text-left text-xs"><thead className="bg-sand uppercase text-taupe"><tr><th className="px-3 py-2">Sale</th><th>Product</th><th>Status</th><th>Gross</th><th>VAT</th><th>Findings</th></tr></thead><tbody className="divide-y divide-line">{data.selectedItems.map((item) => <tr key={item.order_id}><td className="px-3 py-2 text-cocoa"><strong>{item.order_code}</strong><span className="block text-[10px] text-taupe">{item.operation_local_date ?? "No date"} · {item.payment_reference ?? item.order_id.slice(0, 8)}</span></td><td className="pr-3 text-cocoa">{item.description ?? "Unresolved"}<span className="block text-[10px] text-taupe">{item.odoo_product_id ? `Odoo ${item.odoo_product_id}` : "No Odoo product"}</span></td><td className="pr-3"><span className={`rounded-full px-2 py-1 font-bold ${statusStyle(item.status)}`}>{item.status}</span></td><td className="pr-3 text-cocoa">{item.gross_cents == null ? "-" : money(item.gross_cents, selected.currency)}</td><td className="pr-3 text-cocoa">{item.vat_cents == null ? "-" : money(item.vat_cents, selected.currency)}</td><td className="max-w-sm py-2 pr-3 text-[10px] text-taupe"><p>{item.findings.map((finding) => finding.message).join(" ") || "No sale-level findings."}</p><details className="mt-1"><summary className="cursor-pointer font-semibold text-terracotta">Source details</summary><dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5"><dt>Payment</dt><dd>{sourceText(item.source_snapshot.pay_type_raw)}</dd><dt>Raw price</dt><dd>{sourceText(item.source_snapshot.price)}</dd><dt>Units</dt><dd>{sourceText(item.source_snapshot.nums)}</dd><dt>State</dt><dd>{sourceText(item.source_snapshot.order_state)} / {sourceText(item.source_snapshot.status_code)}</dd><dt>Machine</dt><dd>{sourceText(item.source_snapshot.machine_id)}</dd><dt>IMEI</dt><dd>{sourceText(item.source_snapshot.device_imei)}</dd><dt>Refund</dt><dd>{sourceText(item.source_snapshot.refund_status)}</dd><dt>Products</dt><dd className="break-all">{sourceText(item.source_snapshot.products)}</dd></dl></details></td></tr>)}</tbody></table>
+              {!data.selectedItems.length && <p className="p-4 text-sm text-taupe">This run contains no sales in the selected period.</p>}
+              {summary.selected_orders > data.selectedItems.length && <p className="p-3 text-[10px] text-warning">Showing the first {data.selectedItems.length} rows. The CSV includes every frozen row.</p>}
+            </div>
+          </details>
           {invoices.available && queuePreview && <div className={`rounded-xl border p-4 ${queuePreview.queueable ? "border-terracotta/30 bg-terracotta/5" : "border-warning/30 bg-warning/5"}`}>
             <h4 className="text-sm font-bold text-cocoa">Execution choice for run {selected.id.slice(0, 8)}</h4>
             <p className="mt-1 text-xs text-cocoa"><strong>Proceed:</strong> create {queuePreview.invoiceCount} Odoo drafts in {queuePreview.internalBatchCount} sequential internal batch{queuePreview.internalBatchCount === 1 ? "" : "es"} ({queuePreview.internalBatchSizes.join(" + ")}) and skip {queuePreview.skippedBlocked} blocked, {queuePreview.skippedExcluded} excluded, and {queuePreview.skippedRefundReview} refund-review sale{queuePreview.skippedRefundReview === 1 ? "" : "s"}.</p>
@@ -129,13 +117,9 @@ export function FiscalPreflightPanel({ data, invoices, queuePreview, timeZone, c
             <span className="rounded-full bg-sage/15 px-3 py-1 text-xs font-bold text-sage">{invoices.jobs.length} jobs</span>
           </div>
 
-          <div className="rounded-xl border border-line p-3">
-            <div className="mb-3 flex items-center justify-between"><a href={`/odoo?fiscal_month=${shiftMonth(month, -1)}${selected ? `&fiscal_run=${selected.id}` : ""}`} className="rounded border border-line px-2 py-1 text-xs font-bold text-cocoa">Previous</a><strong className="text-sm text-cocoa">{new Date(`${month}-01T00:00:00Z`).toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })}</strong><a href={`/odoo?fiscal_month=${shiftMonth(month, 1)}${selected ? `&fiscal_run=${selected.id}` : ""}`} className="rounded border border-line px-2 py-1 text-xs font-bold text-cocoa">Next</a></div>
-            <div className="grid grid-cols-7 gap-px overflow-hidden rounded-lg bg-line text-center text-[10px]"><>{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <div key={day} className="bg-sand px-1 py-1.5 font-bold uppercase text-taupe">{day}</div>)}</>{calendar.cells.map((cell, index) => <div key={cell?.date ?? `blank-${index}`} className="min-h-16 bg-white p-1 text-left"><span className="text-taupe">{cell?.date.slice(-2)}</span>{cell?.spans.map((span) => <div key={span.id} title={`${span.local_date_from} through ${span.local_date_to} · ${span.status}`} className={`mt-1 truncate rounded px-1 py-0.5 font-semibold ${statusStyle(span.status)}`}>{span.local_date_from === cell.date ? `${span.local_date_from} → ${span.local_date_to}` : span.status}</div>)}</div>)}</div>
-            {calendar.clippedSpans.length > 0 && <p className="mt-2 text-[10px] text-taupe">Visible processed ranges: {calendar.clippedSpans.map((span) => `${span.visible_from} through ${span.visible_to} (${span.status})`).join(" · ")}</p>}
-          </div>
-
-          {invoices.jobs.map((job) => {
+          <details className="rounded-xl border border-line" open={invoices.jobs.some((job) => !["completed", "cancelled"].includes(job.status))}>
+            <summary className="cursor-pointer px-3 py-2 text-xs font-bold text-cocoa">Invoice jobs ({invoices.jobs.length})</summary>
+            <div className="space-y-4 border-t border-line p-3">{invoices.jobs.map((job) => {
             const batches = invoices.batches.filter((batch) => batch.job_id === job.id);
             const batchIds = new Set(batches.map((batch) => batch.id));
             const documents = invoices.documents.filter((document) => batchIds.has(document.batch_id));
@@ -157,8 +141,9 @@ export function FiscalPreflightPanel({ data, invoices, queuePreview, timeZone, c
                 </div>
               </details>
             </div>;
-          })}
-          {!invoices.jobs.length && <p className="rounded-xl bg-cream p-4 text-sm text-taupe">No fiscal invoice jobs have been queued.</p>}
+            })}
+            {!invoices.jobs.length && <p className="rounded-xl bg-cream p-4 text-sm text-taupe">No fiscal invoice jobs have been queued.</p>}</div>
+          </details>
         </div>}
       </div>}
     </OdooAccordion>

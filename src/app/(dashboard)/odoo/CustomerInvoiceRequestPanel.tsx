@@ -24,10 +24,10 @@ export function CustomerInvoiceRequestPanel({ available, requests }: { available
         </div>
         <button className="mt-4 rounded-lg bg-terracotta px-4 py-2 text-xs font-bold text-white">Accept immutable request</button>
       </OdooSaveForm>
-      <div className="rounded-xl border border-line p-4"><h3 className="text-sm font-bold text-cocoa">Latest accepted requests</h3><div className="mt-3 max-h-[30rem] space-y-2 overflow-auto">
+      <details className="rounded-xl border border-line p-4"><summary className="cursor-pointer text-sm font-bold text-cocoa">Latest accepted requests ({requests.length})</summary><div className="mt-3 max-h-[30rem] space-y-2 overflow-auto">
         {requests.map((request) => <details key={request.id} className="rounded-lg bg-cream/60 p-3 text-xs"><summary className="cursor-pointer font-semibold text-cocoa">{request.order_code} · {request.fiscal_details.legal_name}</summary><dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-taupe"><dt>Tax ID</dt><dd>{request.fiscal_details.tax_id}</dd><dt>Email</dt><dd>{request.fiscal_details.email}</dd><dt>Address</dt><dd>{request.fiscal_details.address}, {request.fiscal_details.postal_code} {request.fiscal_details.city}, {request.fiscal_details.province} ({request.fiscal_details.country_code})</dd><dt>Hash</dt><dd className="break-all font-mono text-[9px]">{request.fiscal_details_sha256}</dd></dl></details>)}
         {!requests.length && <p className="text-sm text-taupe">No accepted requests yet.</p>}
-      </div></div>
+      </div></details>
     </div>}
   </OdooAccordion>;
 }

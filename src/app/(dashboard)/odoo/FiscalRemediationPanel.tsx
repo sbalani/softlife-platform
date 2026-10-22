@@ -47,8 +47,9 @@ export function FiscalRemediationPanel({ data, timeZone }: { data: FiscalRemedia
         {data.missingProducts.map((product) => <p key={product.odoo_product_id} className="mt-1 text-cocoa">Odoo {product.odoo_product_id}: {product.names.join(", ")}</p>)}
       </div>}
 
-      <div className="overflow-x-auto rounded-xl border border-line">
-        <table className="w-full min-w-[760px] text-left text-xs">
+      <details className="rounded-xl border border-line" open={data.products.length > 0}>
+        <summary className="cursor-pointer px-3 py-2 text-xs font-bold text-cocoa">Affected products ({data.products.length})</summary>
+        <div className="overflow-x-auto border-t border-line"><table className="w-full min-w-[760px] text-left text-xs">
           <thead className="bg-sand/50 uppercase text-taupe"><tr><th className="px-3 py-2">Product</th><th>Income account</th><th>Effective customer taxes</th></tr></thead>
           <tbody className="divide-y divide-line">{data.products.map((product) => <tr key={product.odoo_product_id}>
             <td className="px-3 py-3 text-cocoa"><strong>{product.names.join(", ")}</strong><span className="block text-[10px] text-taupe">Odoo {product.odoo_product_id}</span></td>
@@ -57,7 +58,8 @@ export function FiscalRemediationPanel({ data, timeZone }: { data: FiscalRemedia
           </tr>)}</tbody>
         </table>
         {!data.products.length && <p className="p-4 text-sm text-taupe">No reported active recipe products currently fail the effective account or tax checks.</p>}
-      </div>
+        </div>
+      </details>
 
       <OdooSaveForm action={requestFiscalProductRemediation} className="rounded-xl border border-danger/30 bg-danger/5 p-4">
         <input type="hidden" name="configuration_report_id" value={data.report?.id ?? ""} />

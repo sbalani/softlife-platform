@@ -39,8 +39,9 @@ export function StockSnapshotPanel({ snapshot, timeZone, sourceWarehouseId }: {
       <div className="rounded-xl bg-cream/60 p-3"><p className="text-[10px] font-bold uppercase text-taupe">Mirrored metadata</p><p className="mt-1 font-semibold text-cocoa">{snapshot?.products ?? 0} products / {snapshot?.warehouses ?? 0} warehouses</p><p className="text-[10px] text-taupe">{snapshot?.trackedProducts ?? 0} lot or serial tracked products</p></div>
     </div>
 
-    <div className="mt-4 overflow-x-auto rounded-xl border border-line">
-      <table className="w-full min-w-[600px] text-xs">
+    <details className="mt-4 rounded-xl border border-line">
+      <summary className="cursor-pointer px-3 py-2 text-xs font-bold text-cocoa">Warehouse balances ({snapshot?.warehouseRows.length ?? 0})</summary>
+      <div className="overflow-x-auto border-t border-line"><table className="w-full min-w-[600px] text-xs">
         <thead className="bg-sand/50 text-left uppercase text-taupe"><tr><th className="px-3 py-2">Warehouse</th><th>Odoo ID</th><th>Stock location</th><th>Product balances</th><th>Available lots</th></tr></thead>
         <tbody className="divide-y divide-line">{(snapshot?.warehouseRows ?? []).map((warehouse) => <tr key={warehouse.odoo_warehouse_id} className={warehouse.odoo_warehouse_id === sourceWarehouseId ? "bg-sage/5" : ""}>
           <td className="px-3 py-2 font-semibold text-cocoa">{warehouse.name}{warehouse.odoo_warehouse_id === sourceWarehouseId ? " (central source)" : ""}</td>
@@ -48,7 +49,8 @@ export function StockSnapshotPanel({ snapshot, timeZone, sourceWarehouseId }: {
         </tr>)}</tbody>
       </table>
       {!snapshot?.warehouseRows.length && <p className="p-3 text-sm text-warning">No Odoo warehouses are mirrored.</p>}
-    </div>
+      </div>
+    </details>
 
     <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_auto] lg:items-start">
       <div className="rounded-xl border border-line p-3 text-xs">

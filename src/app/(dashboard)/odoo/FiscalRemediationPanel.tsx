@@ -35,7 +35,7 @@ export function FiscalRemediationPanel({ data, timeZone }: { data: FiscalRemedia
             {request.claimed_at && <p>Odoo claimed it at {formatDateTime(request.claimed_at, timeZone)}.</p>}
             {request.completed_at && <p>Finished at {formatDateTime(request.completed_at, timeZone)}.</p>}
             {resultSummary && <p className="whitespace-pre-wrap text-cocoa">{resultSummary}</p>}
-            {request.error && <p className="whitespace-pre-wrap font-semibold text-danger">{request.error}</p>}
+            {request.error && request.error !== resultSummary && <p className="whitespace-pre-wrap font-semibold text-danger">{request.error}</p>}
             <p className="break-all font-mono text-[9px]">{request.id}</p>
           </div>}
         </div>

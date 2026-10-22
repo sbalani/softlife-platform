@@ -103,7 +103,7 @@ export function buildFiscalRemediationPreview(input: {
 
   if (!report.accepted || !evaluation.accepted) blockers.push("The latest Odoo report does not have an accepted top-level fiscal configuration.");
   if (!Number.isFinite(checkedAt) || now - checkedAt > 24 * 60 * 60_000 || checkedAt > now + 5 * 60_000) blockers.push("The latest Odoo fiscal configuration report must be no more than 24 hours old.");
-  if (Number(capabilities.fiscal_product_remediation) !== 1) blockers.push("The Odoo connector has not advertised fiscal product remediation capability 1.");
+  if (!(Number(capabilities.fiscal_product_remediation) >= 1)) blockers.push("The Odoo connector has not advertised fiscal product remediation capability 1 or newer.");
   if (!companyId || countryCode !== "ES" || currency !== settings.currency) blockers.push("The report must identify the exact Spanish Odoo company in the configured currency.");
   if (positiveInteger(customer.odoo_id) !== settings.customer_odoo_id) blockers.push("The report does not identify the configured final-consumer customer.");
   if (!accountId || accountCode !== settings.income_account_code || !["income", "income_other"].includes(accountType)) blockers.push("The report does not identify a valid target income account with the configured code and account type.");

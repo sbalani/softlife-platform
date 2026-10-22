@@ -12,7 +12,7 @@ test("confirmation adapter builds trusted payloads for every unfinished internal
   }));
   const client = {
     from(table: string) {
-      if (table === "fiscal_invoice_batches") return { select: () => ({ eq: () => ({ neq: () => ({ order: async () => ({ data: [{ id: "batch", batch_sequence: 1, status: "draft_ready", payload: { company: { odoo_id: 3 } } }], error: null }) }) }) }) };
+      if (table === "fiscal_invoice_batches") return { select: () => ({ eq: () => ({ neq: () => ({ order: async () => ({ data: [{ id: "batch", batch_sequence: 1, status: "draft_ready", contract_version: 2, payload: { company: { odoo_id: 3 } } }], error: null }) }) }) }) };
       return { select: () => ({ eq: () => ({ eq: () => ({ order: async () => ({ data: documents, error: null }) }) }) }) };
     },
     async rpc(name: string, args: Record<string, unknown>) {
@@ -22,7 +22,8 @@ test("confirmation adapter builds trusted payloads for every unfinished internal
   } as unknown as SupabaseClient;
   await enqueueFiscalInvoiceConfirmation(client, { jobId: "33333333-3333-4333-8333-333333333333", requestedBy: "actor" });
   assert.equal(calls[0].name, "queue_fiscal_invoice_job_confirmation");
-  const batches = calls[0].args.p_batches as { payload: { invoices: Record<string, unknown>[] } }[];
+  const batches = calls[0].args.p_batches as { payload: { contract_version: number; invoices: Record<string, unknown>[] } }[];
+  assert.equal(batches[0].payload.contract_version, 2);
   assert.deepEqual(batches[0].payload.invoices.map((invoice) => invoice.platform_invoice_id), ids);
 });
 

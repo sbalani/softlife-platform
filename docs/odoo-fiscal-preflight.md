@@ -8,8 +8,9 @@ The connector uses the existing internal Odoo authentication.
 
 - `GET /api/internal/odoo/fiscal-configuration` returns the expected journal, final-consumer customer, VAT rate, currency, income account, and legacy posting state.
 - `POST /api/internal/odoo/fiscal-configuration` appends an immutable report. Reports are never updated in place.
-- Invoice execution requires `capabilities.fiscal_invoice_draft_creation = 1` and `capabilities.fiscal_invoice_bulk_confirmation = 1`. Batches containing zero-value invoices also require a supported `capabilities.fiscal_zero_value_invoices` version: version 1 supports Free and Admin override vends, while version 2 also supports coupon (`串码支付`) vends.
-- The report referenced by the ready preflight must be accepted and no more than 24 hours old when drafts are queued.
+- Legacy invoice execution accepts `capabilities.fiscal_invoice_draft_creation >= 1` and `capabilities.fiscal_invoice_bulk_confirmation >= 1`. Batches containing zero-value invoices also require a supported `capabilities.fiscal_zero_value_invoices` version: version 1 supports Free and Admin override vends, while version 2 or newer also supports coupon (`串码支付`) vends.
+- Post-cutover execution requires exactly `capabilities.fiscal_invoice_allocation_v2 = 1` and `capabilities.manufacturing_transaction_sales = 1`. Included zero-value sources additionally require `fiscal_zero_value_invoices >= 1`, or `>= 2` for coupons.
+- The report referenced by the ready preflight must be accepted. Reports older than 24 hours are disclosed at execution while their exact accepted identity and hash remain enforced.
 
 Example report:
 
@@ -21,7 +22,9 @@ Example report:
     "fiscal_product_remediation": 1,
     "fiscal_invoice_draft_creation": 1,
     "fiscal_invoice_bulk_confirmation": 1,
-    "fiscal_zero_value_invoices": 2
+    "fiscal_zero_value_invoices": 2,
+    "fiscal_invoice_allocation_v2": 1,
+    "manufacturing_transaction_sales": 1
   },
   "company": { "odoo_id": 3, "country_code": "ES", "vat": "ESB12345678", "currency": "EUR" },
   "income_account": { "odoo_id": 77, "code": "701000", "account_type": "income" },
@@ -54,11 +57,41 @@ The income account and taxes are the effective values after product/category def
 
 ## Draft creation
 
-An admin explicitly selects and acknowledges one immutable preflight. The displayed rows, CSV, execution preview, and queued source always use that same run ID. A run with sale-level blockers may execute its eligible non-refund rows; blocked, excluded, and refund-review counts are disclosed before queueing and stored in the immutable batch decision summary. The alternative is to stop, correct the source, and freeze a replacement run before creating any drafts.
+### September 2026 cutover
 
-Global configuration blockers remain non-bypassable. The server also rejects no invoiceable sales, incompatible connector capabilities, missing or mismatched Odoo identifiers, more than 50,000 invoiceable sales, concurrent draft requests, duplicate source use, and overlapping invoice jobs. One immutable job partitions its sales deterministically into sequential connector requests of at most 500 invoices. Report age is shown as a warning at execution time because the exact accepted report identity and hash remain enforced. Client-supplied accounting configuration is never trusted.
+The immutable Madrid-local transaction date selects the contract. Transactions through 2026-08-31 retain fiscal contract v1. Transactions from 2026-09-01 use fiscal contract v2; mixed ranges are rejected. A v2 preflight must cover one complete, already closed `Europe/Madrid` calendar month.
 
-One eligible sale creates one `out_invoice` contract document and one durable `fiscal_invoice_documents` row. The platform UUID is the idempotency identity. Each invoice has one line containing the Odoo product, description, quantity, exact gross/base/VAT cents, and Odoo tax ID. The invoice SHA-256 is calculated over canonical JSON before `invoice_payload_sha256` is added; the outer SHA-256 covers the complete canonical payload.
+An admin records an accepted customer request against its source order before freezing the month. The legal name, tax ID, email, address, postal code, city, province, country, canonical hash, actor, and acceptance time are immutable. Only one request can be accepted for an order.
+
+Manufacturing contract v3 retains `payload_contract_version: 2` because its recipe schema remains v2, and identifies its transaction extension separately with `manufacturing_contract_version: 3`. Its frozen `connector_capabilities` are returned unchanged. It creates one supporting Odoo sales order and line for every transaction while preserving aggregate manufacturing orders. Each transaction sales order carries `recipe_version_id`, and each recipe aggregate carries `gross_sales_cents`, calculated as the sum of its per-order rounded `expected_total_cents`; the legacy decimal `gross_sales` field remains present. Its accepted callback must exactly cover the frozen platform order IDs and hashes. The durable `manufacturing_sale_order_documents` mapping is required by fiscal v2.
+
+```json
+{
+  "recipes": [{ "recipe_version_id": "uuid", "gross_sales": 1.005, "gross_sales_cents": 101 }],
+  "sales_orders": [{ "platform_order_id": "uuid", "recipe_version_id": "uuid", "expected_total_cents": 101 }]
+}
+```
+
+Fiscal v2 excludes refunded/refund-review transactions and administrative non-sales before supporting-SO validation; they never enter an individual or consolidated invoice and never receive a fiscal payload allocation. This remains true when a refund is recorded after manufacturing created its supporting sales order: the platform's current source state is authoritative. Database queue validation requires exact allocation coverage of every non-excluded eligible source, not excluded refunds. Legacy fiscal v1 classification remains unchanged. Fiscal v2 freezes the accepted request and supporting SO mapping into every eligible preflight item. The supporting mapping's `source_sha256` must still equal the source order's current `export_content_hash` both when the preflight is frozen and when it is queued. The allocation payload exposes this independently as `supporting_sale_order_source_sha256`; its existing `source_sha256` remains the fiscal preflight snapshot hash. A stale manufacturing mapping blocks the month.
+
+```json
+{
+  "source_order_id": "uuid",
+  "source_sha256": "fiscal-preflight-sha256",
+  "supporting_sale_order_id": "uuid",
+  "supporting_sale_order_source_sha256": "manufacturing-export-content-sha256"
+}
+```
+
+Fiscal v2 creates one individual invoice for each requested order and exactly one monthly consolidated invoice for every remaining transaction. Each source transaction has one immutable `fiscal_invoice_source_allocations` row and one invoice line linked to its supporting Odoo SO line. The consolidated invoice header always has `zero_value_reason: null`, including when it has only one zero-value source; each line retains its source reason. The consolidated invoice UUID, allocations, lines, customer identity, and hashes remain stable across retries. Legacy fiscal sale-link processing reads only contract v1 documents.
+
+Fiscal v2 intentionally fail-closes when a month would exceed 500 accounting documents or 5,000 total source/allocation lines across requested individual and consolidated invoices. These are supported monthly bounds; fiscal v2 does not partition an oversized month into sequential requests. Canonical draft payloads are bounded to 8,000,000 UTF-8 bytes, fiscal connector results and confirmation payloads to 500,000 bytes, and manufacturing v3 payloads/results to 5,000,000 bytes. The application and database both enforce these limits before reserving or completing work. Result-size constraints are introduced `NOT VALID` so historical rows are not scanned, while all new or changed rows remain constrained.
+
+An admin explicitly selects and acknowledges one immutable preflight. The displayed rows, CSV, execution preview, and queued source always use that same run ID. Fiscal v2 is whole-month fail-closed: if any source row is blocked, no eligible row from that month can execute. The source must be corrected and a replacement monthly preflight frozen before creating any drafts. Excluded non-sales remain disclosed separately.
+
+Global configuration blockers remain non-bypassable. The server also rejects no invoiceable sales, incompatible connector capabilities, missing or mismatched Odoo identifiers, concurrent draft requests, duplicate source use, and overlapping invoice jobs. Legacy fiscal v1 jobs partition sales deterministically into sequential connector requests of at most 500 invoices. Fiscal v2 instead enforces its monthly fail-closed document and source-line bounds. Report age is shown as a warning at execution time because the exact accepted report identity and hash remain enforced. Client-supplied accounting configuration is never trusted.
+
+Under contract v1, one eligible sale creates one `out_invoice` contract document and one durable `fiscal_invoice_documents` row. The platform UUID is the idempotency identity. Each invoice has one line containing the Odoo product, description, quantity, exact gross/base/VAT cents, and Odoo tax ID. The invoice SHA-256 is calculated over canonical JSON before `invoice_payload_sha256` is added; the outer SHA-256 covers the complete canonical payload.
 
 Completed Huaxin Free, Admin override, and coupon (`串码支付`) vends remain eligible with their product quantity and immutable source evidence, but use zero gross, tax-base, and VAT cents. A zero total from any other payment type remains blocked as invalid source data.
 
@@ -103,12 +136,14 @@ The admin selects exact platform document UUIDs currently in `draft` state and e
 
 Accepted confirmation results must exactly cover the request with matching identity fields, `state: "posted"`, a nonempty Odoo invoice `name`, and boolean `confirmed`. Only selected rows transition to `confirmation_pending` and then `posted`.
 
+The confirmation envelope uses the same contract version as its frozen draft batch, so fiscal v2 batches are confirmed with `contract_version: 2`.
+
 ## Durability and connector behavior
 
 - `fiscal_invoice_jobs` reserves one source preflight and period, records skipped-row decisions, and aggregates draft/posting progress. Legacy completed batches are backfilled as one-batch jobs without changing their documents or Odoo identities.
-- `fiscal_invoice_batches` records ordered internal requests of at most 500 invoices, their frozen payload/hash, queue IDs, status, errors, and audit timestamps. Only the first request is initially released; successful callbacks release the next request transactionally.
-- `fiscal_invoice_documents` records immutable preflight item/order identity, platform UUID, source and invoice hashes, exact cents, Odoo product/tax/date/reference, and returned Odoo move state/name.
-- One source order can appear in only one fiscal invoice document.
+- `fiscal_invoice_batches` records frozen payloads/hashes, queue IDs, status, errors, and audit timestamps. Legacy v1 may contain ordered internal requests of at most 500 invoices and releases them sequentially. Fiscal v2 creates one bounded monthly request and fails closed rather than partitioning an oversized month.
+- `fiscal_invoice_documents` records the contract version, invoice mode, platform UUID, invoice hash, exact cents, tax/date/reference, and returned Odoo move state/name. V1 retains direct source identity; v2 uses authoritative allocations.
+- One source order can appear in only one active v1 document or v2 allocation.
 - A GiST exclusion constraint prevents overlapping timestamp periods for all non-cancelled jobs. Failed jobs retain their source reservation.
 - Tables and transactional RPCs are service-role-only. Preflight immutability and existing v1 stock/remediation requests are unchanged.
 - Connector workers claim requests through `GET /api/internal/odoo/sync-requests` and complete the lease through `POST /api/internal/odoo/sync-requests/{requestId}/result`.

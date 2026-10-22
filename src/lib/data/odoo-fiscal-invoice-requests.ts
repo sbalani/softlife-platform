@@ -14,7 +14,7 @@ function throwFiscalQueueError(error: { code?: string; message?: string }): neve
 
 export async function enqueueFiscalInvoiceConfirmation(s: SupabaseClient, input: { jobId: string; requestedBy: string }) {
   const { data: batchesData, error: batchesError } = await s.from("fiscal_invoice_batches")
-    .select("id,batch_sequence,status,payload").eq("job_id", input.jobId).neq("status", "completed").order("batch_sequence");
+    .select("id,batch_sequence,status,payload,contract_version").eq("job_id", input.jobId).neq("status", "completed").order("batch_sequence");
   if (batchesError) throw batchesError;
   const batches = records(batchesData);
   if (!batches.length || batches.some((batch) => !["draft_ready", "confirmation_failed"].includes(String(batch.status)))) {
@@ -28,9 +28,11 @@ export async function enqueueFiscalInvoiceConfirmation(s: SupabaseClient, input:
     const documents = records(data);
     if (!documents.length || documents.length > 500) throw new Error("Each internal batch must contain between 1 and 500 draft invoices.");
     const company = (batch.payload as Record<string, unknown>).company as Record<string, unknown>;
+    const contractVersion = Number(batch.contract_version ?? 1);
+    if (contractVersion !== 1 && contractVersion !== 2) throw new Error("Unsupported fiscal invoice contract version.");
     const payload = buildFiscalInvoiceConfirmationPayload(Number(company.odoo_id), documents.map((document) => ({
       platform_invoice_id: String(document.id), odoo_move_id: Number(document.odoo_move_id), invoice_payload_sha256: String(document.invoice_payload_sha256),
-    })));
+    })), contractVersion);
     confirmationBatches.push({ batch_id: batch.id, payload, payload_sha256: sha256(payload) });
   }
   const { data, error } = await s.rpc("queue_fiscal_invoice_job_confirmation", {

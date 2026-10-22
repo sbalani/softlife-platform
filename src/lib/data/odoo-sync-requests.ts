@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canonicalJson } from "../odoo-sync-contract.ts";
-import { validateFiscalInvoiceResult } from "../odoo-fiscal-invoices.ts";
+import { FISCAL_INVOICE_MAX_RESULT_BYTES, validateFiscalInvoiceResult } from "../odoo-fiscal-invoices.ts";
 import { OdooContractError } from "./odoo-production.ts";
 import { validateFiscalSaleLinkResult, type FiscalSaleLinkPayload } from "../odoo-fiscal-sale-links.ts";
 
@@ -22,7 +22,7 @@ export async function completeOdooSyncRequest(s: SupabaseClient, requestId: stri
   if (sourceError) throw sourceError;
   const fiscalInvoiceKind = ["fiscal_invoice_draft_creation", "fiscal_invoice_bulk_confirmation"].includes(source.kind);
   const fiscalSaleLinkKind = source.kind === "fiscal_invoice_sale_link";
-  if (canonicalJson(body).length > (fiscalInvoiceKind || fiscalSaleLinkKind ? 250_000 : 20_000)) throw new OdooContractError("Sync result is too large", 413, "payload_too_large");
+  if (Buffer.byteLength(canonicalJson(body), "utf8") > (fiscalInvoiceKind ? FISCAL_INVOICE_MAX_RESULT_BYTES : fiscalSaleLinkKind ? 250_000 : 20_000)) throw new OdooContractError("Sync result is too large", 413, "payload_too_large");
   if (body.accepted && !fiscalInvoiceKind && !fiscalSaleLinkKind && (typeof body.summary !== "string" || !body.summary.trim())) {
     throw new OdooContractError("Successful sync results require a summary");
   }

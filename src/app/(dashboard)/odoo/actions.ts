@@ -13,6 +13,8 @@ import { inclusiveLocalDatePeriod, localDateTimeToUtc } from "@/lib/odoo-sync-co
 import { parseProductionRecipeAssignments } from "@/lib/production-recipe-assignments";
 import { enqueueFiscalSaleLinks } from "@/lib/data/odoo-fiscal-sale-links";
 import { isFiscalCalendarMonth } from "@/lib/odoo-fiscal-invoices";
+import { parseCustomerFiscalDetails } from "@/lib/customer-invoice-requests";
+import { recordAcceptedCustomerInvoiceRequest } from "@/lib/data/customer-invoice-requests";
 
 export type OdooActionResult = { ok: boolean; error?: string; message?: string; redirectTo?: string };
 
@@ -22,6 +24,22 @@ function actionError(error: unknown): OdooActionResult {
     return { ok: false, error: error.message };
   }
   return { ok: false, error: String(error) };
+}
+
+export async function recordCustomerInvoiceRequest(_state: OdooActionResult | null, fd: FormData): Promise<OdooActionResult> {
+  try {
+    const s = await productionAdminClient();
+    const actor = await getSessionProfile();
+    if (!actor || actor.role !== "admin") throw new Error("Admin access required.");
+    const orderCode = String(fd.get("order_code") ?? "").trim();
+    if (!orderCode || orderCode.length > 100) throw new Error("A valid source order code is required.");
+    const fiscalDetails = parseCustomerFiscalDetails(Object.fromEntries([
+      "legal_name", "tax_id", "email", "address", "postal_code", "city", "province", "country_code",
+    ].map((name) => [name, fd.get(name)])));
+    const result = await recordAcceptedCustomerInvoiceRequest(s, { orderCode, fiscalDetails, actorId: actor.id });
+    revalidatePath("/odoo");
+    return { ok: true, message: `Accepted invoice request ${result.request_id.slice(0, 8)} for ${orderCode}. These fiscal details are now immutable.` };
+  } catch (error) { return actionError(error); }
 }
 
 async function productionAdminClient() {

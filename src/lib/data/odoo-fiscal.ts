@@ -4,6 +4,7 @@ import {
   buildFiscalPreflightItem,
   evaluateFiscalConfiguration,
   summarizeFiscalPreflight,
+  currentSupportingSaleOrderSourceHash,
   type FiscalConfigurationEvaluation,
   type FiscalFinding,
   type FiscalPreflightItem,
@@ -12,6 +13,7 @@ import {
   type FiscalSettings,
 } from "../odoo-fiscal-preflight.ts";
 import { sha256 } from "../odoo-sync-contract.ts";
+import { closedFiscalMonth, FISCAL_V2_CUTOVER_DATE } from "../odoo-fiscal-invoices.ts";
 
 export type FiscalPreflightAdminData = {
   available: boolean;
@@ -90,6 +92,8 @@ export async function getFiscalConfigurationRequest(s: SupabaseClient) {
       fiscal_invoice_draft_creation: 1,
       fiscal_invoice_bulk_confirmation: 1,
       fiscal_zero_value_invoices: 2,
+      fiscal_invoice_allocation_v2: 1,
+      manufacturing_transaction_sales: 1,
     },
     required_product_fields: ["odoo_product_id", "sale_ok", "income_account_code", "sale_taxes"],
   };
@@ -115,7 +119,7 @@ async function fetchOrders(s: SupabaseClient, periodFrom: string, periodTo: stri
   const result: Record<string, unknown>[] = [];
   for (let offset = 0; ; offset += 1000) {
     const { data, error } = await s.from("huaxin_orders")
-      .select("id,order_code,out_trade_no,order_state,status_code,order_time,pay_time,price,nums,product_name,products,pay_type_raw,refund_status,refund_out_no,currency,machine_id,device_imei,machines(name)")
+      .select("id,order_code,out_trade_no,order_state,status_code,order_time,pay_time,price,nums,product_name,products,pay_type_raw,refund_status,refund_out_no,currency,machine_id,device_imei,export_content_hash,machines(name)")
       .or(`and(order_time.gte.${periodFrom},order_time.lt.${periodTo}),and(order_time.is.null,pay_time.gte.${periodFrom},pay_time.lt.${periodTo})`)
       .order("order_time").order("id").range(offset, offset + 999);
     if (error) throw error;
@@ -174,6 +178,15 @@ export async function createFiscalPreflight(s: SupabaseClient, input: {
   timeZone: string;
   requestedBy: string;
 }) {
+  const localDate = (value: string) => new Intl.DateTimeFormat("en-CA", {
+    timeZone: input.timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date(value));
+  const localFrom = localDate(input.periodFrom);
+  const localTo = localDate(input.periodTo);
+  const isV2 = localFrom >= FISCAL_V2_CUTOVER_DATE;
+  const fiscalMonth = isV2 ? closedFiscalMonth(input.periodFrom, input.periodTo, input.timeZone) : null;
+  if (isV2 && !fiscalMonth) throw new Error("Post-cutover fiscal preflight requires one full closed Europe/Madrid calendar month.");
+  if (!isV2 && localTo > FISCAL_V2_CUTOVER_DATE) throw new Error("A fiscal preflight cannot cross the September 2026 cutover.");
   const [settings, configuration, orders] = await Promise.all([
     getSettings(s), getLatestConfiguration(s), fetchOrders(s, input.periodFrom, input.periodTo),
   ]);
@@ -188,6 +201,15 @@ export async function createFiscalPreflight(s: SupabaseClient, input: {
   const recipes = await fetchRecipes(s, recipeIds);
   const paymentReferences = [...new Set(orders.map((order) => String(order.out_trade_no ?? "").trim()).filter(Boolean))];
   const paymentCounts = await countPaymentReferences(s, paymentReferences);
+  const orderIds = orders.map((order) => String(order.id));
+  const [requestsResult, supportingResult] = isV2 && orderIds.length ? await Promise.all([
+    s.from("customer_invoice_requests").select("id,source_order_id,fiscal_details,fiscal_details_sha256").in("source_order_id", orderIds),
+    s.from("manufacturing_sale_order_documents").select("id,source_order_id,source_sha256").in("source_order_id", orderIds),
+  ]) : [{ data: [], error: null }, { data: [], error: null }];
+  if (requestsResult.error) throw requestsResult.error;
+  if (supportingResult.error) throw supportingResult.error;
+  const requestsByOrder = new Map(((requestsResult.data as Record<string, unknown>[]) ?? []).map((row) => [String(row.source_order_id), row]));
+  const supportingByOrder = new Map(((supportingResult.data as Record<string, unknown>[]) ?? []).map((row) => [String(row.source_order_id), row]));
 
   let configurationEvaluation: FiscalConfigurationEvaluation | null = null;
   const globalFindings: FiscalFinding[] = [];
@@ -196,6 +218,10 @@ export async function createFiscalPreflight(s: SupabaseClient, input: {
   } else {
     configurationEvaluation = evaluateFiscalConfiguration(settings, configuration.payload as Record<string, unknown>);
     globalFindings.push(...configurationEvaluation.findings);
+    const capabilities = (configuration.payload as Record<string, unknown>).capabilities as Record<string, unknown> | undefined;
+    if (isV2 && (Number(capabilities?.fiscal_invoice_allocation_v2) !== 1 || Number(capabilities?.manufacturing_transaction_sales) !== 1)) {
+      globalFindings.push({ severity: "blocker", code: "fiscal_v2_capabilities_missing", message: "Odoo must advertise fiscal invoice allocation and manufacturing transaction-sales capabilities version 1 for post-cutover months." });
+    }
     if (Date.now() - Date.parse(String(configuration.checked_at)) > 24 * 60 * 60_000) {
       globalFindings.push({ severity: "warning", code: "odoo_configuration_stale", message: "The Odoo fiscal configuration check is more than 24 hours old. Review its age before execution." });
     }
@@ -206,7 +232,7 @@ export async function createFiscalPreflight(s: SupabaseClient, input: {
   const verifiedProducts = configurationEvaluation?.accepted ? productsFromEvaluation(configurationEvaluation) : null;
   const items = orders.map((order) => {
     const paymentReference = String(order.out_trade_no ?? "").trim();
-    return buildFiscalPreflightItem({
+    const item = buildFiscalPreflightItem({
       order,
       resolutions: resolutionsByOrder.get(String(order.id)) ?? [],
       recipes,
@@ -214,7 +240,29 @@ export async function createFiscalPreflight(s: SupabaseClient, input: {
       timeZone: input.timeZone,
       duplicatePaymentReference: Boolean(paymentReference && (paymentCounts.get(paymentReference) ?? 0) > 1),
       verifiedProducts,
+      contractVersion: isV2 ? 2 : 1,
     });
+    if (!isV2 || item.status !== "eligible") return item;
+    const request = requestsByOrder.get(item.order_id);
+    const support = supportingByOrder.get(item.order_id);
+    const supportingSourceHash = currentSupportingSaleOrderSourceHash(order.export_content_hash, support?.source_sha256);
+    if (!support || !supportingSourceHash) {
+      return { ...item, status: "blocked" as const, findings: [...item.findings, {
+        severity: "blocker" as const, code: support ? "supporting_sale_order_stale" : "supporting_sale_order_missing",
+        message: support
+          ? "The transaction changed after its manufacturing v3 supporting sales-order mapping was frozen."
+          : "The transaction has no completed manufacturing v3 supporting sales-order mapping.",
+      }] };
+    }
+    return {
+      ...item,
+      invoice_mode: request ? "individual_requested" as const : "monthly_consolidated" as const,
+      invoice_request_id: request ? String(request.id) : null,
+      customer_fiscal_details: request ? request.fiscal_details as Record<string, unknown> : null,
+      customer_fiscal_details_sha256: request ? String(request.fiscal_details_sha256) : null,
+      supporting_sale_order_id: String(support.id),
+      supporting_sale_order_source_sha256: supportingSourceHash,
+    };
   });
   const summary = summarizeFiscalPreflight(items);
   const settingsSnapshot = {
@@ -227,7 +275,7 @@ export async function createFiscalPreflight(s: SupabaseClient, input: {
     posting_enabled: settings.posting_enabled,
     updated_at: settings.updated_at,
   };
-  const { data, error } = await s.rpc("create_fiscal_preflight", {
+  const { data, error } = await s.rpc(isV2 ? "create_fiscal_preflight_v2" : "create_fiscal_preflight", {
     p_period_from: input.periodFrom,
     p_period_to: input.periodTo,
     p_time_zone: input.timeZone,
@@ -256,6 +304,12 @@ function presentItem(row: Record<string, unknown>): FiscalPreflightItem {
     odoo_product_id: row.odoo_product_id == null ? null : Number(row.odoo_product_id), refund_required: Boolean(row.refund_required),
     refund_reference: row.refund_reference == null ? null : String(row.refund_reference), findings: rows(row.findings) as FiscalFinding[],
     source_snapshot: row.source_snapshot as Record<string, unknown>, source_sha256: String(row.source_sha256),
+    invoice_mode: row.invoice_mode == null ? null : row.invoice_mode as FiscalPreflightItem["invoice_mode"],
+    invoice_request_id: row.invoice_request_id == null ? null : String(row.invoice_request_id),
+    customer_fiscal_details: row.customer_fiscal_details == null ? null : row.customer_fiscal_details as Record<string, unknown>,
+    customer_fiscal_details_sha256: row.customer_fiscal_details_sha256 == null ? null : String(row.customer_fiscal_details_sha256),
+    supporting_sale_order_id: row.supporting_sale_order_id == null ? null : String(row.supporting_sale_order_id),
+    supporting_sale_order_source_sha256: row.supporting_sale_order_source_sha256 == null ? null : String(row.supporting_sale_order_source_sha256),
   };
 }
 

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildFiscalPreflightItem,
   evaluateFiscalConfiguration,
+  currentSupportingSaleOrderSourceHash,
   fiscalCsvCell,
   fiscalGrossBreakdown,
   operationLocalDate,
@@ -53,7 +54,7 @@ const baseOrder = {
   device_imei: "imei-1",
 };
 
-function item(overrides: Record<string, unknown> = {}) {
+function item(overrides: Record<string, unknown> = {}, contractVersion: 1 | 2 = 1) {
   return buildFiscalPreflightItem({
     order: { ...baseOrder, ...overrides },
     resolutions: [{ line_index: 0, raw_name: "Frozen yogurt", raw_position: null, resolution_status: "resolved", recipe_id: "recipe-1" }],
@@ -61,6 +62,7 @@ function item(overrides: Record<string, unknown> = {}) {
     settings,
     timeZone: "Europe/Madrid",
     duplicatePaymentReference: false,
+    contractVersion,
     verifiedProducts: new Map([[101, { odoo_product_id: 101, sale_ok: true, income_account_code: "701000", sale_tax_rates: [10], sale_tax_country_codes: ["ES"], sale_taxes: [{ odoo_tax_id: 41, rate: 10, country_code: "ES", price_include: true, amount_type: "percent", type_tax_use: "sale" }] }]]),
   });
 }
@@ -70,6 +72,13 @@ test("evaluates a complete Odoo configuration with a standard sales journal", ()
   assert.equal(result.accepted, true);
   assert.deepEqual(result.findings, []);
   assert.equal(result.products[0].odoo_product_id, 101);
+});
+
+test("supporting sales-order mappings require the current manufacturing source hash", () => {
+  const hash = "a".repeat(64);
+  assert.equal(currentSupportingSaleOrderSourceHash(hash, hash), hash);
+  assert.equal(currentSupportingSaleOrderSourceHash("b".repeat(64), hash), null);
+  assert.equal(currentSupportingSaleOrderSourceHash(null, hash), null);
 });
 
 test("continues accepting the version 1 zero-value capability during rollout", () => {
@@ -234,6 +243,15 @@ test("flags refunded sales for credit-note review without changing the gross inv
     selected_orders: 1, eligible_invoices: 1, blocked_orders: 0, excluded_orders: 0,
     refunds_requiring_review: 1, warning_findings: 1, gross_cents: 380, tax_base_cents: 345, vat_cents: 35,
   });
+});
+
+test("fiscal v2 excludes refunds and administrative non-sales while preserving legacy classification", () => {
+  for (const overrides of [{ refund_status: "1", refund_out_no: "REFUND-1" }, { pay_type_raw: "自动制作" }]) {
+    assert.equal(item(overrides).status, "eligible");
+    const result = item(overrides, 2);
+    assert.equal(result.status, "excluded");
+    assert(result.findings.some((finding) => finding.code.endsWith("_excluded")));
+  }
 });
 
 test("builds a sorted remediation payload from the same effective product checks", () => {

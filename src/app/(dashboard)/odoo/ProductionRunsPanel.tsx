@@ -152,6 +152,7 @@ function RunDetails({ run, displayTimeZone, recipes, warehouseNames }: { run: Ru
           <div><dt className="font-bold uppercase text-taupe">Idempotency key</dt><dd className="break-all font-mono text-cocoa">{run.idempotency_key}</dd></div>
           <div><dt className="font-bold uppercase text-taupe">Frozen hash</dt><dd className="break-all font-mono text-cocoa">{run.payload_sha256 ?? "Not frozen"}</dd></div>
           <div><dt className="font-bold uppercase text-taupe">Reserved order rows</dt><dd className="font-semibold text-cocoa">{run.order_count}</dd></div>
+          <div><dt className="font-bold uppercase text-taupe">Manufacturing contract</dt><dd className="font-semibold text-cocoa">v{value(run.payload?.manufacturing_contract_version, "1")}</dd></div>
           <div><dt className="font-bold uppercase text-taupe">Run timezone</dt><dd className="text-cocoa">{run.time_zone}</dd></div>
           <div><dt className="font-bold uppercase text-taupe">Odoo document date</dt><dd className="text-cocoa">{run.document_date}</dd></div>
           <div><dt className="font-bold uppercase text-taupe">Created</dt><dd className="text-cocoa">{formatDateTime(run.created_at, displayTimeZone)}</dd></div>
@@ -163,6 +164,7 @@ function RunDetails({ run, displayTimeZone, recipes, warehouseNames }: { run: Ru
           {warehouses.length ? <div className="mt-2 space-y-3">{warehouses.map((warehouse, warehouseIndex) => (
             <div key={`${value(warehouse.odoo_warehouse_id)}-${warehouseIndex}`} className="rounded-lg bg-cream/60 p-3">
               <p className="font-bold text-cocoa">Warehouse Odoo ID {value(warehouse.odoo_warehouse_id)} · Sales customer configured in Odoo</p>
+              {records(warehouse.sales_orders).length > 0 && <p className="mt-1 text-[10px] font-semibold text-terracotta">{records(warehouse.sales_orders).length} frozen transaction supporting sales order{records(warehouse.sales_orders).length === 1 ? "" : "s"}</p>}
               <div className="mt-2 space-y-2">{records(warehouse.recipes).map((recipe, recipeIndex) => (
                 <div key={`${value(recipe.recipe_version_id)}-${recipeIndex}`} className="rounded border border-line bg-white p-2">
                   <p className="font-semibold text-cocoa">{value(recipe.name, "Unnamed recipe")} · {value(recipe.units_sold, "0")} units · {value(recipe.gross_sales, "0")} {value(recipe.currency, "")}</p>

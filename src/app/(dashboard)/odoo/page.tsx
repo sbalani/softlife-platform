@@ -18,6 +18,8 @@ import { isFiscalCalendarMonth } from "@/lib/odoo-fiscal-invoices";
 import { OdooAccordion } from "./OdooAccordion";
 import { getFiscalSaleLinkAdminData } from "@/lib/data/odoo-fiscal-sale-links";
 import { FiscalSaleLinkPanel } from "./FiscalSaleLinkPanel";
+import { getCustomerInvoiceRequestAdminData } from "@/lib/data/customer-invoice-requests";
+import { CustomerInvoiceRequestPanel } from "./CustomerInvoiceRequestPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -31,12 +33,13 @@ export default async function OdooPage({ searchParams }: { searchParams: Promise
   const monthParts = new Intl.DateTimeFormat("en", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit" }).formatToParts(new Date());
   const monthValues = new Map(monthParts.map((part) => [part.type, part.value]));
   const selectedFiscalMonth = isFiscalCalendarMonth(fiscalMonth) ? fiscalMonth : `${monthValues.get("year")}-${monthValues.get("month")}`;
-  const [{ skus, source: skuSource }, { lots, source: lotSource }, production, fiscal, remediation] = await Promise.all([
+  const [{ skus, source: skuSource }, { lots, source: lotSource }, production, fiscal, remediation, customerInvoiceRequests] = await Promise.all([
     getOdooSkus(),
     getOdooLots(),
     getProductionAdminData(),
     getFiscalPreflightAdminData(fiscalRun),
     actor?.role === "admin" ? getFiscalRemediationAdminData() : null,
+    actor?.role === "admin" ? getCustomerInvoiceRequestAdminData() : null,
   ]);
   const [invoices, queuePreview, saleLinks] = await Promise.all([
     getFiscalInvoiceAdminData(selectedFiscalMonth),
@@ -58,6 +61,8 @@ export default async function OdooPage({ searchParams }: { searchParams: Promise
       <StockSnapshotPanel snapshot={production.stockSnapshot} timeZone={tz} sourceWarehouseId={production.settings?.replenishment_source_odoo_warehouse_id ?? null} />
 
       <FiscalPreflightPanel data={fiscal} invoices={invoices} queuePreview={queuePreview} timeZone={tz} calendarMonth={selectedFiscalMonth} />
+
+      {customerInvoiceRequests && <CustomerInvoiceRequestPanel {...customerInvoiceRequests} />}
 
       {saleLinks && <FiscalSaleLinkPanel data={saleLinks} timeZone={tz} />}
 

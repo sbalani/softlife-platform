@@ -59,7 +59,7 @@ async function loadMonthDocuments(s: SupabaseClient, first: string, last: string
   for (let offset = 0; ; offset += 1000) {
     const result = await s.from("fiscal_invoice_documents")
       .select("id,source_order_id,invoice_payload,odoo_move_id,odoo_product_id,order_code,status,sale_link_status")
-      .gte("invoice_date", first).lte("invoice_date", last).eq("status", "posted")
+      .gte("invoice_date", first).lte("invoice_date", last).eq("status", "posted").eq("contract_version", 1)
       .order("invoice_date").order("id").range(offset, offset + 999);
     if (result.error) throw result.error;
     const page = records(result.data);

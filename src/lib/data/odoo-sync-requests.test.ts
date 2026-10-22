@@ -34,6 +34,16 @@ test("invoice completion validates identity then calls the generic completion RP
   assert.equal(rpcCalls.length, 1);
 });
 
+test("invoice completion bounds UTF-8 result bytes", async () => {
+  const payload = { invoices: [] };
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: { kind: "fiscal_invoice_draft_creation", payload }, error: null }) }) }) }),
+  } as unknown as SupabaseClient;
+  await assert.rejects(completeOdooSyncRequest(client, "d58e68dd-21a6-4a55-8cf4-d7a26bba1264", {
+    accepted: false, claim_token: "7cbd854e-3f88-4ca3-b86b-a4853adffbd3", error: "é".repeat(250_001),
+  }), /too large/);
+});
+
 test("remediation queue adapter writes only the constrained kind and frozen payload", async () => {
   const inserted: Record<string, unknown>[] = [];
   const client = { from(table: string) {

@@ -83,7 +83,19 @@ export type FiscalPreflightItem = {
   findings: FiscalFinding[];
   source_snapshot: Record<string, unknown>;
   source_sha256: string;
+  invoice_mode: "individual_requested" | "monthly_consolidated" | null;
+  invoice_request_id: string | null;
+  customer_fiscal_details: Record<string, unknown> | null;
+  customer_fiscal_details_sha256: string | null;
+  supporting_sale_order_id: string | null;
+  supporting_sale_order_source_sha256: string | null;
 };
+
+export function currentSupportingSaleOrderSourceHash(orderHash: unknown, mappingHash: unknown): string | null {
+  const current = String(orderHash ?? "").trim();
+  const mapped = String(mappingHash ?? "").trim();
+  return /^[0-9a-f]{64}$/.test(current) && current === mapped ? mapped : null;
+}
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -219,8 +231,9 @@ export function buildFiscalPreflightItem(input: {
   timeZone: string;
   duplicatePaymentReference: boolean;
   verifiedProducts: Map<number, FiscalProductCheck> | null;
+  contractVersion?: 1 | 2;
 }): FiscalPreflightItem {
-  const { order, resolutions, recipes, settings, timeZone, duplicatePaymentReference, verifiedProducts } = input;
+  const { order, resolutions, recipes, settings, timeZone, duplicatePaymentReference, verifiedProducts, contractVersion = 1 } = input;
   const findings: FiscalFinding[] = [];
   const orderId = text(order.id);
   const orderCode = text(order.order_code);
@@ -233,7 +246,9 @@ export function buildFiscalPreflightItem(input: {
   const refundRequired = refunded(order);
 
   if (!completed(order)) findings.push({ severity: "info", code: "not_completed", message: "Order is not completed and is excluded from invoicing." });
-  const excluded = findings.some((finding) => finding.code === "not_completed");
+  if (contractVersion === 2 && refundRequired) findings.push({ severity: "info", code: "refund_excluded", message: "Refunded transactions are excluded from fiscal v2 invoicing." });
+  if (contractVersion === 2 && isAdminOverride(payType)) findings.push({ severity: "info", code: "admin_override_excluded", message: "Administrative non-sale transactions are excluded from fiscal v2 invoicing." });
+  const excluded = findings.some((finding) => ["not_completed", "refund_excluded", "admin_override_excluded"].includes(finding.code));
 
   let recipe: FiscalRecipe | null = null;
   if (!excluded) {
@@ -326,6 +341,12 @@ export function buildFiscalPreflightItem(input: {
     findings,
     source_snapshot: sourceSnapshot,
     source_sha256: sha256(sourceSnapshot),
+    invoice_mode: null,
+    invoice_request_id: null,
+    customer_fiscal_details: null,
+    customer_fiscal_details_sha256: null,
+    supporting_sale_order_id: null,
+    supporting_sale_order_source_sha256: null,
   };
 }
 

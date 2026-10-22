@@ -3,12 +3,16 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceClient, isSupabaseConfigured } from "../supabase/server";
 import {
   buildFiscalInvoiceDraftBatches,
+  buildFiscalInvoiceDraftPayloadV2,
+  closedFiscalMonth,
+  fiscalV2WholeMonthBlocker,
   fiscalCalendarMonth,
   isFiscalCalendarMonth,
   type FiscalCalendarSpan,
   type FiscalInvoiceSourceItem,
+  type FiscalInvoiceSourceItemV2,
 } from "../odoo-fiscal-invoices.ts";
-import { zeroValueVendReason } from "../odoo-fiscal-preflight.ts";
+import { currentSupportingSaleOrderSourceHash, zeroValueVendReason } from "../odoo-fiscal-preflight.ts";
 import { sha256 } from "../odoo-sync-contract.ts";
 
 export type FiscalInvoiceDocumentAdmin = {
@@ -26,6 +30,8 @@ export type FiscalInvoiceDocumentAdmin = {
   odoo_state: string | null;
   odoo_name: string | null;
   invoice_payload_sha256: string;
+  contract_version: number;
+  invoice_mode: string | null;
 };
 
 export type FiscalInvoiceBatchAdmin = FiscalCalendarSpan & {
@@ -84,7 +90,7 @@ export type FiscalInvoiceQueuePreview = {
 };
 
 const EMPTY: FiscalInvoiceAdminData = { available: false, jobs: [], batches: [], documents: [] };
-const DOCUMENT_COLUMNS = "id,batch_id,invoice_date,order_code,reference,currency,gross_cents,tax_base_cents,vat_cents,status,odoo_move_id,odoo_state,odoo_name,invoice_payload_sha256";
+const DOCUMENT_COLUMNS = "id,batch_id,invoice_date,order_code,reference,currency,gross_cents,tax_base_cents,vat_cents,status,odoo_move_id,odoo_state,odoo_name,invoice_payload_sha256,contract_version,invoice_mode";
 
 function records(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object") : [];
@@ -133,7 +139,7 @@ async function loadPreflightRows(s: SupabaseClient, runId: string) {
   const result: Record<string, unknown>[] = [];
   for (let offset = 0; ; offset += 1000) {
     const pageResult = await s.from("fiscal_preflight_items")
-      .select("id,order_id,status,operation_at,operation_local_date,order_code,payment_reference,description,units,gross_cents,tax_base_cents,vat_cents,odoo_product_id,refund_required,source_sha256,source_snapshot")
+      .select("id,order_id,status,operation_at,operation_local_date,order_code,payment_reference,description,units,gross_cents,tax_base_cents,vat_cents,odoo_product_id,refund_required,source_sha256,source_snapshot,invoice_mode,invoice_request_id,customer_fiscal_details,customer_fiscal_details_sha256,supporting_sale_order_id,supporting_sale_order_source_sha256")
       .eq("run_id", runId).order("operation_at").order("order_id").range(offset, offset + 999);
     if (pageResult.error) throw pageResult.error;
     const page = records(pageResult.data);
@@ -144,7 +150,7 @@ async function loadPreflightRows(s: SupabaseClient, runId: string) {
 
 async function loadFiscalInvoiceSource(s: SupabaseClient, preflightRunId: string) {
   const { data: run, error: runError } = await s.from("fiscal_preflight_runs")
-    .select("id,status,period_from,period_to,time_zone,currency,configuration_report_id,global_findings,summary")
+    .select("id,status,period_from,period_to,time_zone,currency,configuration_report_id,global_findings,summary,contract_version,local_month")
     .eq("id", preflightRunId).maybeSingle();
   if (runError) throw runError;
   if (!run) throw new Error("The selected fiscal preflight does not exist.");
@@ -157,8 +163,31 @@ async function loadFiscalInvoiceSource(s: SupabaseClient, preflightRunId: string
     s.from("odoo_fiscal_settings").select("journal_code,customer_odoo_id,currency,tax_treatment_approved").eq("singleton", true).single(),
   ]);
   for (const result of [reportResult, settingsResult]) if (result.error) throw result.error;
+  const wholeMonthBlocker = Number(run.contract_version ?? 1) === 2 ? fiscalV2WholeMonthBlocker(preflightRows) : null;
+  if (wholeMonthBlocker) throw new Error(wholeMonthBlocker);
+  const supportingIds = [...new Set(preflightRows.map((row) => String(row.supporting_sale_order_id ?? "")).filter(Boolean))];
+  const orderIds = Number(run.contract_version ?? 1) === 2 ? preflightRows.map((row) => String(row.order_id)) : [];
+  const supportingRows: Record<string, unknown>[] = [];
+  const currentOrderRows: Record<string, unknown>[] = [];
+  for (let offset = 0; offset < Math.max(supportingIds.length, orderIds.length); offset += 200) {
+    const [supportingResult, currentOrdersResult] = await Promise.all([
+      supportingIds.length > offset
+        ? s.from("manufacturing_sale_order_documents").select("id,source_order_id,source_sha256,odoo_sale_order_id,odoo_sale_order_line_id").in("id", supportingIds.slice(offset, offset + 200))
+        : Promise.resolve({ data: [], error: null }),
+      orderIds.length > offset
+        ? s.from("huaxin_orders").select("id,export_content_hash").in("id", orderIds.slice(offset, offset + 200))
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (supportingResult.error) throw supportingResult.error;
+    if (currentOrdersResult.error) throw currentOrdersResult.error;
+    supportingRows.push(...((supportingResult.data as Record<string, unknown>[]) ?? []));
+    currentOrderRows.push(...((currentOrdersResult.data as Record<string, unknown>[]) ?? []));
+  }
+  const supportingById = new Map(supportingRows.map((row) => [String(row.id), row]));
+  const currentOrderHashById = new Map(currentOrderRows.map((row) => [String(row.id), row.export_content_hash]));
   const eligibleRows = preflightRows.filter((item) => item.status === "eligible");
-  const allItems = eligibleRows.map((item): FiscalInvoiceSourceItem & { operation_at: string } => ({
+  const allItems = eligibleRows.map((item): (FiscalInvoiceSourceItem | FiscalInvoiceSourceItemV2) & { operation_at: string } => {
+    const base = {
     id: String(item.id), order_id: String(item.order_id), operation_at: String(item.operation_at),
     operation_local_date: String(item.operation_local_date), order_code: String(item.order_code),
     payment_reference: item.payment_reference == null ? null : String(item.payment_reference),
@@ -166,7 +195,24 @@ async function loadFiscalInvoiceSource(s: SupabaseClient, preflightRunId: string
     tax_base_cents: Number(item.tax_base_cents), vat_cents: Number(item.vat_cents),
     odoo_product_id: Number(item.odoo_product_id), refund_required: Boolean(item.refund_required), source_sha256: String(item.source_sha256),
     zero_value_reason: zeroValueVendReason(String((item.source_snapshot as Record<string, unknown>)?.pay_type_raw ?? "") || null),
-  }));
+    };
+    if (Number(run.contract_version ?? 1) !== 2) return base;
+    const supporting = supportingById.get(String(item.supporting_sale_order_id));
+    if (!supporting) throw new Error(`Frozen supporting sales-order mapping is missing for ${String(item.order_code)}.`);
+    const supportingSourceHash = currentSupportingSaleOrderSourceHash(currentOrderHashById.get(String(item.order_id)), supporting.source_sha256);
+    if (!supportingSourceHash || supportingSourceHash !== item.supporting_sale_order_source_sha256 || String(supporting.source_order_id) !== String(item.order_id)) {
+      throw new Error(`Frozen supporting sales-order mapping is stale for ${String(item.order_code)}.`);
+    }
+    return { ...base,
+      invoice_mode: String(item.invoice_mode) as FiscalInvoiceSourceItemV2["invoice_mode"],
+      invoice_request_id: item.invoice_request_id == null ? null : String(item.invoice_request_id),
+      customer_fiscal_details: item.customer_fiscal_details as FiscalInvoiceSourceItemV2["customer_fiscal_details"],
+      customer_fiscal_details_sha256: item.customer_fiscal_details_sha256 == null ? null : String(item.customer_fiscal_details_sha256),
+      supporting_sale_order_id: String(item.supporting_sale_order_id),
+      supporting_sale_order_source_sha256: supportingSourceHash,
+      odoo_sale_order_id: Number(supporting.odoo_sale_order_id), odoo_sale_order_line_id: Number(supporting.odoo_sale_order_line_id),
+    };
+  });
   const skippedRefundReview = allItems.filter((item) => item.refund_required).length;
   const items = allItems.filter((item) => !item.refund_required);
   if (!items.length) throw new Error("No invoiceable sales remain after blocked, excluded, and refund-review rows are skipped.");
@@ -184,6 +230,31 @@ async function loadFiscalInvoiceSource(s: SupabaseClient, preflightRunId: string
 
 export async function enqueueFiscalInvoiceDraftBatch(s: SupabaseClient, input: { preflightRunId: string; requestedBy: string }) {
   const source = await loadFiscalInvoiceSource(s, input.preflightRunId);
+  if (Number(source.run.contract_version ?? 1) === 2) {
+    const month = closedFiscalMonth(String(source.run.period_from), String(source.run.period_to), String(source.run.time_zone));
+    if (!month || month.month !== source.run.local_month) throw new Error("Fiscal v2 requires one closed Europe/Madrid calendar month.");
+    const items = source.items as FiscalInvoiceSourceItemV2[];
+    const documentCount = items.filter((item) => item.invoice_mode === "individual_requested").length
+      + (items.some((item) => item.invoice_mode === "monthly_consolidated") ? 1 : 0);
+    const built = buildFiscalInvoiceDraftPayloadV2({
+      report: source.report, currency: String(source.run.currency), journalCode: String(source.settings.journal_code),
+      anonymousCustomerOdooId: Number(source.settings.customer_odoo_id), localMonth: month.month,
+      monthInvoiceDate: month.invoiceDate, items, platformInvoiceIds: Array.from({ length: documentCount }, () => randomUUID()),
+      platformAllocationIds: items.map(() => randomUUID()),
+    });
+    if (!built.payload || !built.payloadSha256) throw new Error(built.blockers[0] ?? "Fiscal invoice draft creation is blocked.");
+    const documents = built.payload.invoices.map((invoice) => ({
+      platform_invoice_id: invoice.platform_invoice_id, invoice_payload: invoice,
+      invoice_payload_sha256: invoice.invoice_payload_sha256,
+    }));
+    const { data, error } = await s.rpc("create_fiscal_invoice_job_v2", {
+      p_preflight_run_id: source.run.id, p_configuration_report_id: source.report.id,
+      p_requested_by: input.requestedBy, p_payload: built.payload, p_payload_sha256: built.payloadSha256,
+      p_documents: documents,
+    });
+    if (error) throwFiscalQueueError(error);
+    return data as { job_id: string; request_id: string; document_count: number; allocation_count: number; batch_count: number; skipped_blocked: number; skipped_excluded: number; skipped_refund_review: number };
+  }
   const platformInvoiceIds = source.items.map(() => randomUUID());
   const built = buildFiscalInvoiceDraftBatches({
     now: Date.now(), report: source.report, currency: String(source.run.currency),
@@ -222,6 +293,37 @@ export async function getFiscalInvoiceQueuePreview(preflightRunId: string): Prom
   try {
     const s = await createServiceClient();
     const source = await loadFiscalInvoiceSource(s, preflightRunId);
+    if (Number(source.run.contract_version ?? 1) === 2) {
+      const month = closedFiscalMonth(String(source.run.period_from), String(source.run.period_to), String(source.run.time_zone));
+      const items = source.items as FiscalInvoiceSourceItemV2[];
+      if (!month || month.month !== source.run.local_month) return { ...fallback, blockers: ["Fiscal v2 requires one closed Europe/Madrid calendar month."] };
+      const documentCount = items.filter((item) => item.invoice_mode === "individual_requested").length
+        + (items.some((item) => item.invoice_mode === "monthly_consolidated") ? 1 : 0);
+      const built = buildFiscalInvoiceDraftPayloadV2({
+        report: source.report, currency: String(source.run.currency), journalCode: String(source.settings.journal_code),
+        anonymousCustomerOdooId: Number(source.settings.customer_odoo_id), localMonth: month.month,
+        monthInvoiceDate: month.invoiceDate, items, platformInvoiceIds: Array.from({ length: documentCount }, () => randomUUID()),
+        platformAllocationIds: items.map(() => randomUUID()),
+      });
+      const [overlapResult, activeRequestResult] = await Promise.all([
+        s.from("fiscal_invoice_jobs").select("id,status,local_date_from,local_date_to")
+          .lt("period_from", String(source.run.period_to)).gt("period_to", String(source.run.period_from))
+          .neq("status", "cancelled").limit(1).maybeSingle(),
+        s.from("odoo_sync_requests").select("id,status").eq("kind", "fiscal_invoice_draft_creation")
+          .in("status", ["pending", "processing"]).limit(1).maybeSingle(),
+      ]);
+      if (overlapResult.error) throw overlapResult.error;
+      if (activeRequestResult.error) throw activeRequestResult.error;
+      const blockers = [...built.blockers];
+      if (overlapResult.data) blockers.push(`An existing ${overlapResult.data.status} invoice batch already covers this month.`);
+      if (activeRequestResult.data) blockers.push("Another Odoo invoice-draft request is already pending or processing.");
+      const warnings = Date.now() - Date.parse(source.report.checked_at) > 24 * 60 * 60_000
+        ? ["The immutable Odoo configuration report is more than 24 hours old. Its accepted identities and hash will still be enforced."] : [];
+      return { ...fallback, queueable: blockers.length === 0, blockers, warnings,
+        invoiceCount: documentCount, skippedBlocked: source.skippedBlocked, skippedExcluded: source.skippedExcluded,
+        skippedRefundReview: source.skippedRefundReview, internalBatchCount: built.payload ? 1 : 0,
+        internalBatchSizes: built.payload ? [built.payload.invoices.length] : [] };
+    }
     const platformInvoiceIds = source.items.map(() => randomUUID());
     const built = buildFiscalInvoiceDraftBatches({
       now: Date.now(), report: source.report, currency: String(source.run.currency),
@@ -291,11 +393,14 @@ export async function getFiscalInvoiceAdminData(month: string): Promise<FiscalIn
     const documentRows = batches.length ? await loadAdminDocuments(s, batches.map((batch) => batch.id)) : [];
     const documents = documentRows.map((document): FiscalInvoiceDocumentAdmin => ({
       id: String(document.id), batch_id: String(document.batch_id), invoice_date: String(document.invoice_date),
-      order_code: String(document.order_code), reference: String(document.reference), currency: String(document.currency),
+      order_code: document.order_code == null
+        ? document.invoice_mode === "monthly_consolidated" ? "Monthly consolidated" : "Customer requested"
+        : String(document.order_code), reference: String(document.reference), currency: String(document.currency),
       gross_cents: Number(document.gross_cents), tax_base_cents: Number(document.tax_base_cents), vat_cents: Number(document.vat_cents),
       status: String(document.status), odoo_move_id: document.odoo_move_id == null ? null : Number(document.odoo_move_id),
       odoo_state: document.odoo_state == null ? null : String(document.odoo_state), odoo_name: document.odoo_name == null ? null : String(document.odoo_name),
       invoice_payload_sha256: String(document.invoice_payload_sha256),
+      contract_version: Number(document.contract_version ?? 1), invoice_mode: document.invoice_mode == null ? null : String(document.invoice_mode),
     }));
     const jobs = rawJobs.map((job): FiscalInvoiceJobAdmin => {
       const childIds = new Set(batches.filter((batch) => batch.job_id === String(job.id)).map((batch) => batch.id));

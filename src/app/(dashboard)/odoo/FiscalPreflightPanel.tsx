@@ -14,8 +14,12 @@ function currentMonth(timeZone: string) {
   const value = new Map(parts.map((part) => [part.type, part.value]));
   const year = Number(value.get("year"));
   const month = Number(value.get("month"));
-  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  return { from: `${year}-${String(month).padStart(2, "0")}-01`, to: `${year}-${String(month).padStart(2, "0")}-${lastDay}` };
+  const previous = new Date(Date.UTC(year, month - 2, 1));
+  const previousYear = previous.getUTCFullYear();
+  const previousMonth = previous.getUTCMonth() + 1;
+  const lastDay = new Date(Date.UTC(previousYear, previousMonth, 0)).getUTCDate();
+  const prefix = `${previousYear}-${String(previousMonth).padStart(2, "0")}`;
+  return { from: `${prefix}-01`, to: `${prefix}-${lastDay}` };
 }
 
 function statusStyle(status: string) {
@@ -48,7 +52,7 @@ export function FiscalPreflightPanel({ data, invoices, queuePreview, timeZone, c
   const month = isFiscalCalendarMonth(calendarMonth) ? calendarMonth : defaults.from.slice(0, 7);
   const calendar = fiscalCalendarMonth(month, invoices.jobs);
   return (
-    <OdooAccordion title="Fiscal invoicing" description="Freeze completed vending sales, create one durable Odoo customer-invoice draft per eligible sale, then explicitly confirm selected drafts." badge={<span className={`rounded-full px-3 py-1 text-xs font-bold ${data.available && invoices.available ? "bg-sage/15 text-sage" : "bg-warning/15 text-warning"}`}>{data.available && invoices.available ? "Execution contract ready" : "Migration pending"}</span>}>
+    <OdooAccordion title="Fiscal invoicing" description="Freeze completed sales. Legacy periods create one draft per sale; post-cutover months create requested invoices plus one consolidated remainder invoice." badge={<span className={`rounded-full px-3 py-1 text-xs font-bold ${data.available && invoices.available ? "bg-sage/15 text-sage" : "bg-warning/15 text-warning"}`}>{data.available && invoices.available ? "Execution contract ready" : "Migration pending"}</span>}>
       {!data.available || !data.settings ? <p className="rounded-xl bg-warning/10 px-4 py-3 text-sm text-warning">Apply the fiscal preflight migration before running this control.</p> : <div className="space-y-5">
         <div className="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-6">
           <div className="rounded-xl bg-cream p-3"><span className="block uppercase text-taupe">Journal</span><strong className="text-cocoa">{data.settings.journal_code}</strong></div>

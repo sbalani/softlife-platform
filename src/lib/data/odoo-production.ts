@@ -56,6 +56,7 @@ export function describeManufacturingPreparationError(error: unknown): string {
 type CatalogPosition = SyncCursor | "done" | null;
 type CatalogCursor = { ingredients: CatalogPosition; recipes: CatalogPosition; updatedAfter: string | null };
 type PeriodInput = { idempotencyKey: string; localFrom: string; localTo: string; timeZone: string; initiatedBy: "odoo" | "platform" };
+const MANUFACTURING_V3_CUTOVER = "2026-09-01";
 type ProductRow = {
   id: string; name: string; type: string; consumption_type: string | null; odoo_id: number | null;
   default_portion_size: number | null; default_portion_uom: string | null; updated_at: string;
@@ -255,6 +256,23 @@ export function parsePeriodInput(body: Record<string, unknown>): PeriodInput & {
   return { ...input, periodFrom, periodTo, documentDate: productionDocumentDate(input.localTo), fingerprint };
 }
 
+export function manufacturingContractVersion(input: { localFrom: string; localTo: string; timeZone: string }): 2 | 3 {
+  const from = input.localFrom.slice(0, 10);
+  const to = input.localTo.slice(0, 10);
+  if (to <= MANUFACTURING_V3_CUTOVER) return 2;
+  if (from >= MANUFACTURING_V3_CUTOVER && input.timeZone === "Europe/Madrid") return 3;
+  throw new OdooContractError("A production run cannot cross the September 2026 cutover and post-cutover runs must use Europe/Madrid.");
+}
+
+export function manufacturingGrossCents(value: unknown) {
+  const match = String(value ?? "").trim().match(/^\+?(\d+)(?:\.(\d+))?$/);
+  if (!match) return null;
+  const fraction = match[2] ?? "";
+  let cents = BigInt(match[1]) * BigInt(100) + BigInt((fraction + "00").slice(0, 2));
+  if (Number(fraction[2] ?? "0") >= 5) cents += BigInt(1);
+  return cents <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(cents) : null;
+}
+
 function localDateTimeAt(timestamp: string, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en", {
     timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
@@ -426,6 +444,7 @@ export async function enqueueManufacturingPeriod(s: SupabaseClient, body: Record
 
 export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record<string, unknown>, caller: "odoo" | "platform" = "odoo", workerClaim?: { exportId: string; claimToken: string }) {
   const input = parsePeriodInput(body);
+  const contractVersion = manufacturingContractVersion(input);
   if (input.initiatedBy !== caller) throw new OdooContractError("The run initiator does not match the authenticated caller", 403, "wrong_initiator");
   const { data: existing, error: existingError } = workerClaim
     ? await s.from("manufacturing_period_exports").select("*").eq("id", workerClaim.exportId).maybeSingle()
@@ -494,7 +513,7 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
     });
     const membershipRows: Record<string, unknown>[] = [];
     for (const rows of membershipResults) membershipRows.push(...rows);
-    const [productsResult, recipesResult, assignmentsResult, defaultsResult, machineOverridesResult, settingsResult, warehousesResult, pendingPushesResult] = await Promise.all([
+    const [productsResult, recipesResult, assignmentsResult, defaultsResult, machineOverridesResult, settingsResult, warehousesResult, pendingPushesResult, capabilityReportResult] = await Promise.all([
       s.from("products").select("id,name,type,consumption_type,odoo_id,default_portion_size,default_portion_uom,updated_at,product_aliases(alias,normalized_alias),odoo_products(uom,package_content_quantity,package_content_uom),production_product_consumption_overrides(quantity,uom)"),
       s.from("recipes").select("id,name,odoo_finished_product_id,recipe_components(product_id)").eq("active", true),
       machineIds.length ? s.from("machine_menu_recipe_assignments").select("machine_id,menu_kind,menu_position,recipe_id,valid_from,valid_to,recipes(name)").in("machine_id", machineIds).lt("valid_from", input.periodTo).or(`valid_to.is.null,valid_to.gt.${input.periodFrom}`) : Promise.resolve({ data: [], error: null }),
@@ -503,8 +522,11 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       s.from("production_settings").select("cup_odoo_product_id,currency,replenishment_source_odoo_warehouse_id").eq("singleton", true).single(),
       s.from("odoo_warehouses").select("odoo_id,name,sales_customer_odoo_id,stock_location_id"),
       machineIds.length ? s.from("menu_recipe_push_operations").select("machine_id,assignments").in("machine_id", machineIds).eq("status", "pending") : Promise.resolve({ data: [], error: null }),
+      contractVersion === 3
+        ? s.from("odoo_fiscal_configuration_reports").select("payload").eq("accepted", true).order("created_at", { ascending: false }).limit(1).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ]);
-    for (const result of [productsResult, recipesResult, assignmentsResult, defaultsResult, machineOverridesResult, settingsResult, warehousesResult, pendingPushesResult]) if (result.error) throw result.error;
+    for (const result of [productsResult, recipesResult, assignmentsResult, defaultsResult, machineOverridesResult, settingsResult, warehousesResult, pendingPushesResult, capabilityReportResult]) if (result.error) throw result.error;
     if (!settingsResult.data) throw new OdooContractError("Production settings are unavailable", 503, "not_configured");
     const settings = settingsResult.data;
     const products = (productsResult.data as unknown as ProductRow[]) ?? [];
@@ -553,6 +575,12 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       for (const assignment of operation.assignments ?? []) pendingMenuKeys.add(`${operation.machine_id}:${String(assignment.menu_kind)}:${String(assignment.menu_position)}`);
     }
     const blocked: Record<string, unknown>[] = [];
+    if (contractVersion === 3) {
+      const capabilities = ((capabilityReportResult.data?.payload as Record<string, unknown> | undefined)?.capabilities as Record<string, unknown> | undefined) ?? {};
+      if (Number(capabilities.manufacturing_transaction_sales) !== 1 || Number(capabilities.fiscal_invoice_allocation_v2) !== 1) {
+        blocked.push({ problem_code: "missing_transaction_sales_capability", message: "Odoo must advertise manufacturing transaction-sales and fiscal invoice allocation capabilities version 1 before preparing a post-cutover run." });
+      }
+    }
     if (orders.length === 0) blocked.push({
       problem_code: "no_eligible_orders",
       message: "No completed, non-refunded customer orders exist in the selected period.",
@@ -622,6 +650,9 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
       const warehouseId = Number(order.odoo_warehouse_id_at_sale);
       const warehouse = warehouseMap.get(warehouseId);
       if (!warehouseId || !warehouse) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "missing_warehouse_assignment" }); continue; }
+      if (contractVersion === 3 && (!Number.isInteger(Number(warehouse.sales_customer_odoo_id)) || Number(warehouse.sales_customer_odoo_id) <= 0)) {
+        blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "missing_warehouse_customer" }); continue;
+      }
       const currency = String(order.currency ?? settings.currency ?? "EUR");
       if (currency !== settings.currency) { blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "currency_mismatch", currency, expected_currency: settings.currency }); continue; }
       const versionKey = `${recipeId}:${machineId}`;
@@ -649,16 +680,34 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
         row.recipe_version_id = versionResult.version.id;
       }
       const recipe = await getRecipeMetadata(recipeId);
+       const grossCents = contractVersion === 3 ? manufacturingGrossCents(order.price) : null;
+      if (contractVersion === 3 && (grossCents === null || grossCents < 0 || !Number.isInteger(Number(recipe.odoo_finished_product_id)) || Number(recipe.odoo_finished_product_id) <= 0)) {
+        blocked.push({ order_id: orderId, order_code: orderCode, machine: machineName, problem_code: "invalid_supporting_sale_order" });
+        continue;
+      }
       const groupKey = `${warehouseId}:${versionResult.version.id}:${currency}`;
       const current = groups.get(groupKey) ?? {
         odoo_warehouse_id: warehouseId, odoo_customer_id: warehouse.sales_customer_odoo_id, warehouse_name: warehouse.name,
         recipe_id: recipeId, recipe_version_id: versionResult.version.id, version: versionResult.version.version,
         name: recipe.name, odoo_finished_product_id: recipe.odoo_finished_product_id, units_sold: 0, gross_sales: 0,
-        currency, components: versionResult.components, source_orders: [],
+        ...(contractVersion === 3 ? { gross_sales_cents: 0 } : {}),
+        currency, components: versionResult.components, source_orders: [], sales_orders: [],
       };
       current.units_sold = Number(current.units_sold) + Number(order.nums);
       current.gross_sales = Number(current.gross_sales) + Number(order.price ?? 0);
+      if (contractVersion === 3) current.gross_sales_cents = Number(current.gross_sales_cents) + grossCents!;
       (current.source_orders as Record<string, unknown>[]).push(manufacturingSourceOrder(order));
+      if (contractVersion === 3) {
+        (current.sales_orders as Record<string, unknown>[]).push({
+          platform_order_id: orderId, platform_line_key: `${orderId}:1`, source_sha256: String(order.export_content_hash),
+          recipe_version_id: String(versionResult.version.id),
+          order_code: orderCode, order_date: localDateTimeAt(String(order.order_time), input.timeZone).slice(0, 10),
+          customer_odoo_id: Number(warehouse.sales_customer_odoo_id), currency, reference: orderCode,
+          expected_total_cents: grossCents!,
+          lines: [{ platform_line_key: `${orderId}:1`, odoo_product_id: Number(recipe.odoo_finished_product_id),
+            description: recipe.name, quantity: Number(order.nums), gross_cents: grossCents! }],
+        });
+      }
       groups.set(groupKey, current);
     }
     if (resolutionRows.length) {
@@ -670,7 +719,7 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
     const warehouses = new Map<number, Record<string, unknown>>();
     for (const group of groups.values()) {
       const warehouseId = Number(group.odoo_warehouse_id);
-      const warehouse = warehouses.get(warehouseId) ?? { odoo_warehouse_id: warehouseId, odoo_customer_id: group.odoo_customer_id, source_orders: [], recipes: [] };
+      const warehouse = warehouses.get(warehouseId) ?? { odoo_warehouse_id: warehouseId, odoo_customer_id: group.odoo_customer_id, source_orders: [], sales_orders: [], recipes: [] };
       const components = (group.components as { odoo_product_id: number; quantity: number; uom: string; stock_quantity: number; stock_uom: string; package_content_quantity: number | null; package_content_uom: string | null }[]).map((component) => ({
         odoo_product_id: component.odoo_product_id, quantity_per_unit: component.quantity,
         total_quantity: component.quantity * Number(group.units_sold), uom: component.uom,
@@ -679,8 +728,10 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
         package_content_quantity: component.package_content_quantity, package_content_uom: component.package_content_uom,
       }));
       (warehouse.source_orders as Record<string, unknown>[]).push(...(group.source_orders as Record<string, unknown>[]));
+      (warehouse.sales_orders as Record<string, unknown>[]).push(...(group.sales_orders as Record<string, unknown>[]));
       const recipeGroup = { ...group };
       delete recipeGroup.source_orders;
+      delete recipeGroup.sales_orders;
       (warehouse.recipes as Record<string, unknown>[]).push({ ...recipeGroup, components });
       warehouses.set(warehouseId, warehouse);
     }
@@ -730,7 +781,17 @@ export async function prepareManufacturingPeriod(s: SupabaseClient, body: Record
         }
       }
     }
-    const payload = { payload_contract_version: 2, manufacturing_contract_version: 2, export_id: exportId, period_from: input.periodFrom, period_to: input.periodTo, time_zone: input.timeZone, document_date: input.documentDate, warehouses: warehousePayload, replenishment };
+    if (contractVersion === 2) for (const warehouse of warehousePayload) delete warehouse.sales_orders;
+    const payload = {
+      payload_contract_version: 2, manufacturing_contract_version: contractVersion,
+      export_id: exportId, period_from: input.periodFrom, period_to: input.periodTo, time_zone: input.timeZone,
+      document_date: input.documentDate, warehouses: warehousePayload, replenishment,
+      ...(contractVersion === 3 ? { connector_capabilities: {
+        manufacturing_transaction_sales: 1, fiscal_invoice_allocation_v2: 1,
+      } } : {}),
+    };
+    if (contractVersion === 3) validateManufacturingV3PayloadTotals(payload);
+    if (Buffer.byteLength(canonicalJson(payload), "utf8") > 5_000_000) blocked.push({ problem_code: "manufacturing_payload_too_large", message: "The frozen manufacturing connector payload exceeds 5,000,000 bytes." });
     const payloadHash = sha256(payload);
     const configSnapshot = { defaults: defaultsResult.data, product_overrides: [...productOverrides.entries()].map(([product_id, override]) => ({ product_id, ...override })), machine_overrides: machineOverridesResult.data, settings,
       resolved_products: products.map((product) => ({ id: product.id, odoo_id: product.odoo_id, odoo_product: relation(product.odoo_products) })),
@@ -778,6 +839,7 @@ export function presentManufacturingExport(row: Record<string, unknown>) {
     period_from: row.period_from, period_to: row.period_to, time_zone: row.time_zone, document_date: row.document_date,
     payload_contract_version: payload.payload_contract_version ?? 1,
     manufacturing_contract_version: payload.manufacturing_contract_version ?? 1,
+    ...(Object.hasOwn(payload, "connector_capabilities") ? { connector_capabilities: payload.connector_capabilities } : {}),
     payload_sha256: row.payload_sha256, warehouses: payload.warehouses ?? [], replenishment: payload.replenishment ?? null, blocked_items: row.blocked_reasons ?? [],
     replenishment_result: row.replenishment_result ?? null, odoo_result: row.odoo_result ?? null, created_at: row.created_at, updated_at: row.updated_at,
     preparation_stage: row.preparation_stage ?? null, preparation_attempt_count: Number(row.preparation_attempt_count ?? 0), preparation_error: row.preparation_error ?? null,
@@ -932,12 +994,13 @@ export async function recordManufacturingPeriodResult(s: SupabaseClient, exportI
   const hash = String(body.payload_sha256 ?? "");
   if (!/^[0-9a-f-]{36}$/i.test(exportId) || !/^[0-9a-f]{64}$/i.test(hash)) throw new OdooContractError("Valid export ID and payload hash are required");
   if (typeof body.accepted !== "boolean") throw new OdooContractError("accepted must be boolean");
-  if (canonicalJson(body).length > 100_000) throw new OdooContractError("Result payload is too large", 413, "payload_too_large");
+  if (Buffer.byteLength(canonicalJson(body), "utf8") > 5_000_000) throw new OdooContractError("Result payload is too large", 413, "payload_too_large");
   const { data: run, error: runError } = await s.from("manufacturing_period_exports").select("payload").eq("id", exportId).maybeSingle();
   if (runError) throw runError;
   if (!run) throw new OdooContractError("Production run not found", 404, "not_found");
   validateManufacturingResult(body, run.payload as Record<string, unknown> | null);
-  const { data, error } = await s.rpc("record_manufacturing_export_result", { p_export_id: exportId, p_payload_sha256: hash, p_result: body });
+  const contractVersion = Number((run.payload as Record<string, unknown> | null)?.manufacturing_contract_version ?? 1);
+  const { data, error } = await s.rpc(contractVersion === 3 ? "record_manufacturing_export_result_v3" : "record_manufacturing_export_result", { p_export_id: exportId, p_payload_sha256: hash, p_result: body });
   if (error) {
     if (["P0001", "P0002"].includes(error.code)) throw new OdooContractError(error.message, 409, error.code === "P0002" ? "hash_mismatch" : "result_conflict");
     throw error;
@@ -950,6 +1013,8 @@ export function validateManufacturingResult(body: Record<string, unknown>, paylo
     if (typeof body.error !== "string" || !body.error.trim() || body.error.length > 5000) throw new OdooContractError("A bounded error is required for a rejected result");
     return;
   }
+  const contractVersion = Number(payload?.manufacturing_contract_version ?? 1);
+  if (contractVersion === 3) validateManufacturingV3PayloadTotals(payload!);
   const expected = new Map(((payload?.warehouses as Record<string, unknown>[] | undefined) ?? []).map((warehouse) => [
     Number(warehouse.odoo_warehouse_id),
     Array.isArray(warehouse.recipes) ? warehouse.recipes.length : 0,
@@ -958,27 +1023,76 @@ export function validateManufacturingResult(body: Record<string, unknown>, paylo
   const received = new Set<number>();
   const receivedManufacturingIds = new Set<number>();
   const receivedSalesOrderIds = new Set<number>();
+  const receivedSalesOrderLineIds = new Set<number>();
   const receivedDeliveryIds = new Set<number>();
   for (const row of rows) {
     const warehouseId = Number(row.odoo_warehouse_id);
     const manufacturingIds = Array.isArray(row.manufacturing_order_ids) ? row.manufacturing_order_ids.map(Number) : [];
     const salesOrderId = Number(row.sales_order_id);
     const deliveryId = Number(row.delivery_id);
+    const expectedWarehouse = ((payload?.warehouses as Record<string, unknown>[] | undefined) ?? []).find((warehouse) => Number(warehouse.odoo_warehouse_id) === warehouseId);
+    const expectedSales = (expectedWarehouse?.sales_orders as Record<string, unknown>[] | undefined) ?? [];
+    const sales = Array.isArray(row.sales_orders) ? row.sales_orders as Record<string, unknown>[] : [];
+    const expectedSalesById = new Map(expectedSales.map((sale) => [String(sale.platform_order_id), sale]));
+    const seenSales = new Set<string>();
+    const validV3Sales = contractVersion !== 3 || (sales.length === expectedSales.length && sales.every((sale) => {
+      const id = String(sale.platform_order_id ?? "");
+      const source = expectedSalesById.get(id);
+      const odooSaleOrderId = Number(sale.odoo_sale_order_id);
+      const odooSaleOrderLineId = Number(sale.odoo_sale_order_line_id);
+      if (!source || seenSales.has(id) || sale.source_sha256 !== source.source_sha256 || sale.platform_line_key !== source.platform_line_key
+        || !Number.isInteger(odooSaleOrderId) || odooSaleOrderId <= 0 || !Number.isInteger(odooSaleOrderLineId) || odooSaleOrderLineId <= 0
+        || typeof sale.created !== "boolean" || receivedSalesOrderIds.has(odooSaleOrderId) || receivedSalesOrderLineIds.has(odooSaleOrderLineId)) return false;
+      seenSales.add(id);
+      receivedSalesOrderIds.add(odooSaleOrderId);
+      receivedSalesOrderLineIds.add(odooSaleOrderLineId);
+      return true;
+    }));
     if (!expected.has(warehouseId) || received.has(warehouseId) || manufacturingIds.length !== expected.get(warehouseId)
       || manufacturingIds.some((id) => !Number.isInteger(id) || id <= 0)
-      || !Number.isInteger(salesOrderId) || salesOrderId <= 0
-      || !Number.isInteger(deliveryId) || deliveryId <= 0
+      || (contractVersion !== 3 && (!Number.isInteger(salesOrderId) || salesOrderId <= 0))
+      || (contractVersion !== 3 && (!Number.isInteger(deliveryId) || deliveryId <= 0))
+      || !validV3Sales
       || manufacturingIds.some((id) => receivedManufacturingIds.has(id))
       || new Set(manufacturingIds).size !== manufacturingIds.length
-      || receivedSalesOrderIds.has(salesOrderId) || receivedDeliveryIds.has(deliveryId)) {
-      throw new OdooContractError("Accepted results require one valid manufacturing, sale, and delivery result per frozen warehouse");
+      || (contractVersion !== 3 && (receivedSalesOrderIds.has(salesOrderId) || receivedDeliveryIds.has(deliveryId)))) {
+      throw new OdooContractError(contractVersion === 3
+        ? "Accepted results require exact manufacturing and transaction sales-order coverage for every frozen warehouse"
+        : "Accepted results require one valid manufacturing, sale, and delivery result per frozen warehouse");
     }
     received.add(warehouseId);
     for (const id of manufacturingIds) receivedManufacturingIds.add(id);
-    receivedSalesOrderIds.add(salesOrderId);
-    receivedDeliveryIds.add(deliveryId);
+    if (contractVersion !== 3) {
+      receivedSalesOrderIds.add(salesOrderId);
+      receivedDeliveryIds.add(deliveryId);
+    }
   }
   if (received.size !== expected.size) throw new OdooContractError("Accepted result warehouses do not match the frozen payload");
+}
+
+export function validateManufacturingV3PayloadTotals(payload: Record<string, unknown>) {
+  for (const warehouse of (payload.warehouses as Record<string, unknown>[] | undefined) ?? []) {
+    const totals = new Map<string, number>();
+    for (const sale of (warehouse.sales_orders as Record<string, unknown>[] | undefined) ?? []) {
+      const recipeVersionId = String(sale.recipe_version_id ?? "");
+      const cents = Number(sale.expected_total_cents);
+      if (!recipeVersionId || !Number.isSafeInteger(cents) || cents < 0) throw new OdooContractError("Manufacturing v3 sales orders require recipe identity and integer gross cents");
+      const total = (totals.get(recipeVersionId) ?? 0) + cents;
+      if (!Number.isSafeInteger(total)) throw new OdooContractError("Manufacturing v3 recipe gross cents exceed the safe integer range");
+      totals.set(recipeVersionId, total);
+    }
+    const seen = new Set<string>();
+    for (const recipe of (warehouse.recipes as Record<string, unknown>[] | undefined) ?? []) {
+      const recipeVersionId = String(recipe.recipe_version_id ?? "");
+      if (!recipeVersionId || seen.has(recipeVersionId) || Number(recipe.gross_sales_cents) !== totals.get(recipeVersionId)) {
+        throw new OdooContractError("Manufacturing v3 recipe gross cents must equal its per-order rounded sales total");
+      }
+      seen.add(recipeVersionId);
+    }
+    if (seen.size !== totals.size || [...totals.keys()].some((key) => !seen.has(key))) {
+      throw new OdooContractError("Manufacturing v3 sales orders must map to exactly one recipe aggregate");
+    }
+  }
 }
 
 export async function getOdooSales(s: SupabaseClient, url: URL) {

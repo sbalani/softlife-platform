@@ -380,6 +380,12 @@ verify_jwt = false
 [functions.huaxin-order-sync]
 verify_jwt = false
 
+[functions.franchisee-contract-reminders]
+verify_jwt = false
+
+[functions.payout-notifications]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

@@ -1,7 +1,7 @@
 import { getSessionProfile } from "@/lib/auth/session";
 import { getTenantPayoutReport } from "@/lib/data/franchisee-profit";
 import { authorizePayoutTenant, createPayoutPdf, validPayoutRange } from "@/lib/payout-report";
-import { getTenantBankDetails } from "@/lib/data/franchisees";
+import { getTenantBankDetails, getTenantById, tenantPostalAddress } from "@/lib/data/franchisees";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -26,12 +26,20 @@ export async function GET(request: Request) {
   if (!validPayoutRange(from, to)) return privateResponse("A valid dateFrom/dateTo range is required.", { status: 400 });
 
   try {
-    const report = await getTenantPayoutReport(authorization.tenantId, from, to!);
+    const [report, tenant, storedBankDetails] = await Promise.all([
+      getTenantPayoutReport(authorization.tenantId, from, to!),
+      getTenantById(authorization.tenantId),
+      getTenantBankDetails(authorization.tenantId),
+    ]);
     if (!report) return privateResponse("Franchisee tenant not found.", { status: 404 });
-    const includeBankDetails = url.searchParams.get("includeBankDetails") === "true";
-    const storedBankDetails = includeBankDetails ? await getTenantBankDetails(authorization.tenantId) : null;
     const bankDetails = storedBankDetails ? { accountHolderName: storedBankDetails.account_holder_name, iban: storedBankDetails.iban, bicSwift: storedBankDetails.bic_swift, bankName: storedBankDetails.bank_name } : null;
-    const pdf = await createPayoutPdf({ franchiseeName: report.tenantName, from, to: to!, rows: report.rows, bankDetails });
+    const paymentDetails = tenant?.company_name && tenant.tax_id && bankDetails ? {
+      recipientLegalName: tenant.company_name,
+      recipientTaxId: tenant.tax_id,
+      recipientAddress: tenantPostalAddress(tenant),
+      bankDetails,
+    } : null;
+    const pdf = await createPayoutPdf({ franchiseeName: report.tenantName, from, to: to!, rows: report.rows, paymentDetails });
     const safeTenant = report.tenantName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "franchisee";
     return privateResponse(pdf as unknown as BodyInit, {
       headers: {

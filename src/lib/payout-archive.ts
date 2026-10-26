@@ -8,6 +8,9 @@ export type PayoutArchiveReport = {
   rows: PayoutRow[];
   total: number;
   bankDetails: BankDetails | null;
+  recipientLegalName?: string | null;
+  recipientTaxId?: string | null;
+  recipientAddress?: string | null;
 };
 
 function filenamePart(value: string) {
@@ -31,7 +34,13 @@ export async function createPayoutArchive(input: {
     const filename = `payout-${filenamePart(report.tenantName)}-${report.tenantId.slice(0, 8)}-${input.from}-${input.to}.pdf`;
     files[filename] = await createPayoutPdf({
       franchiseeName: report.tenantName, from: input.from, to: input.to,
-      rows: report.rows, bankDetails: report.bankDetails,
+      rows: report.rows,
+      paymentDetails: report.bankDetails && report.recipientLegalName && report.recipientTaxId ? {
+        recipientLegalName: report.recipientLegalName,
+        recipientTaxId: report.recipientTaxId,
+        recipientAddress: report.recipientAddress ?? null,
+        bankDetails: report.bankDetails,
+      } : null,
     });
     manifest.push([
       report.tenantId, report.tenantName, report.total.toFixed(2),

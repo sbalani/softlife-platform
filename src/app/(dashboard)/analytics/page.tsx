@@ -46,7 +46,7 @@ function PayoutExportForm({ tenantId, from, to, compact = false }: { tenantId: s
     <input type="hidden" name="tenantId" value={tenantId} />
     <input type="hidden" name="dateFrom" value={from} />
     <input type="hidden" name="dateTo" value={to} />
-    <label className="flex items-center gap-1.5 text-xs font-semibold text-taupe"><input type="checkbox" name="includeBankDetails" value="true" className="accent-terracotta" />Include bank details if available</label>
+    <span className="text-xs font-semibold text-taupe">Includes verified transfer details</span>
     <button className={compact ? "rounded-lg border border-terracotta px-3 py-1.5 text-xs font-bold text-terracotta" : "rounded-lg bg-sage px-3 py-2 text-sm font-bold text-white"}>{compact ? "Export PDF" : "Payout PDF"}</button>
   </form>;
 }

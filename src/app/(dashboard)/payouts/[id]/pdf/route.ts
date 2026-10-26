@@ -1,10 +1,10 @@
 import { getSessionProfile } from "@/lib/auth/session";
 import { createServiceClient } from "@/lib/supabase/server";
-import { createPayoutPdf, type PayoutRow } from "@/lib/payout-report";
+import { createPayoutPdf, type PayoutPaymentDetails, type PayoutRow } from "@/lib/payout-report";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-type Snapshot = { tenantName: string; from: string; to: string; rows: PayoutRow[] };
+type Snapshot = { tenantName: string; from: string; to: string; rows: PayoutRow[]; paymentDetails?: PayoutPaymentDetails };
 
 function validSnapshot(value: unknown): value is Snapshot {
   if (!value || typeof value !== "object") return false;
@@ -23,7 +23,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
   let query = (await createServiceClient())
     .from("franchisee_payout_settlements")
-    .select("id,tenant_id,period_month,status,source_snapshot")
+    .select("id,period_month,status,source_snapshot,payment_details_snapshot")
     .eq("id", id)
     .eq("status", "paid");
   if (session.role === "franchisee") {
@@ -35,11 +35,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   if (!data) return new Response("Payout not found", { status: 404 });
   if (!validSnapshot(data.source_snapshot)) return new Response("Payout snapshot is invalid", { status: 500 });
 
+  const paymentDetails = (data.payment_details_snapshot as PayoutPaymentDetails | null) ?? data.source_snapshot.paymentDetails ?? null;
   const pdf = await createPayoutPdf({
     franchiseeName: data.source_snapshot.tenantName,
     from: data.source_snapshot.from,
     to: data.source_snapshot.to,
     rows: data.source_snapshot.rows,
+    paymentDetails,
   });
   const filename = `payout-${String(data.period_month).slice(0, 7)}.pdf`;
   return new Response(Buffer.from(pdf), {

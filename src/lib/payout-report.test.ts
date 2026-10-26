@@ -57,7 +57,7 @@ test("range validation and payout PDFs without bank details work", async () => {
   assert.equal(validPayoutRange("invalid", "2026-07-31"), false);
   assert.equal(validPayoutRange("2026-99-99", "2026-07-31"), false);
   assert.equal(validPayoutRange("2025-01-01", "2026-07-31"), false);
-  const bytes = await createPayoutPdf({ franchiseeName: "Madrid Foods 🍦", from: "2026-07-01", to: "2026-07-31", rows: [], bankDetails: null });
+  const bytes = await createPayoutPdf({ franchiseeName: "Madrid Foods 🍦", from: "2026-07-01", to: "2026-07-31", rows: [], paymentDetails: null });
   assert.equal(String.fromCharCode(...bytes.slice(0, 5)), "%PDF-");
   assert.equal((await PDFDocument.load(bytes)).getPageCount(), 1);
 });
@@ -66,7 +66,10 @@ test("bank details are formatted only when supplied to a payout statement", asyn
   assert.deepEqual(payoutBankDetailLines(null), []);
   const bankDetails = { accountHolderName: "Madrid Foods SL", iban: "ES9121000418450200051332", bicSwift: "CAIXESBBXXX", bankName: "CaixaBank" };
   assert.deepEqual(payoutBankDetailLines(bankDetails), ["Account holder: Madrid Foods SL", "IBAN: ES9121000418450200051332", "BIC/SWIFT: CAIXESBBXXX", "Bank: CaixaBank"]);
-  const bytes = await createPayoutPdf({ franchiseeName: "Madrid Foods", from: "2026-07-01", to: "2026-07-31", rows: [], bankDetails });
+  const bytes = await createPayoutPdf({
+    franchiseeName: "Madrid Foods", from: "2026-07-01", to: "2026-07-31", rows: [],
+    paymentDetails: { recipientLegalName: "Madrid Foods SL", recipientTaxId: "B12345678", recipientAddress: "Calle Mayor 1, Madrid", bankDetails, paymentReference: "SEPA-2026-07" },
+  });
   assert.equal(String.fromCharCode(...bytes.slice(0, 5)), "%PDF-");
   assert.equal((await PDFDocument.load(bytes)).getPageCount(), 1);
 });

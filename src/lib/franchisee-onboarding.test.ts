@@ -76,6 +76,9 @@ test("versioned Spanish contract contains both SoftLife-assigned modes and requi
   assert.match(contract, /boquillas externas de salida[\s\S]*cada día de operación/);
   assert.match(contract, /Modelo de la MÁQUINA: pendiente de asignación[\s\S]*modalidad y el porcentaje asignados exclusivamente por SOFTLIFE/);
   assert.match(contract, /facturación por el destinatario/);
+  assert.match(contract, /importe total bruto de la retribución del GESTOR, incluyendo el IVA/);
+  assert.match(contract, /sin añadir IVA adicional ni incrementar la retribución/);
+  assert.doesNotMatch(contract, /no incluye el IVA de esta factura/);
 
   const deferred = contractPlainText(renderFranchiseeContract({ ...party, accountHolderName: null, iban: null, bicSwift: null, bankDetailsDeferred: true }));
   assert.match(deferred, /datos bancarios quedan pendientes de aportación/);
@@ -92,13 +95,13 @@ test("template hash and canonical payload are stable", () => {
   assert.equal(payload.manager.sharePercent, null);
   assert.equal(payload.manager.bankDetailsDeferred, false);
   assert.equal(canonicalJson(payload), canonicalJson(reordered));
-  assert.equal(sha256Hex(canonicalJson(payload)), "bfc256a77c6bf6f5b1d06ae725999f3b1ad6fa3aa071f03ae87bffa3c892dd0d");
+  assert.equal(sha256Hex(canonicalJson(payload)), "03b0624f2f977d971cc71d1e8b6e4b4035321b8d962adec3923b96d8c6b9208f");
 
   const deferred = buildCanonicalPayload({ ...party, accountHolderName: null, iban: null, bicSwift: null, bankDetailsDeferred: true, typedSignature: party.representativeName }, "79b69771-6d3c-43fd-b068-d11e2b2fa9dc", "2026-09-29T12:34:56.000Z", { ipAuditHash: "a".repeat(64), userAgent: "test-agent" });
   assert.equal(deferred.manager.accountHolderName, null);
   assert.equal(deferred.manager.iban, null);
   assert.equal(deferred.manager.bicSwift, null);
-  assert.equal(sha256Hex(canonicalJson(deferred)), "79c3a9952711cb315cc43af09cfd7da1eb1cb4c6cde962ed25aece48fd0fd8c2");
+  assert.equal(sha256Hex(canonicalJson(deferred)), "edc509fee0f4a65b857e5fc054ef166cd8c19bd599d329b39cd21c0d47b90b2d");
 });
 
 test("validation ignores browser modality and accepts complete or explicitly deferred bank details", () => {

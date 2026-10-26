@@ -47,6 +47,14 @@ export type TenantSummary = Pick<Tenant, "id" | "name" | "kind" | "created_at" |
   payout_ready: boolean;
 };
 
+export function tenantPostalAddress(tenant: Pick<Tenant, "address_line_1" | "address_line_2" | "postal_code" | "city" | "province" | "country">): string | null {
+  const locality = [tenant.postal_code, tenant.city].filter(Boolean).join(" ");
+  return [tenant.address_line_1, tenant.address_line_2, locality, tenant.province, tenant.country]
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .join(", ") || null;
+}
+
 export type FranchiseeIntakeSubmission = {
   id: string;
   trade_name: string | null;
@@ -144,6 +152,14 @@ export async function getTenantBankDetails(tenantId: string): Promise<TenantBank
     .select("tenant_id,account_holder_name,iban,bic_swift,bank_name,updated_at").eq("tenant_id", tenantId).maybeSingle();
   if (error) throw error;
   return data as TenantBankDetails | null;
+}
+
+export async function getTenantContractInstallationAddress(tenant: Pick<Tenant, "source_intake_submission_id">): Promise<string | null> {
+  if (!isSupabaseConfigured() || !tenant.source_intake_submission_id) return null;
+  const { data, error } = await (await createServiceClient()).from("franchisee_intake_submissions")
+    .select("installation_address").eq("id", tenant.source_intake_submission_id).maybeSingle();
+  if (error) throw error;
+  return String(data?.installation_address ?? "").trim() || null;
 }
 
 export async function getPayoutReadiness(tenantId: string) {

@@ -80,3 +80,25 @@ test("sale-link completion validates exact identities and records the result", a
   });
   assert.deepEqual(rpcCalls, ["complete_fiscal_invoice_sale_link_request"]);
 });
+
+test("payout self-bill completion validates exact bill identity without a summary", async () => {
+  const rpcCalls: string[] = [];
+  const payload = {
+    schema_version: 1,
+    bill: {
+      platform_bill_id: "11111111-1111-4111-8111-111111111111",
+      odoo_move_id: 9,
+      payload_sha256: "a".repeat(64),
+    },
+  };
+  const client = {
+    from: () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: { kind: "payout_vendor_bill_posting", payload }, error: null }) }) }) }),
+    rpc: async (name: string) => { rpcCalls.push(name); return { data: { status: "completed" }, error: null }; },
+  } as unknown as SupabaseClient;
+  await completeOdooSyncRequest(client, "d58e68dd-21a6-4a55-8cf4-d7a26bba1264", {
+    accepted: true,
+    claim_token: "7cbd854e-3f88-4ca3-b86b-a4853adffbd3",
+    bill: { platform_bill_id: payload.bill.platform_bill_id, odoo_move_id: 9, payload_sha256: "a".repeat(64), state: "posted", name: "AF/2026/1", posted: true },
+  });
+  assert.deepEqual(rpcCalls, ["complete_odoo_sync_request"]);
+});

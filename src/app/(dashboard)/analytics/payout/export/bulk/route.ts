@@ -1,6 +1,6 @@
 import { getSessionProfile } from "@/lib/auth/session";
 import { getPayoutReports } from "@/lib/data/franchisee-profit";
-import { getTenantBankDetails } from "@/lib/data/franchisees";
+import { getTenantBankDetails, getTenantById, tenantPostalAddress } from "@/lib/data/franchisees";
 import { validPayoutRange } from "@/lib/payout-report";
 import { createPayoutArchive } from "@/lib/payout-archive";
 
@@ -32,20 +32,25 @@ export async function POST(request: Request) {
   if (mode === "selected" && (!requestedTenantIds.length || requestedTenantIds.length > 100 || requestedTenantIds.some((id) => !UUID.test(id)))) {
     return privateResponse("Select between 1 and 100 valid franchisees.", { status: 400 });
   }
-  const includeBankDetails = form.get("includeBankDetails") === "true";
   try {
     const reports = await getPayoutReports(from, to, mode === "all" ? undefined : requestedTenantIds);
     if (!reports.length) return privateResponse("No positive franchisee payouts match this period and selection.", { status: 404 });
     if (reports.length > 100) return privateResponse("The bulk export is limited to 100 franchisees.", { status: 400 });
     const archiveReports = await Promise.all(reports.map(async (report) => {
-      const storedBank = includeBankDetails ? await getTenantBankDetails(report.tenantId) : null;
+      const [storedBank, tenant] = await Promise.all([getTenantBankDetails(report.tenantId), getTenantById(report.tenantId)]);
       const bankDetails = storedBank ? {
         accountHolderName: storedBank.account_holder_name, iban: storedBank.iban,
         bicSwift: storedBank.bic_swift, bankName: storedBank.bank_name,
       } : null;
-      return { ...report, bankDetails };
+      return {
+        ...report,
+        bankDetails,
+        recipientLegalName: tenant?.company_name ?? null,
+        recipientTaxId: tenant?.tax_id ?? null,
+        recipientAddress: tenant ? tenantPostalAddress(tenant) : null,
+      };
     }));
-    const archive = await createPayoutArchive({ from, to, reports: archiveReports, bankDetailsRequested: includeBankDetails });
+    const archive = await createPayoutArchive({ from, to, reports: archiveReports, bankDetailsRequested: true });
     return privateResponse(archive as unknown as BodyInit, {
       headers: {
         "Content-Type": "application/zip",

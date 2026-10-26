@@ -47,7 +47,7 @@ function translated(value: string, locale: Locale) {
   return locale === "es" ? SPANISH[value] ?? value : value;
 }
 
-function TopBar({ onMenuClick, profile, hasUpdate, locale }: { onMenuClick: () => void; profile: Profile; hasUpdate: boolean; locale: Locale }) {
+function TopBar({ onMenuClick, profile, hasUpdate, unreadNotifications, locale }: { onMenuClick: () => void; profile: Profile; hasUpdate: boolean; unreadNotifications: number; locale: Locale }) {
   const displayName = profile.fullName || profile.email || (locale === "es" ? "Sesión iniciada" : "Signed in");
   const initial = displayName[0]?.toUpperCase() ?? "?";
   return (
@@ -60,9 +60,9 @@ function TopBar({ onMenuClick, profile, hasUpdate, locale }: { onMenuClick: () =
         <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
       </button>
       <div className="flex items-center gap-3 sm:gap-5">
-        <Link href={hasUpdate ? "/downloads" : "/alerts"} title={locale === "es" ? "Notificaciones" : "Notifications"} className="relative text-taupe hover:text-cocoa">
+        <Link href={profile.role === "operator" ? "/alerts" : "/notifications"} title={locale === "es" ? "Notificaciones" : "Notifications"} className="relative text-taupe hover:text-cocoa">
           <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 8a6 6 0 1112 0c0 7 3 7 3 9H3c0-2 3-2 3-9z"/><path d="M10 21a2 2 0 004 0"/></svg>
-          {hasUpdate && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-danger" />}
+          {unreadNotifications > 0 ? <span className="absolute -right-2.5 -top-2.5 min-w-4 rounded-full bg-danger px-1 text-center text-[10px] font-bold leading-4 text-white">{unreadNotifications > 99 ? "99+" : unreadNotifications}</span> : hasUpdate && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-danger" />}
         </Link>
         <LanguageSelector locale={locale} compact />
         <SignOutButton title={locale === "es" ? "Cerrar sesión" : "Sign out"} />
@@ -130,7 +130,7 @@ function SidebarContent({ onNavigate, role, mobile, locale }: { onNavigate: () =
   );
 }
 
-export function DashboardShell({ children, profile, mobileBuildUpdate, payoutMissing, locale }: { children: ReactNode; profile: Profile; mobileBuildUpdate: MobileBuildAlertData | null; payoutMissing: ("company" | "tax" | "bank")[]; locale: Locale }) {
+export function DashboardShell({ children, profile, mobileBuildUpdate, payoutMissing, unreadNotifications, locale }: { children: ReactNode; profile: Profile; mobileBuildUpdate: MobileBuildAlertData | null; payoutMissing: ("company" | "tax" | "bank")[]; unreadNotifications: number; locale: Locale }) {
   const [navOpen, setNavOpen] = useState(false);
 
   return (
@@ -155,7 +155,7 @@ export function DashboardShell({ children, profile, mobileBuildUpdate, payoutMis
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar onMenuClick={() => setNavOpen(true)} profile={profile} hasUpdate={!!mobileBuildUpdate} locale={locale} />
+        <TopBar onMenuClick={() => setNavOpen(true)} profile={profile} hasUpdate={!!mobileBuildUpdate} unreadNotifications={unreadNotifications} locale={locale} />
         <main className="min-w-0 flex-1 overflow-x-hidden">
           <div className="mx-auto max-w-7xl min-w-0 px-4 py-6 sm:px-6 sm:py-8">{mobileBuildUpdate && <MobileBuildAlert build={mobileBuildUpdate} />}{payoutMissing.length > 0 && <PayoutReadinessAlert missing={payoutMissing} locale={locale} />}{children}</div>
         </main>

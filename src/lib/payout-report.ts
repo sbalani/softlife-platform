@@ -36,6 +36,15 @@ export type PayoutRow = {
   orders: number;
 };
 
+export type PayoutPaymentDetails = {
+  recipientLegalName: string;
+  recipientTaxId: string;
+  recipientAddress: string | null;
+  bankDetails: BankDetails;
+  paymentReference?: string | null;
+  paidAt?: string | null;
+};
+
 export function roundCurrency(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
@@ -171,7 +180,7 @@ export async function createPayoutPdf(input: {
   from: string;
   to: string;
   rows: PayoutRow[];
-  bankDetails?: BankDetails | null;
+  paymentDetails?: PayoutPaymentDetails | null;
 }): Promise<Uint8Array> {
   const document = await PDFDocument.create();
   document.setTitle(`Payout statement - ${input.franchiseeName}`);
@@ -190,21 +199,44 @@ export async function createPayoutPdf(input: {
     if (first) {
       page.drawText(fit(input.franchiseeName, bold, 24, 770), { x: 36, y, size: 24, font: bold, color: rgb(0.19, 0.12, 0.09) });
       y -= 28;
-      page.drawText("Franchisee payout statement (not an invoice)", { x: 36, y, size: 13, font: bold, color: rgb(0.35, 0.55, 0.45) });
+      page.drawText("Franchisee payout and payment statement (not an invoice)", { x: 36, y, size: 13, font: bold, color: rgb(0.35, 0.55, 0.45) });
       y -= 20;
       page.drawText(`Period: ${input.from} to ${input.to} (Europe/Madrid)`, { x: 36, y, size: 10, font: regular });
       y -= 15;
-      page.drawText(`Sales IVA follows the applicable sales tax rate; total payable includes ${PAYOUT_IVA_RATE_PERCENT}% payout IVA.`, { x: 36, y, size: 8, font: regular });
+      page.drawText(`The partner share is the final gross amount including ${PAYOUT_IVA_RATE_PERCENT}% IVA; no IVA is added to the total payable.`, { x: 36, y, size: 8, font: regular });
       y -= 24;
-      const bankLines = payoutBankDetailLines(input.bankDetails);
+      page.drawText("Payer / Ordenante", { x: 36, y, size: 10, font: bold, color: rgb(0.19, 0.12, 0.09) });
+      y -= 14;
+      page.drawText("CONTROL ALT TECH 2026, S.L. | NIF B88827340", { x: 36, y, size: 9, font: regular });
+      y -= 12;
+      page.drawText("C/ Compositor Lembergh Ruiz 30, Local 2, 29007 Malaga, Spain", { x: 36, y, size: 9, font: regular });
+      y -= 20;
+      const bankLines = payoutBankDetailLines(input.paymentDetails?.bankDetails);
       if (bankLines.length) {
-        page.drawText("Payment account", { x: 36, y, size: 10, font: bold, color: rgb(0.19, 0.12, 0.09) });
+        page.drawText("Beneficiary and transfer account / Beneficiario y cuenta de abono", { x: 36, y, size: 10, font: bold, color: rgb(0.19, 0.12, 0.09) });
         y -= 14;
+        page.drawText(fit(`${input.paymentDetails!.recipientLegalName} | NIF/CIF ${input.paymentDetails!.recipientTaxId}`, regular, 9, 770), { x: 36, y, size: 9, font: regular });
+        y -= 12;
+        if (input.paymentDetails!.recipientAddress) {
+          page.drawText(fit(input.paymentDetails!.recipientAddress!, regular, 9, 770), { x: 36, y, size: 9, font: regular });
+          y -= 12;
+        }
         for (const line of bankLines) {
           page.drawText(fit(line, regular, 9, 770), { x: 36, y, size: 9, font: regular });
           y -= 12;
         }
+        if (input.paymentDetails?.paymentReference) {
+          page.drawText(fit(`Transfer reference / Concepto: ${input.paymentDetails.paymentReference}`, bold, 9, 770), { x: 36, y, size: 9, font: bold });
+          y -= 12;
+        }
+        if (input.paymentDetails?.paidAt) {
+          page.drawText(`Payment recorded / Pago registrado: ${input.paymentDetails.paidAt}`, { x: 36, y, size: 9, font: regular });
+          y -= 12;
+        }
         y -= 12;
+      } else {
+        page.drawText("Beneficiary payment account unavailable. Do not transfer until verified.", { x: 36, y, size: 9, font: bold, color: rgb(0.7, 0.2, 0.15) });
+        y -= 24;
       }
     } else {
       page.drawText(fit(`${input.franchiseeName} - payout statement`, bold, 13, 770), { x: 36, y, size: 13, font: bold });
@@ -244,19 +276,17 @@ export async function createPayoutPdf(input: {
 
   if (y! < 60) addPage();
   const totals = input.rows.reduce((sum, row) => {
-    const payout = payoutTaxBreakdown(row.payout);
     return {
       orders: sum.orders + row.orders,
       gross: sum.gross + row.gross,
       vat: sum.vat + row.vat,
       net: sum.net + row.net,
-      payoutBase: sum.payoutBase + payout.base,
-      payoutIva: sum.payoutIva + payout.iva,
-      payoutTotal: sum.payoutTotal + payout.total,
+      payoutTotal: sum.payoutTotal + row.payout,
     };
-  }, { orders: 0, gross: 0, vat: 0, net: 0, payoutBase: 0, payoutIva: 0, payoutTotal: 0 });
+  }, { orders: 0, gross: 0, vat: 0, net: 0, payoutTotal: 0 });
+  const totalPayout = payoutTaxBreakdown(totals.payoutTotal);
   page!.drawText("TOTAL", { x: columns[1], y: y!, size: 9, font: bold });
-  [String(totals.orders), totals.gross.toFixed(2), totals.vat.toFixed(2), totals.net.toFixed(2), totals.payoutBase.toFixed(2), totals.payoutIva.toFixed(2), totals.payoutTotal.toFixed(2)]
+  [String(totals.orders), totals.gross.toFixed(2), totals.vat.toFixed(2), totals.net.toFixed(2), totalPayout.base.toFixed(2), totalPayout.iva.toFixed(2), totalPayout.total.toFixed(2)]
     .forEach((value, index) => page!.drawText(value, { x: columns[index + 3], y: y!, size: 9, font: bold }));
 
   return document.save();

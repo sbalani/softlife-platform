@@ -47,3 +47,9 @@ test("existing role restrictions remain intact", () => {
   assert.equal(canAccessWebPath("franchisee", "/users"), false);
   assert.equal(canAccessWebPath("admin", "/users"), true);
 });
+
+test("the persistent notification inbox is not implicitly opened to operators", () => {
+  assert.equal(canAccessWebPath("admin", "/notifications"), true);
+  assert.equal(canAccessWebPath("franchisee", "/notifications"), true);
+  assert.equal(canAccessWebPath("operator", "/notifications"), false);
+});

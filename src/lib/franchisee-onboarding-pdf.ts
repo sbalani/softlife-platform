@@ -1,6 +1,7 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { contractPlainText, renderFranchiseeContract } from "./franchisee-onboarding-contract.ts";
 import { canonicalJson, sha256Hex, type OnboardingCanonicalPayload } from "./franchisee-onboarding-evidence.ts";
+import type { TenantContractAcceptancePayload } from "./franchisee-contract-acceptance.ts";
 
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
@@ -37,7 +38,9 @@ function wrap(text: string, font: PDFFont, size: number, width: number): string[
   return lines.length ? lines : [""];
 }
 
-export async function createOnboardingContractPdf(payload: OnboardingCanonicalPayload, sourceHash: string): Promise<{ bytes: Uint8Array; hash: string }> {
+type ContractPdfPayload = OnboardingCanonicalPayload | TenantContractAcceptancePayload;
+
+export async function createOnboardingContractPdf(payload: ContractPdfPayload, sourceHash: string): Promise<{ bytes: Uint8Array; hash: string }> {
   const document = await PDFDocument.create();
   document.setTitle(`Contrato SoftLife ${payload.acceptanceId}`);
   document.setSubject(`Aceptación electrónica ${payload.contract.version}`);
@@ -98,6 +101,7 @@ export async function createOnboardingContractPdf(payload: OnboardingCanonicalPa
     `Huella HMAC de IP (no es la IP en claro): ${payload.audit.ipAuditHash}`,
     `Agente de usuario: ${payload.audit.userAgent}`,
   ];
+  if ("identity" in payload) auditLines.splice(2, 0, `Tenant: ${payload.identity.tenantId}`, `Usuario: ${payload.identity.userId}`);
   auditLines.forEach((line) => drawBlock(line, { size: 8.5, gap: 3 }));
   drawBlock("Declaraciones registradas", { font: bold, size: 10, gap: 6 });
   drawBlock(`1. Aceptada: ${payload.declarations.terms.wording}`, { size: 8.5, gap: 3 });

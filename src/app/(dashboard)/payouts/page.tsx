@@ -4,13 +4,15 @@ import { KpiCard } from "@/components/charts";
 import { getSessionProfile } from "@/lib/auth/session";
 import { getPayoutReadiness, getTenantSummaries } from "@/lib/data/franchisees";
 import { getPayoutReports, getTenantPayoutReport, type PayoutReport } from "@/lib/data/franchisee-profit";
-import { getPayoutSettlements } from "@/lib/data/payouts";
+import { getPayoutSelfBills, getPayoutSettlements } from "@/lib/data/payouts";
+import { getCurrentContractAcceptances } from "@/lib/data/franchisee-contract-acceptances";
 import { formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { FRANCHISEE_CONTRACT_VERSION } from "@/lib/franchisee-onboarding-contract";
 import { payoutMonthRange } from "@/lib/payouts";
 import { payoutTaxBreakdown } from "@/lib/payout-report";
 import { MarkPayoutPaidForm } from "./MarkPayoutPaidForm";
+import { CreatePayoutSelfBillForm, PostPayoutSelfBillForm, RetryPayoutSelfBillForm } from "./PayoutSelfBillActions";
 
 export const dynamic = "force-dynamic";
 
@@ -55,11 +57,20 @@ export default async function PayoutsPage({ searchParams }: { searchParams: Prom
     readiness.set(tenantId, [...payoutReadiness.missing]);
   }
 
-  const settlements = await getPayoutSettlements(range.month, reports.map((report) => report.tenantId));
+  const tenantIds = reports.map((report) => report.tenantId);
+  const [settlements, acceptances] = await Promise.all([
+    getPayoutSettlements(range.month, tenantIds),
+    getCurrentContractAcceptances(tenantIds),
+  ]);
+  const selfBills = await getPayoutSelfBills(settlements.map((settlement) => settlement.id));
   const settlementByTenant = new Map(settlements.map((settlement) => [settlement.tenant_id, settlement]));
+  const selfBillBySettlement = new Map(selfBills.map((bill) => [bill.settlement_id, bill]));
+  const acceptanceByTenant = new Map(acceptances.map((acceptance) => [acceptance.tenant_id, acceptance]));
   const rows = reports.map((report) => {
     const payout = payoutTaxBreakdown(report.total);
     const settlement = settlementByTenant.get(report.tenantId);
+    const selfBill = settlement ? selfBillBySettlement.get(settlement.id) : undefined;
+    const acceptance = acceptanceByTenant.get(report.tenantId);
     const missing = readiness.get(report.tenantId) ?? [];
     const issues = missing.map((field) => MISSING_LABELS[field]);
     if (payout.total === 0) issues.push("No eligible completed sales in this month");
@@ -67,7 +78,7 @@ export default async function PayoutsPage({ searchParams }: { searchParams: Prom
     if (settlement?.paid_total_cents != null && settlement.paid_total_cents !== Math.round(payout.total * 100)) {
       issues.push("Current calculation differs from the paid amount");
     }
-    return { report, payout, settlement, missing, issues };
+    return { report, payout, settlement, selfBill, acceptance, missing, issues };
   });
   const total = rows.reduce((sum, row) => sum + row.payout.total, 0);
   const paidRows = rows.filter((row) => row.settlement?.status === "paid");
@@ -86,10 +97,10 @@ export default async function PayoutsPage({ searchParams }: { searchParams: Prom
         </form>
       </header>
 
-      <div role="alert" className="mb-5 rounded-2xl border border-warning/40 bg-warning/10 p-4 text-sm text-cocoa">
-        <p className="font-bold">New self-billing agreement acceptance required</p>
+      <div className="mb-5 rounded-2xl border border-line bg-white p-4 text-sm text-cocoa">
+        <p className="font-bold">Current agreement acceptance</p>
         <p className="mt-1 text-xs leading-5 text-taupe">
-          Every franchisee must accept the current agreement ({FRANCHISEE_CONTRACT_VERSION}), including authorization for self-billing, before the next payment is released. Tenant-linked acceptance tracking is not yet available, so admins must verify the signed evidence before marking a payout paid.
+          {acceptances.length} of {reports.length} franchisee accounts have accepted {FRANCHISEE_CONTRACT_VERSION}. Acceptance is shown for review only and is not yet enforced by the payment action.
         </p>
       </div>
 
@@ -101,12 +112,12 @@ export default async function PayoutsPage({ searchParams }: { searchParams: Prom
       </div>
 
       <section className="overflow-x-auto rounded-2xl border border-line bg-white">
-        <table className="w-full min-w-[980px] text-sm">
+        <table className="w-full min-w-[1180px] text-sm">
           <thead className="bg-sand/60 text-left text-[11px] uppercase tracking-wide text-taupe">
-            <tr><th className="px-5 py-3">Month</th><th className="px-5 py-3">Franchisee</th><th className="px-5 py-3 text-right">Payout</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Notices / issues</th><th className="px-5 py-3 text-right">Actions</th></tr>
+            <tr><th className="px-5 py-3">Month</th><th className="px-5 py-3">Franchisee</th><th className="px-5 py-3 text-right">Payout</th><th className="px-5 py-3">Payment</th><th className="px-5 py-3">Accounting</th><th className="px-5 py-3">Notices / issues</th><th className="px-5 py-3 text-right">Actions</th></tr>
           </thead>
           <tbody className="divide-y divide-line">
-            {rows.map(({ report, payout, settlement, missing, issues }) => {
+            {rows.map(({ report, payout, settlement, selfBill, acceptance, missing, issues }) => {
               const paid = settlement?.status === "paid";
               const exportUrl = paid && settlement
                 ? `/payouts/${settlement.id}/pdf`
@@ -117,12 +128,15 @@ export default async function PayoutsPage({ searchParams }: { searchParams: Prom
                   <td className="px-5 py-4"><span className="font-bold text-cocoa">{report.tenantName}</span><span className="block text-xs text-taupe">{report.rows.length} machine assignment{report.rows.length === 1 ? "" : "s"}</span></td>
                   <td className="px-5 py-4 text-right"><span className="font-bold text-cocoa">€{payout.total.toFixed(2)}</span><span className="block text-xs text-taupe">Base €{payout.base.toFixed(2)} · IVA €{payout.iva.toFixed(2)}</span>{paid && settlement.paid_total_cents != null && <span className="block text-xs text-sage">Paid €{(settlement.paid_total_cents / 100).toFixed(2)}</span>}</td>
                   <td className="px-5 py-4"><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${paid ? "bg-sage/15 text-sage" : "bg-warning/15 text-warning"}`}>{paid ? "Paid" : "Pending"}</span>{settlement?.paid_at && <span className="mt-2 block text-xs text-taupe">{formatDateTime(settlement.paid_at, tz)}</span>}{settlement?.payment_reference && <span className="mt-1 block text-xs text-taupe">Ref: {settlement.payment_reference}</span>}</td>
-                  <td className="px-5 py-4 text-xs"><p className="font-semibold text-warning">Agreement acceptance must be verified</p>{issues.map((issue) => <p key={issue} className={issue.includes("differs") ? "font-semibold text-danger" : "mt-1 text-taupe"}>{issue}</p>)}</td>
-                  <td className="px-5 py-4"><div className="flex justify-end gap-2">{payout.total > 0 && <Link href={exportUrl} className="rounded-lg border border-terracotta px-3 py-2 text-xs font-bold text-terracotta">PDF</Link>}{session.role === "admin" && range.month < range.currentMonth && !paid && missing.length === 0 && payout.total > 0 && <MarkPayoutPaidForm tenantId={report.tenantId} month={range.month} />}</div></td>
+                  <td className="px-5 py-4 text-xs text-cocoa">
+                     {selfBill ? <><span className="rounded-full bg-sand px-2.5 py-1 font-bold">{selfBill.status.replaceAll("_", " ")}</span>{selfBill.odoo_name && <span className="mt-2 block font-semibold">{selfBill.odoo_name}</span>}{selfBill.error && <span className="mt-2 block max-w-56 text-danger">{selfBill.error}</span>}{selfBill.status === "completed" && selfBill.pdf_storage_path && <Link href={`/payouts/self-bills/${selfBill.id}/pdf`} className="mt-2 block font-bold text-terracotta underline">Self-bill PDF</Link>}</> : <span className="text-taupe">Not created</span>}
+                  </td>
+                  <td className="px-5 py-4 text-xs">{acceptance ? <p className="font-semibold text-sage">Current contract accepted · <Link href={`/account/contract/${acceptance.id}/pdf`} className="underline">PDF</Link></p> : <p className="font-semibold text-warning">Current contract not accepted</p>}{issues.map((issue) => <p key={issue} className={issue.includes("differs") ? "font-semibold text-danger" : "mt-1 text-taupe"}>{issue}</p>)}</td>
+                   <td className="px-5 py-4"><div className="flex flex-wrap justify-end gap-2">{payout.total > 0 && <Link href={exportUrl} className="rounded-lg border border-terracotta px-3 py-2 text-xs font-bold text-terracotta">Statement PDF</Link>}{session.role === "admin" && range.month < range.currentMonth && !selfBill && acceptance && missing.length === 0 && payout.total > 0 && <CreatePayoutSelfBillForm tenantId={report.tenantId} month={range.month} />}{session.role === "admin" && selfBill?.status === "draft" && <PostPayoutSelfBillForm selfBillId={selfBill.id} />}{session.role === "admin" && selfBill?.status === "failed" && <RetryPayoutSelfBillForm selfBillId={selfBill.id} />}{session.role === "admin" && range.month < range.currentMonth && !paid && missing.length === 0 && payout.total > 0 && <MarkPayoutPaidForm tenantId={report.tenantId} month={range.month} />}</div></td>
                 </tr>
               );
             })}
-            {rows.length === 0 && <tr><td colSpan={6} className="px-5 py-12 text-center text-taupe">No franchisee payout accounts are available.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={7} className="px-5 py-12 text-center text-taupe">No franchisee payout accounts are available.</td></tr>}
           </tbody>
         </table>
       </section>

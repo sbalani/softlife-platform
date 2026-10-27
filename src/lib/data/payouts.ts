@@ -24,6 +24,8 @@ export type PayoutSelfBill = {
   gross_cents: number;
   tax_base_cents: number;
   iva_cents: number;
+  contract_acceptance_id: string | null;
+  contract_version: string;
   draft_request_id: string | null;
   post_request_id: string | null;
   pdf_request_id: string | null;
@@ -50,7 +52,7 @@ export async function getPayoutSelfBills(settlementIds: string[]): Promise<Payou
   if (!isSupabaseConfigured() || settlementIds.length === 0) return [];
   const { data, error } = await (await createServiceClient())
     .from("payout_self_bills")
-    .select("id,settlement_id,tenant_id,status,draft_only,gross_cents,tax_base_cents,iva_cents,draft_request_id,post_request_id,pdf_request_id,odoo_move_id,odoo_name,error,pdf_storage_path,pdf_sha256,pdf_size_bytes")
+    .select("id,settlement_id,tenant_id,status,draft_only,gross_cents,tax_base_cents,iva_cents,contract_acceptance_id,contract_version,draft_request_id,post_request_id,pdf_request_id,odoo_move_id,odoo_name,error,pdf_storage_path,pdf_sha256,pdf_size_bytes")
     .in("settlement_id", settlementIds);
   if (error) throw error;
   return (data as PayoutSelfBill[]) ?? [];

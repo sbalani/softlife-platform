@@ -36,7 +36,7 @@ export type PayoutSelfBillDraftPayload = {
     tax_base_cents: number;
     iva_cents: number;
     iva_rate_percent: 21;
-    contract_acceptance_id: string;
+    contract_acceptance_id: string | null;
     contract_version: typeof FRANCHISEE_CONTRACT_VERSION | typeof LEGACY_PAYOUT_CONTRACT_VERSION;
     source_snapshot_sha256: string;
     vendor: PayoutSelfBillVendor;
@@ -82,7 +82,7 @@ export function buildPayoutSelfBillDraftPayload(input: {
   periodMonth: string;
   invoiceDate: string;
   taxBaseCents: number;
-  contractAcceptanceId: string;
+  contractAcceptanceId: string | null;
   sourceSnapshotSha256: string;
   vendor: PayoutSelfBillVendor;
 }): { payload: PayoutSelfBillDraftPayload; payloadSha256: string } {
@@ -133,9 +133,10 @@ export function validatePayoutSelfBillPayload(kind: PayoutSelfBillKind, input: u
   if (!UUID.test(String(bill.platform_bill_id ?? ""))) throw new Error("Invalid platform bill ID");
   if (kind === "payout_vendor_bill_draft_creation") {
     const keys = ["platform_bill_id", "settlement_id", "tenant_id", "period_month", "invoice_date", "currency", "move_type", "reference", "description", "gross_cents", "tax_base_cents", "iva_cents", "iva_rate_percent", "contract_acceptance_id", "contract_version", "source_snapshot_sha256", "vendor"];
-    if (!exactKeys(bill, keys) || !UUID.test(String(bill.settlement_id ?? "")) || !UUID.test(String(bill.tenant_id ?? "")) || !UUID.test(String(bill.contract_acceptance_id ?? ""))) throw new Error("Invalid draft self-bill identity");
+    if (!exactKeys(bill, keys) || !UUID.test(String(bill.settlement_id ?? "")) || !UUID.test(String(bill.tenant_id ?? "")) || !(bill.contract_acceptance_id === null || UUID.test(String(bill.contract_acceptance_id)))) throw new Error("Invalid draft self-bill identity");
     if (!MONTH.test(String(bill.period_month ?? "")) || !DATE.test(String(bill.invoice_date ?? "")) || bill.currency !== "EUR" || bill.move_type !== "in_invoice") throw new Error("Invalid draft self-bill accounting fields");
     const contractVersion = String(bill.contract_version ?? "");
+    if (contractVersion === LEGACY_PAYOUT_CONTRACT_VERSION && bill.contract_acceptance_id === null) throw new Error("Legacy self-bill contract acceptance is required");
     const [year, month] = String(bill.period_month).split("-").map(Number);
     const expectedDate = contractVersion === LEGACY_PAYOUT_CONTRACT_VERSION
       ? new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10)

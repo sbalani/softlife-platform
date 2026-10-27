@@ -32,6 +32,16 @@ test("draft payload is deterministic and validates exact result totals", () => {
   }), /Invalid draft/);
 });
 
+test("draft payload records missing contract acceptance without blocking self-billing", () => {
+  const built = buildPayoutSelfBillDraftPayload({
+    ...ids, contractAcceptanceId: null, periodMonth: "2026-08", invoiceDate: "2026-09-01", taxBaseCents: 14_924,
+    sourceSnapshotSha256: "d".repeat(64),
+    vendor: { legal_name: "Gestor SL", tax_id: "B12345678", email: "billing@example.com", address_line_1: "Calle Uno 1", address_line_2: null, postal_code: "29001", city: "Malaga", province: "Malaga", country_code: "ES" },
+  });
+  assert.equal(built.payload.bill.contract_acceptance_id, null);
+  assert.doesNotThrow(() => validatePayoutSelfBillPayload("payout_vendor_bill_draft_creation", built.payload));
+});
+
 test("invoice dates use the first day after the payout month and legacy v3 payloads remain valid", () => {
   assert.equal(payoutSelfBillInvoiceDate("2026-09"), "2026-10-01");
   assert.equal(payoutSelfBillInvoiceDate("2026-12"), "2027-01-01");
@@ -44,6 +54,8 @@ test("invoice dates use the first day after the payout month and legacy v3 paylo
   legacy.bill.contract_version = "SL-GESTOR-2026-10-26-v3";
   legacy.bill.invoice_date = "2026-09-30";
   assert.doesNotThrow(() => validatePayoutSelfBillPayload("payout_vendor_bill_draft_creation", legacy));
+  legacy.bill.contract_acceptance_id = null;
+  assert.throws(() => validatePayoutSelfBillPayload("payout_vendor_bill_draft_creation", legacy), /Legacy self-bill contract acceptance/);
 });
 
 test("Spanish payout country values normalize to the queue contract", () => {

@@ -18,7 +18,7 @@ export type PayoutSelfBillVendor = {
   postal_code: string;
   city: string;
   province: string;
-  country_code: "ES";
+  country_code: string;
 };
 export type PayoutSelfBillDraftPayload = {
   schema_version: 1;
@@ -147,10 +147,13 @@ export function validatePayoutSelfBillPayload(kind: PayoutSelfBillKind, input: u
       : payoutSelfBillTaxBreakdown(Number(bill.tax_base_cents));
     if (bill.tax_base_cents !== amounts.taxBaseCents || bill.iva_cents !== amounts.ivaCents || bill.iva_rate_percent !== 21) throw new Error("Invalid self-bill IVA breakdown");
     if (bill.gross_cents !== amounts.grossCents || ![FRANCHISEE_CONTRACT_VERSION, LEGACY_PAYOUT_CONTRACT_VERSION].includes(contractVersion) || !SHA256.test(String(bill.source_snapshot_sha256 ?? ""))) throw new Error("Invalid self-bill evidence");
-    if (!bill.vendor || typeof bill.vendor !== "object") throw new Error("Self-bill vendor is required");
+    if (!bill.vendor || typeof bill.vendor !== "object") throw new Error("Self-bill vendor snapshot is required");
     const vendor = bill.vendor as Record<string, unknown>;
     const vendorKeys = ["legal_name", "tax_id", "email", "address_line_1", "address_line_2", "postal_code", "city", "province", "country_code"];
-    if (!exactKeys(vendor, vendorKeys) || !nonempty(vendor.legal_name) || !nonempty(vendor.tax_id) || !nonempty(vendor.email) || !nonempty(vendor.address_line_1) || !(vendor.address_line_2 === null || typeof vendor.address_line_2 === "string") || !nonempty(vendor.postal_code) || !nonempty(vendor.city) || !nonempty(vendor.province) || vendor.country_code !== "ES") throw new Error("Incomplete self-bill vendor identity");
+    const lengths = { legal_name: 200, tax_id: 50, email: 254, address_line_1: 300, postal_code: 20, city: 100, province: 100, country_code: 100 } as const;
+    if (!exactKeys(vendor, vendorKeys)
+      || Object.entries(lengths).some(([key, maximum]) => typeof vendor[key] !== "string" || String(vendor[key]).length > maximum)
+      || !(vendor.address_line_2 === null || typeof vendor.address_line_2 === "string" && vendor.address_line_2.length <= 300)) throw new Error("Invalid self-bill vendor snapshot");
     return;
   }
   const keys = kind === "payout_vendor_bill_posting" ? ["platform_bill_id", "odoo_move_id", "payload_sha256"] : ["platform_bill_id", "odoo_move_id", "payload_sha256", "odoo_name"];

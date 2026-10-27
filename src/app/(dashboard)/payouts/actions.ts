@@ -137,10 +137,6 @@ export async function createPayoutSelfBill(_previous: PayoutActionState, formDat
     if (!currentAcceptance && formData.get("acknowledge_missing_acceptance") !== "yes") {
       return { ok: false, message: "Confirm that the current contract is not accepted before creating this self-bill." };
     }
-    const requiredVendor = [tenant.company_name, tenant.tax_id, tenant.contact_email, tenant.address_line_1, tenant.postal_code, tenant.city, tenant.province, tenant.country];
-    if (requiredVendor.some((value) => !value?.trim())) return { ok: false, message: "Complete the franchisee legal, email, and postal details first." };
-    const countryCode = spanishPayoutCountryCode(tenant.country);
-    if (!countryCode) return { ok: false, message: "Self-billing currently requires a Spanish franchisee address." };
     const payout = payoutTaxBreakdown(report.rows.reduce((sum, row) => sum + row.payout, 0));
     const taxBaseCents = Math.round(payout.base * 100);
     const ivaCents = Math.round(payout.iva * 100);
@@ -183,9 +179,10 @@ export async function createPayoutSelfBill(_previous: PayoutActionState, formDat
       contractAcceptanceId: currentAcceptance?.id ?? null,
       sourceSnapshotSha256,
       vendor: {
-        legal_name: tenant.company_name!, tax_id: tenant.tax_id!, email: tenant.contact_email!,
-        address_line_1: tenant.address_line_1!, address_line_2: tenant.address_line_2?.trim() || null,
-        postal_code: tenant.postal_code!, city: tenant.city!, province: tenant.province!, country_code: countryCode,
+        legal_name: tenant.company_name?.trim() ?? "", tax_id: tenant.tax_id?.trim() ?? "", email: tenant.contact_email?.trim() ?? "",
+        address_line_1: tenant.address_line_1?.trim() ?? "", address_line_2: tenant.address_line_2?.trim() || null,
+        postal_code: tenant.postal_code?.trim() ?? "", city: tenant.city?.trim() ?? "", province: tenant.province?.trim() ?? "",
+        country_code: spanishPayoutCountryCode(tenant.country) ?? tenant.country?.trim() ?? "",
       },
     });
     if (built.payloadSha256 !== sha256(canonicalJson(built.payload))) throw new Error("Could not freeze canonical self-bill payload");

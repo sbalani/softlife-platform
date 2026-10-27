@@ -42,6 +42,16 @@ test("draft payload records missing contract acceptance without blocking self-bi
   assert.doesNotThrow(() => validatePayoutSelfBillPayload("payout_vendor_bill_draft_creation", built.payload));
 });
 
+test("draft payload preserves incomplete customer-supplied company details", () => {
+  const built = buildPayoutSelfBillDraftPayload({
+    ...ids, contractAcceptanceId: null, periodMonth: "2026-08", invoiceDate: "2026-09-01", taxBaseCents: 14_924,
+    sourceSnapshotSha256: "e".repeat(64),
+    vendor: { legal_name: "Benalvending", tax_id: "B26854638", email: "contacto.benalvending@gmail.com", address_line_1: "", address_line_2: null, postal_code: "", city: "", province: "", country_code: "" },
+  });
+  assert.equal(built.payload.bill.vendor.address_line_1, "");
+  assert.doesNotThrow(() => validatePayoutSelfBillPayload("payout_vendor_bill_draft_creation", built.payload));
+});
+
 test("invoice dates use the first day after the payout month and legacy v3 payloads remain valid", () => {
   assert.equal(payoutSelfBillInvoiceDate("2026-09"), "2026-10-01");
   assert.equal(payoutSelfBillInvoiceDate("2026-12"), "2027-01-01");

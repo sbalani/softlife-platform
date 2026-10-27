@@ -38,9 +38,8 @@ function form(overrides: Record<string, string> = {}) {
   return data;
 }
 
-test("tenant evidence pins exact v3 contract and canonical tenant/user identity", () => {
-  assert.equal(FRANCHISEE_CONTRACT_VERSION, "SL-GESTOR-2026-10-26-v3");
-  assert.equal(FRANCHISEE_CONTRACT_TEMPLATE_HASH, "1bcedd5dfba2b85600dae517477171800ebab54b6626677f6cf3a3beefc4e8b5");
+test("tenant evidence pins exact current contract and canonical tenant/user identity", () => {
+  assert.equal(FRANCHISEE_CONTRACT_VERSION, "SL-GESTOR-2026-10-27-v4");
   const payload = buildTenantAcceptancePayload(
     { ...party, typedSignature: party.representativeName },
     { tenantId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
@@ -49,9 +48,9 @@ test("tenant evidence pins exact v3 contract and canonical tenant/user identity"
     { ipAuditHash: "d".repeat(64), userAgent: "test-agent" },
   );
   assert.deepEqual(payload.identity, { tenantId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" });
-  assert.equal(payload.contract.version, "SL-GESTOR-2026-10-26-v3");
+  assert.equal(payload.contract.version, "SL-GESTOR-2026-10-27-v4");
   assert.equal(payload.contract.templateHash, FRANCHISEE_CONTRACT_TEMPLATE_HASH);
-  assert.equal(sha256Hex(canonicalJson(payload)), "692201d2c3287665001faabfbe8a16ab80fa6e2edf4b557feaa6dee2d01e0d20");
+  assert.equal(sha256Hex(canonicalJson(payload)), "8d1fca8135c60369507af85d129e5c5b69f5b117def35b29d35e995e70e95876");
 });
 
 test("tenant acceptance validates only signer fields, declarations, signature, and fallback installation address", () => {

@@ -12,6 +12,7 @@ export type PayoutSettlement = {
   payment_reference: string | null;
   agreement_version: string | null;
   contract_acceptance_id: string | null;
+  source_snapshot: unknown;
 };
 
 export type PayoutSelfBill = {
@@ -38,7 +39,7 @@ export async function getPayoutSettlements(periodMonth: string, tenantIds: strin
   if (!isSupabaseConfigured() || tenantIds.length === 0) return [];
   const { data, error } = await (await createServiceClient())
     .from("franchisee_payout_settlements")
-    .select("id,tenant_id,period_month,status,calculated_total_cents,paid_total_cents,paid_at,paid_by,payment_reference,agreement_version,contract_acceptance_id")
+    .select("id,tenant_id,period_month,status,calculated_total_cents,paid_total_cents,paid_at,paid_by,payment_reference,agreement_version,contract_acceptance_id,source_snapshot")
     .eq("period_month", `${periodMonth}-01`)
     .in("tenant_id", tenantIds);
   if (error) throw error;

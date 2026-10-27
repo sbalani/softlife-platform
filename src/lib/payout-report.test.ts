@@ -3,7 +3,7 @@ import test from "node:test";
 import { PDFDocument } from "pdf-lib";
 import { strFromU8, unzipSync } from "fflate";
 import type { Order } from "./data/orders.ts";
-import { authorizePayoutTenant, calculatePayoutIva, calculatePayoutRows, createPayoutPdf, payoutBankDetailLines, payoutTaxBreakdown, validPayoutRange, type PayoutAssignment } from "./payout-report.ts";
+import { authorizePayoutTenant, calculatePayoutIva, calculatePayoutRows, createPayoutPdf, legacyPayoutRowTaxBreakdowns, payoutBankDetailLines, payoutRowTaxBreakdowns, payoutTaxBreakdown, validPayoutRange, type PayoutAssignment } from "./payout-report.ts";
 import { createPayoutArchive } from "./payout-archive.ts";
 
 const assignment = (overrides: Partial<PayoutAssignment> = {}): PayoutAssignment => ({
@@ -28,8 +28,9 @@ test("payouts use Madrid order_time, stable machine IDs, effective VAT and clipp
   assert.equal(rows[0].gross, 11);
   assert.ok(Math.abs(rows[0].net - 10) < 0.000001);
   assert.ok(Math.abs(rows[0].payout - 2.5) < 0.000001);
-  assert.deepEqual(payoutTaxBreakdown(rows[0].payout), { base: 2.07, iva: 0.43, total: 2.5 });
-  assert.equal(calculatePayoutIva(rows[0].payout), 0.43);
+  assert.deepEqual(payoutTaxBreakdown(rows[0].payout), { base: 2.5, iva: 0.53, total: 3.03 });
+  assert.equal(calculatePayoutIva(rows[0].payout), 0.53);
+  assert.deepEqual(payoutTaxBreakdown(156.66), { base: 156.66, iva: 32.9, total: 189.56 });
 });
 
 test("payouts internally exclude incomplete, admin and refunded orders", () => {
@@ -40,6 +41,20 @@ test("payouts internally exclude incomplete, admin and refunded orders", () => {
     order({ machine_id: "machine-b" }),
   ];
   assert.deepEqual(calculatePayoutRows(orders, [assignment()], [], { from: "2026-07-01", to: "2026-07-31" }), []);
+});
+
+test("row IVA allocation reconciles exactly to the aggregate invoice IVA", () => {
+  const rows = payoutRowTaxBreakdowns([0.03, 0.03]);
+  assert.deepEqual(rows, [
+    { base: 0.03, iva: 0.01, total: 0.04 },
+    { base: 0.03, iva: 0, total: 0.03 },
+  ]);
+  assert.equal(rows.reduce((sum, row) => sum + row.iva, 0), payoutTaxBreakdown(0.06).iva);
+  assert.equal(rows.reduce((sum, row) => sum + row.total, 0), payoutTaxBreakdown(0.06).total);
+  const legacy = legacyPayoutRowTaxBreakdowns([0.03, 0.03]);
+  assert.equal(legacy.reduce((sum, row) => sum + row.base, 0), 0.05);
+  assert.equal(legacy.reduce((sum, row) => sum + row.iva, 0), 0.01);
+  assert.equal(legacy.reduce((sum, row) => sum + row.total, 0), 0.06);
 });
 
 test("payout authorization only permits an admin selection or the franchisee's own tenant", () => {
@@ -91,6 +106,6 @@ test("bulk payout archives contain separate PDFs and a manifest", async () => {
   ]);
   assert.equal(String.fromCharCode(...files[names[1]].slice(0, 5)), "%PDF-");
   const manifest = strFromU8(files["manifest.csv"]);
-  assert.match(manifest, /Madrid Foods,2.50,unavailable/);
-  assert.match(manifest, /Madrid Foods,3.50,unavailable/);
+  assert.match(manifest, /Madrid Foods,3.03,unavailable/);
+  assert.match(manifest, /Madrid Foods,4.24,unavailable/);
 });

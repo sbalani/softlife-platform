@@ -1,6 +1,6 @@
 import { strToU8, zipSync } from "fflate";
 import type { BankDetails } from "./bank-details.ts";
-import { createPayoutPdf, type PayoutRow } from "./payout-report.ts";
+import { createPayoutPdf, payoutTaxBreakdown, type PayoutRow } from "./payout-report.ts";
 
 export type PayoutArchiveReport = {
   tenantId: string;
@@ -43,7 +43,7 @@ export async function createPayoutArchive(input: {
       } : null,
     });
     manifest.push([
-      report.tenantId, report.tenantName, report.total.toFixed(2),
+      report.tenantId, report.tenantName, payoutTaxBreakdown(report.total).total.toFixed(2),
       input.bankDetailsRequested ? report.bankDetails ? "included" : "unavailable" : "not requested",
       filename,
     ]);

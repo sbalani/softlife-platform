@@ -16,7 +16,7 @@ import { getDailyWeather } from "@/lib/data/weather";
 import { weatherCodeLabel } from "@/lib/weather";
 import { getSalesContextNotes } from "@/lib/data/sales-context-notes";
 import { SalesNotesPanel } from "./SalesNotesPanel";
-import { payoutTaxBreakdown } from "@/lib/payout-report";
+import { payoutRowTaxBreakdowns, payoutTaxBreakdown } from "@/lib/payout-report";
 import { PayoutBulkExport } from "./PayoutBulkExport";
 
 export const dynamic = "force-dynamic";
@@ -144,11 +144,9 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   const payoutGroups = [...new Set(payoutRows.map((row) => row.tenantId))].map((tenantId) => {
     const rows = payoutRows.filter((row) => row.tenantId === tenantId);
     const payout = rows.reduce((sum, row) => sum + row.payout, 0);
-    const tax = rows.reduce((sum, row) => {
-      const value = payoutTaxBreakdown(row.payout);
-      return { base: sum.base + value.base, iva: sum.iva + value.iva, total: sum.total + value.total };
-    }, { base: 0, iva: 0, total: 0 });
-    return { tenantId, tenantName: rows[0]?.tenantName ?? "Franchisee", rows, payout, ...tax };
+    const tax = payoutTaxBreakdown(payout);
+    const rowTaxes = payoutRowTaxBreakdowns(rows.map((row) => row.payout));
+    return { tenantId, tenantName: rows[0]?.tenantName ?? "Franchisee", rows, rowTaxes, payout, ...tax };
   });
 
   const salesTotals = dailySalesTotals(sales, range.from, range.days, tz);
@@ -317,7 +315,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
             {payoutGroups.map((group) => (
               <div key={group.tenantId} className="rounded-xl border border-line p-4">
                 <div className="mb-3 flex flex-wrap justify-between gap-3"><span className="font-bold text-cocoa">{group.tenantName}</span><div className="flex flex-wrap items-center gap-3 text-xs"><span>Base €{group.base.toFixed(2)}</span><span>IVA €{group.iva.toFixed(2)}</span><span className="font-bold text-sage">Payable €{group.total.toFixed(2)}</span><PayoutExportForm tenantId={group.tenantId} from={range.from} to={range.to} compact /></div></div>
-                <div className="overflow-x-auto"><table className="w-full min-w-[880px] text-xs"><thead className="text-left uppercase text-taupe"><tr><th className="py-2">Machine</th><th>Period</th><th className="text-right">Share</th><th className="text-right">Orders</th><th className="text-right">Sales gross</th><th className="text-right">Sales IVA</th><th className="text-right">Sales net</th><th className="text-right">Payout base</th><th className="text-right">IVA 21%</th><th className="text-right">Total payable</th></tr></thead><tbody className="divide-y divide-line">{group.rows.map((row) => { const tax = payoutTaxBreakdown(row.payout); return <tr key={row.assignmentId}><td className="py-2 font-semibold text-cocoa">{row.machineName}</td><td>{row.period}</td><td className="text-right">{row.sharePercent}%</td><td className="text-right">{row.orders}</td><td className="text-right">€{row.gross.toFixed(2)}</td><td className="text-right">€{row.vat.toFixed(2)}</td><td className="text-right">€{row.net.toFixed(2)}</td><td className="text-right">€{tax.base.toFixed(2)}</td><td className="text-right">€{tax.iva.toFixed(2)}</td><td className="text-right font-bold text-sage">€{tax.total.toFixed(2)}</td></tr>; })}</tbody></table></div>
+                <div className="overflow-x-auto"><table className="w-full min-w-[880px] text-xs"><thead className="text-left uppercase text-taupe"><tr><th className="py-2">Machine</th><th>Period</th><th className="text-right">Share</th><th className="text-right">Orders</th><th className="text-right">Sales gross</th><th className="text-right">Sales IVA</th><th className="text-right">Sales net</th><th className="text-right">Payout base</th><th className="text-right">IVA 21%</th><th className="text-right">Total payable</th></tr></thead><tbody className="divide-y divide-line">{group.rows.map((row, index) => { const tax = group.rowTaxes[index]; return <tr key={row.assignmentId}><td className="py-2 font-semibold text-cocoa">{row.machineName}</td><td>{row.period}</td><td className="text-right">{row.sharePercent}%</td><td className="text-right">{row.orders}</td><td className="text-right">€{row.gross.toFixed(2)}</td><td className="text-right">€{row.vat.toFixed(2)}</td><td className="text-right">€{row.net.toFixed(2)}</td><td className="text-right">€{tax.base.toFixed(2)}</td><td className="text-right">€{tax.iva.toFixed(2)}</td><td className="text-right font-bold text-sage">€{tax.total.toFixed(2)}</td></tr>; })}</tbody></table></div>
               </div>
             ))}
           </div>

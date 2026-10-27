@@ -10,7 +10,7 @@ import { formatDateTime } from "@/lib/dates";
 import { getDisplayTimezone } from "@/lib/timezone";
 import { FRANCHISEE_CONTRACT_VERSION } from "@/lib/franchisee-onboarding-contract";
 import { payoutMonthRange } from "@/lib/payouts";
-import { payoutTaxBreakdown } from "@/lib/payout-report";
+import { legacyPayoutTaxBreakdown, payoutTaxBreakdown } from "@/lib/payout-report";
 import { MarkPayoutPaidForm } from "./MarkPayoutPaidForm";
 import { CreatePayoutSelfBillForm, PostPayoutSelfBillForm, RetryPayoutSelfBillForm } from "./PayoutSelfBillActions";
 
@@ -67,16 +67,30 @@ export default async function PayoutsPage({ searchParams }: { searchParams: Prom
   const selfBillBySettlement = new Map(selfBills.map((bill) => [bill.settlement_id, bill]));
   const acceptanceByTenant = new Map(acceptances.map((acceptance) => [acceptance.tenant_id, acceptance]));
   const rows = reports.map((report) => {
-    const payout = payoutTaxBreakdown(report.total);
     const settlement = settlementByTenant.get(report.tenantId);
+    const currentPayout = settlement?.agreement_version === "SL-GESTOR-2026-10-26-v3"
+      ? legacyPayoutTaxBreakdown(report.total)
+      : payoutTaxBreakdown(report.total);
+    const snapshot = settlement?.source_snapshot && typeof settlement.source_snapshot === "object"
+      ? settlement.source_snapshot as Record<string, unknown>
+      : null;
+    const frozenPayout = snapshot?.version === 2
+      && Number.isSafeInteger(snapshot.taxBaseCents)
+      && Number.isSafeInteger(snapshot.ivaCents)
+      && Number.isSafeInteger(snapshot.totalCents)
+      ? { base: Number(snapshot.taxBaseCents) / 100, iva: Number(snapshot.ivaCents) / 100, total: Number(snapshot.totalCents) / 100 }
+      : settlement?.agreement_version === "SL-GESTOR-2026-10-26-v3"
+        ? legacyPayoutTaxBreakdown(settlement.calculated_total_cents / 100)
+        : null;
+    const payout = frozenPayout ?? currentPayout;
     const selfBill = settlement ? selfBillBySettlement.get(settlement.id) : undefined;
     const acceptance = acceptanceByTenant.get(report.tenantId);
     const missing = readiness.get(report.tenantId) ?? [];
     const issues = missing.map((field) => MISSING_LABELS[field]);
     if (payout.total === 0) issues.push("No eligible completed sales in this month");
     if (range.month === range.currentMonth) issues.push("Current month is still in progress and cannot be marked paid");
-    if (settlement?.paid_total_cents != null && settlement.paid_total_cents !== Math.round(payout.total * 100)) {
-      issues.push("Current calculation differs from the paid amount");
+    if (settlement && settlement.calculated_total_cents !== Math.round(currentPayout.total * 100)) {
+      issues.push("Current calculation differs from the frozen amount");
     }
     return { report, payout, settlement, selfBill, acceptance, missing, issues };
   });
@@ -100,7 +114,7 @@ export default async function PayoutsPage({ searchParams }: { searchParams: Prom
       <div className="mb-5 rounded-2xl border border-line bg-white p-4 text-sm text-cocoa">
         <p className="font-bold">Current agreement acceptance</p>
         <p className="mt-1 text-xs leading-5 text-taupe">
-          {acceptances.length} of {reports.length} franchisee accounts have accepted {FRANCHISEE_CONTRACT_VERSION}. Acceptance is shown for review only and is not yet enforced by the payment action.
+          {acceptances.length} of {reports.length} franchisee accounts have accepted {FRANCHISEE_CONTRACT_VERSION}. The current contract is required before a payout can be billed or marked paid.
         </p>
       </div>
 
@@ -119,7 +133,7 @@ export default async function PayoutsPage({ searchParams }: { searchParams: Prom
           <tbody className="divide-y divide-line">
             {rows.map(({ report, payout, settlement, selfBill, acceptance, missing, issues }) => {
               const paid = settlement?.status === "paid";
-              const exportUrl = paid && settlement
+              const exportUrl = settlement
                 ? `/payouts/${settlement.id}/pdf`
                 : `/analytics/payout/export?${new URLSearchParams({ tenantId: report.tenantId, dateFrom: range.from, dateTo: range.to })}`;
               return (
@@ -132,7 +146,7 @@ export default async function PayoutsPage({ searchParams }: { searchParams: Prom
                      {selfBill ? <><span className="rounded-full bg-sand px-2.5 py-1 font-bold">{selfBill.status.replaceAll("_", " ")}</span>{selfBill.odoo_name && <span className="mt-2 block font-semibold">{selfBill.odoo_name}</span>}{selfBill.error && <span className="mt-2 block max-w-56 text-danger">{selfBill.error}</span>}{selfBill.status === "completed" && selfBill.pdf_storage_path && <Link href={`/payouts/self-bills/${selfBill.id}/pdf`} className="mt-2 block font-bold text-terracotta underline">Self-bill PDF</Link>}</> : <span className="text-taupe">Not created</span>}
                   </td>
                   <td className="px-5 py-4 text-xs">{acceptance ? <p className="font-semibold text-sage">Current contract accepted · <Link href={`/account/contract/${acceptance.id}/pdf`} className="underline">PDF</Link></p> : <p className="font-semibold text-warning">Current contract not accepted</p>}{issues.map((issue) => <p key={issue} className={issue.includes("differs") ? "font-semibold text-danger" : "mt-1 text-taupe"}>{issue}</p>)}</td>
-                   <td className="px-5 py-4"><div className="flex flex-wrap justify-end gap-2">{payout.total > 0 && <Link href={exportUrl} className="rounded-lg border border-terracotta px-3 py-2 text-xs font-bold text-terracotta">Statement PDF</Link>}{session.role === "admin" && range.month < range.currentMonth && !selfBill && acceptance && missing.length === 0 && payout.total > 0 && <CreatePayoutSelfBillForm tenantId={report.tenantId} month={range.month} />}{session.role === "admin" && selfBill?.status === "draft" && <PostPayoutSelfBillForm selfBillId={selfBill.id} />}{session.role === "admin" && selfBill?.status === "failed" && <RetryPayoutSelfBillForm selfBillId={selfBill.id} />}{session.role === "admin" && range.month < range.currentMonth && !paid && missing.length === 0 && payout.total > 0 && <MarkPayoutPaidForm tenantId={report.tenantId} month={range.month} />}</div></td>
+                   <td className="px-5 py-4"><div className="flex flex-wrap justify-end gap-2">{payout.total > 0 && <Link href={exportUrl} className="rounded-lg border border-terracotta px-3 py-2 text-xs font-bold text-terracotta">Statement PDF</Link>}{session.role === "admin" && range.month < range.currentMonth && !selfBill && acceptance && missing.length === 0 && payout.total > 0 && <CreatePayoutSelfBillForm tenantId={report.tenantId} month={range.month} />}{session.role === "admin" && selfBill?.status === "draft" && <PostPayoutSelfBillForm selfBillId={selfBill.id} />}{session.role === "admin" && selfBill?.status === "failed" && <RetryPayoutSelfBillForm selfBillId={selfBill.id} />}{session.role === "admin" && range.month < range.currentMonth && !paid && (acceptance || settlement?.agreement_version === "SL-GESTOR-2026-10-26-v3") && missing.length === 0 && payout.total > 0 && <MarkPayoutPaidForm tenantId={report.tenantId} month={range.month} />}</div></td>
                 </tr>
               );
             })}

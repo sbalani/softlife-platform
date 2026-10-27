@@ -76,9 +76,9 @@ test("versioned Spanish contract contains both SoftLife-assigned modes and requi
   assert.match(contract, /boquillas externas de salida[\s\S]*cada día de operación/);
   assert.match(contract, /Modelo de la MÁQUINA: pendiente de asignación[\s\S]*modalidad y el porcentaje asignados exclusivamente por SOFTLIFE/);
   assert.match(contract, /facturación por el destinatario/);
-  assert.match(contract, /importe total bruto de la retribución del GESTOR, incluyendo el IVA/);
-  assert.match(contract, /sin añadir IVA adicional ni incrementar la retribución/);
-  assert.doesNotMatch(contract, /no incluye el IVA de esta factura/);
+  assert.match(contract, /resultado constituye la base imponible de la retribución del GESTOR/);
+  assert.match(contract, /A esa base imponible se añadirá el 21 % de IVA/);
+  assert.match(contract, /importe total a pagar será la suma de la base imponible y dicho IVA/);
 
   const deferred = contractPlainText(renderFranchiseeContract({ ...party, accountHolderName: null, iban: null, bicSwift: null, bankDetailsDeferred: true }));
   assert.match(deferred, /datos bancarios quedan pendientes de aportación/);
@@ -95,13 +95,13 @@ test("template hash and canonical payload are stable", () => {
   assert.equal(payload.manager.sharePercent, null);
   assert.equal(payload.manager.bankDetailsDeferred, false);
   assert.equal(canonicalJson(payload), canonicalJson(reordered));
-  assert.equal(sha256Hex(canonicalJson(payload)), "03b0624f2f977d971cc71d1e8b6e4b4035321b8d962adec3923b96d8c6b9208f");
+  assert.equal(sha256Hex(canonicalJson(payload)), "75d05e45d4a682b0dacb977a966321f4a31a6b7b021a99616bbd82016ce60e33");
 
   const deferred = buildCanonicalPayload({ ...party, accountHolderName: null, iban: null, bicSwift: null, bankDetailsDeferred: true, typedSignature: party.representativeName }, "79b69771-6d3c-43fd-b068-d11e2b2fa9dc", "2026-09-29T12:34:56.000Z", { ipAuditHash: "a".repeat(64), userAgent: "test-agent" });
   assert.equal(deferred.manager.accountHolderName, null);
   assert.equal(deferred.manager.iban, null);
   assert.equal(deferred.manager.bicSwift, null);
-  assert.equal(sha256Hex(canonicalJson(deferred)), "edc509fee0f4a65b857e5fc054ef166cd8c19bd599d329b39cd21c0d47b90b2d");
+  assert.equal(sha256Hex(canonicalJson(deferred)), "bb6fa8868a4531635b296134459622a721250090e69fbc059cfd0b8b975da058");
 });
 
 test("validation ignores browser modality and accepts complete or explicitly deferred bank details", () => {

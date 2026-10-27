@@ -10,7 +10,8 @@ import { isPayoutMonth, payoutMonthRange } from "@/lib/payouts";
 import { FRANCHISEE_CONTRACT_VERSION } from "@/lib/franchisee-onboarding-contract";
 import { getCurrentTenantContractAcceptance } from "@/lib/data/franchisee-contract-acceptances";
 import { canonicalJson, sha256 } from "@/lib/odoo-sync-contract";
-import { buildPayoutSelfBillDraftPayload, spanishPayoutCountryCode } from "@/lib/payout-self-billing";
+import { buildPayoutSelfBillDraftPayload, LEGACY_PAYOUT_CONTRACT_VERSION, payoutSelfBillInvoiceDate, spanishPayoutCountryCode } from "@/lib/payout-self-billing";
+import { payoutTaxBreakdown } from "@/lib/payout-report";
 
 export type MarkPayoutState = { ok: boolean; message: string } | null;
 export type PayoutActionState = { ok: boolean; message: string } | null;
@@ -31,51 +32,80 @@ export async function markPayoutPaid(_previous: MarkPayoutState, formData: FormD
   try {
     const range = payoutMonthRange(month);
     if (range.month !== month || month >= range.currentMonth) return { ok: false, message: "Only completed payout months can be marked paid." };
-    const [report, readiness, tenant, bank, acceptance] = await Promise.all([
+    const service = await createServiceClient();
+    const periodMonth = `${month}-01`;
+    const [report, readiness, tenant, bank, acceptance, frozenResult] = await Promise.all([
       getTenantPayoutReport(tenantId, range.from, range.to),
       getPayoutReadiness(tenantId),
       getTenantById(tenantId),
       getTenantBankDetails(tenantId),
       getCurrentTenantContractAcceptance(tenantId),
+      service.from("franchisee_payout_settlements")
+        .select("status,calculated_total_cents,agreement_version,contract_acceptance_id,source_snapshot,payment_details_snapshot")
+        .eq("tenant_id", tenantId).eq("period_month", periodMonth).maybeSingle(),
     ]);
-    if (!report) return { ok: false, message: "Franchisee account not found." };
-    if (!readiness.ready) return { ok: false, message: "Complete the franchisee payout details before marking this payment paid." };
-    if (!tenant?.company_name || !tenant.tax_id || !bank) return { ok: false, message: "Complete the franchisee payment recipient details first." };
+    if (frozenResult.error) throw frozenResult.error;
+    const frozen = frozenResult.data;
+    const alreadyPaid = frozen?.status === "paid";
+    if (!alreadyPaid && !report) return { ok: false, message: "Franchisee account not found." };
+    if (!alreadyPaid && !readiness.ready) return { ok: false, message: "Complete the franchisee payout details before marking this payment paid." };
+    if (!alreadyPaid && (!tenant?.company_name || !tenant.tax_id || !bank)) return { ok: false, message: "Complete the franchisee payment recipient details first." };
 
-    const totalCents = Math.round(report.rows.reduce((sum, row) => sum + row.payout, 0) * 100);
-    if (totalCents <= 0) return { ok: false, message: "A zero payout cannot be marked paid." };
-
-    const service = await createServiceClient();
-    const periodMonth = `${month}-01`;
-    const sourceSnapshot = {
-        version: 1,
-        tenantId,
-        tenantName: report.tenantName,
-        from: range.from,
-        to: range.to,
-        totalCents,
-        rows: report.rows,
-        paymentDetails: {
-          recipientLegalName: tenant.company_name,
-          recipientTaxId: tenant.tax_id,
-          recipientAddress: tenantPostalAddress(tenant),
+    const payout = payoutTaxBreakdown(report?.rows.reduce((sum, row) => sum + row.payout, 0) ?? 0);
+    const taxBaseCents = Math.round(payout.base * 100);
+    const ivaCents = Math.round(payout.iva * 100);
+    const calculatedTotalCents = Math.round(payout.total * 100);
+    const legacy = frozen?.agreement_version === LEGACY_PAYOUT_CONTRACT_VERSION;
+    if (!legacy && !alreadyPaid && (!acceptance || acceptance.contract_version !== FRANCHISEE_CONTRACT_VERSION)) return { ok: false, message: "The current contract must be accepted first." };
+    if (legacy && (!UUID.test(String(frozen.contract_acceptance_id ?? "")) || !frozen.source_snapshot || typeof frozen.source_snapshot !== "object")) {
+      return { ok: false, message: "The frozen legacy payout evidence is incomplete." };
+    }
+    if (!legacy && frozen && !alreadyPaid && (frozen.calculated_total_cents !== calculatedTotalCents || frozen.agreement_version !== FRANCHISEE_CONTRACT_VERSION || frozen.contract_acceptance_id !== acceptance!.id)) {
+      return { ok: false, message: "The frozen payout differs from the current contract or calculation." };
+    }
+    const frozenPaymentDetails = frozen?.payment_details_snapshot && typeof frozen.payment_details_snapshot === "object"
+      ? frozen.payment_details_snapshot as Record<string, unknown>
+      : null;
+    if (alreadyPaid && !frozenPaymentDetails) return { ok: false, message: "The frozen payment evidence is incomplete." };
+    const paymentDetails = alreadyPaid
+      ? { ...frozenPaymentDetails, paymentReference }
+      : {
+          recipientLegalName: tenant!.company_name!,
+          recipientTaxId: tenant!.tax_id!,
+          recipientAddress: tenantPostalAddress(tenant!),
           bankDetails: {
-            accountHolderName: bank.account_holder_name,
-            iban: bank.iban,
-            bicSwift: bank.bic_swift,
-            bankName: bank.bank_name,
+            accountHolderName: bank!.account_holder_name,
+            iban: bank!.iban,
+            bicSwift: bank!.bic_swift,
+            bankName: bank!.bank_name,
           },
           paymentReference,
-        },
+        };
+    const currentSnapshot = {
+        version: 2,
+        tenantId,
+        tenantName: report?.tenantName ?? "",
+        from: range.from,
+        to: range.to,
+        taxBaseCents,
+        ivaCents,
+        totalCents: calculatedTotalCents,
+        rows: report?.rows ?? [],
       };
+    const frozenSnapshot = frozen?.source_snapshot as Record<string, unknown> | undefined;
+    const sourceSnapshot = { ...(frozenSnapshot ?? currentSnapshot), paymentDetails };
+    const totalCents = frozen ? Number(frozen.calculated_total_cents) : calculatedTotalCents;
+    const agreementVersion = frozen?.agreement_version ?? FRANCHISEE_CONTRACT_VERSION;
+    const contractAcceptanceId = frozen?.contract_acceptance_id ?? acceptance!.id;
+    if (!Number.isSafeInteger(totalCents) || totalCents <= 0) return { ok: false, message: "A zero or invalid payout cannot be marked paid." };
     const { data, error } = await service.rpc("mark_payout_settlement_paid", {
       p_tenant_id: tenantId,
       p_period_month: periodMonth,
       p_paid_by: session.id,
       p_payment_reference: paymentReference,
       p_total_cents: totalCents,
-      p_agreement_version: FRANCHISEE_CONTRACT_VERSION,
-      p_contract_acceptance_id: acceptance?.id ?? null,
+      p_agreement_version: agreementVersion,
+      p_contract_acceptance_id: contractAcceptanceId,
       p_source_snapshot: sourceSnapshot,
     });
     if (error) throw error;
@@ -102,12 +132,15 @@ export async function createPayoutSelfBill(_previous: PayoutActionState, formDat
       getTenantById(tenantId),
       getCurrentTenantContractAcceptance(tenantId),
     ]);
-    if (!report || !tenant || !acceptance || acceptance.contract_version !== FRANCHISEE_CONTRACT_VERSION) return { ok: false, message: "The current v3 contract must be accepted first." };
+    if (!report || !tenant || !acceptance || acceptance.contract_version !== FRANCHISEE_CONTRACT_VERSION) return { ok: false, message: "The current contract must be accepted first." };
     const requiredVendor = [tenant.company_name, tenant.tax_id, tenant.contact_email, tenant.address_line_1, tenant.postal_code, tenant.city, tenant.province, tenant.country];
     if (requiredVendor.some((value) => !value?.trim())) return { ok: false, message: "Complete the franchisee legal, email, and postal details first." };
     const countryCode = spanishPayoutCountryCode(tenant.country);
     if (!countryCode) return { ok: false, message: "Self-billing currently requires a Spanish franchisee address." };
-    const grossCents = Math.round(report.rows.reduce((sum, row) => sum + row.payout, 0) * 100);
+    const payout = payoutTaxBreakdown(report.rows.reduce((sum, row) => sum + row.payout, 0));
+    const taxBaseCents = Math.round(payout.base * 100);
+    const ivaCents = Math.round(payout.iva * 100);
+    const grossCents = Math.round(payout.total * 100);
     if (grossCents <= 0) return { ok: false, message: "A zero payout cannot be billed." };
     const service = await createServiceClient();
     const periodMonth = `${month}-01`;
@@ -115,7 +148,7 @@ export async function createPayoutSelfBill(_previous: PayoutActionState, formDat
       .select("id,source_snapshot,calculated_total_cents,payout_self_bills(id,payload,payload_sha256,status)")
       .eq("tenant_id", tenantId).eq("period_month", periodMonth).maybeSingle();
     if (existingError) throw existingError;
-    const recalculatedSnapshot = { version: 1, tenantId, tenantName: report.tenantName, from: range.from, to: range.to, totalCents: grossCents, rows: report.rows };
+    const recalculatedSnapshot = { version: 2, tenantId, tenantName: report.tenantName, from: range.from, to: range.to, taxBaseCents, ivaCents, totalCents: grossCents, rows: report.rows };
     const sourceSnapshot = existing?.source_snapshot ?? recalculatedSnapshot;
     const sourceSnapshotSha256 = sha256(sourceSnapshot);
     const existingBill = Array.isArray(existing?.payout_self_bills) ? existing.payout_self_bills[0] : existing?.payout_self_bills;
@@ -131,8 +164,8 @@ export async function createPayoutSelfBill(_previous: PayoutActionState, formDat
       settlementId,
       tenantId,
       periodMonth: month,
-      invoiceDate: range.to,
-      grossCents,
+      invoiceDate: payoutSelfBillInvoiceDate(month),
+      taxBaseCents,
       contractAcceptanceId: acceptance.id,
       sourceSnapshotSha256,
       vendor: {

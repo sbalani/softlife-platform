@@ -3,13 +3,13 @@ import { formatContractReminderEmail } from "./email.ts";
 
 const email = formatContractReminderEmail({
   recipientName: `Ana <script>alert("x")</script> & O'Neil`,
-  contractVersion: "SL-GESTOR-2026-10-26-v3",
+  contractVersion: "SL-GESTOR-2026-10-27-v4",
   deadline: "14 de noviembre de 2026",
   accountUrl: "https://platform.softlife.es/account",
 });
 
 Deno.test("formats the current contract reminder in Spanish", () => {
-  assertStringIncludes(email.subject, "SL-GESTOR-2026-10-26-v3");
+  assertStringIncludes(email.subject, "SL-GESTOR-2026-10-27-v4");
   assertStringIncludes(email.html, "versión vigente");
   assertStringIncludes(email.text, "14 de noviembre de 2026");
   assertStringIncludes(email.text, "no bloqueará automáticamente tu acceso");

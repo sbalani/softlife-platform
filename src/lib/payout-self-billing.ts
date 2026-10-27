@@ -7,6 +7,7 @@ const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export const PAYOUT_SELF_BILL_MAX_RESULT_BYTES = 20_000;
+export const LEGACY_PAYOUT_CONTRACT_VERSION = "SL-GESTOR-2026-10-26-v3";
 export type PayoutSelfBillKind = "payout_vendor_bill_draft_creation" | "payout_vendor_bill_posting" | "payout_vendor_bill_pdf_export";
 export type PayoutSelfBillVendor = {
   legal_name: string;
@@ -36,7 +37,7 @@ export type PayoutSelfBillDraftPayload = {
     iva_cents: number;
     iva_rate_percent: 21;
     contract_acceptance_id: string;
-    contract_version: typeof FRANCHISEE_CONTRACT_VERSION;
+    contract_version: typeof FRANCHISEE_CONTRACT_VERSION | typeof LEGACY_PAYOUT_CONTRACT_VERSION;
     source_snapshot_sha256: string;
     vendor: PayoutSelfBillVendor;
   };
@@ -51,10 +52,22 @@ function exactKeys(value: Record<string, unknown>, keys: string[]): boolean {
   return actual.length === keys.length && actual.every((key, index) => key === [...keys].sort()[index]);
 }
 
-export function payoutSelfBillTaxBreakdown(grossCents: number) {
+export function payoutSelfBillTaxBreakdown(taxBaseCents: number) {
+  if (!Number.isSafeInteger(taxBaseCents) || taxBaseCents <= 0) throw new Error("Tax base cents must be a positive integer");
+  const ivaCents = Math.round(taxBaseCents * 21 / 100);
+  return { grossCents: taxBaseCents + ivaCents, taxBaseCents, ivaCents };
+}
+
+function legacyPayoutSelfBillTaxBreakdown(grossCents: number) {
   if (!Number.isSafeInteger(grossCents) || grossCents <= 0) throw new Error("Gross cents must be a positive integer");
   const taxBaseCents = Math.round(grossCents * 100 / 121);
   return { grossCents, taxBaseCents, ivaCents: grossCents - taxBaseCents };
+}
+
+export function payoutSelfBillInvoiceDate(periodMonth: string): string {
+  if (!MONTH.test(periodMonth)) throw new Error("Invalid payout period month");
+  const [year, month] = periodMonth.split("-").map(Number);
+  return new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
 }
 
 export function spanishPayoutCountryCode(value: string | null | undefined): "ES" | null {
@@ -68,12 +81,12 @@ export function buildPayoutSelfBillDraftPayload(input: {
   tenantId: string;
   periodMonth: string;
   invoiceDate: string;
-  grossCents: number;
+  taxBaseCents: number;
   contractAcceptanceId: string;
   sourceSnapshotSha256: string;
   vendor: PayoutSelfBillVendor;
 }): { payload: PayoutSelfBillDraftPayload; payloadSha256: string } {
-  const amounts = payoutSelfBillTaxBreakdown(input.grossCents);
+  const amounts = payoutSelfBillTaxBreakdown(input.taxBaseCents);
   const payload: PayoutSelfBillDraftPayload = {
     schema_version: 1,
     bill: {
@@ -122,12 +135,17 @@ export function validatePayoutSelfBillPayload(kind: PayoutSelfBillKind, input: u
     const keys = ["platform_bill_id", "settlement_id", "tenant_id", "period_month", "invoice_date", "currency", "move_type", "reference", "description", "gross_cents", "tax_base_cents", "iva_cents", "iva_rate_percent", "contract_acceptance_id", "contract_version", "source_snapshot_sha256", "vendor"];
     if (!exactKeys(bill, keys) || !UUID.test(String(bill.settlement_id ?? "")) || !UUID.test(String(bill.tenant_id ?? "")) || !UUID.test(String(bill.contract_acceptance_id ?? ""))) throw new Error("Invalid draft self-bill identity");
     if (!MONTH.test(String(bill.period_month ?? "")) || !DATE.test(String(bill.invoice_date ?? "")) || bill.currency !== "EUR" || bill.move_type !== "in_invoice") throw new Error("Invalid draft self-bill accounting fields");
+    const contractVersion = String(bill.contract_version ?? "");
     const [year, month] = String(bill.period_month).split("-").map(Number);
-    const monthEnd = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
-    if (bill.invoice_date !== monthEnd || bill.reference !== `AUTOFAC-${bill.period_month}-${bill.tenant_id}` || !nonempty(bill.reference, 200) || !nonempty(bill.description) || !bill.description.includes("facturación por el destinatario")) throw new Error("Invalid self-bill reference or description");
-    const amounts = payoutSelfBillTaxBreakdown(Number(bill.gross_cents));
+    const expectedDate = contractVersion === LEGACY_PAYOUT_CONTRACT_VERSION
+      ? new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10)
+      : payoutSelfBillInvoiceDate(String(bill.period_month));
+    if (bill.invoice_date !== expectedDate || bill.reference !== `AUTOFAC-${bill.period_month}-${bill.tenant_id}` || !nonempty(bill.reference, 200) || !nonempty(bill.description) || !bill.description.includes("facturación por el destinatario")) throw new Error("Invalid self-bill reference or description");
+    const amounts = contractVersion === LEGACY_PAYOUT_CONTRACT_VERSION
+      ? legacyPayoutSelfBillTaxBreakdown(Number(bill.gross_cents))
+      : payoutSelfBillTaxBreakdown(Number(bill.tax_base_cents));
     if (bill.tax_base_cents !== amounts.taxBaseCents || bill.iva_cents !== amounts.ivaCents || bill.iva_rate_percent !== 21) throw new Error("Invalid self-bill IVA breakdown");
-    if (bill.contract_version !== FRANCHISEE_CONTRACT_VERSION || !SHA256.test(String(bill.source_snapshot_sha256 ?? ""))) throw new Error("Invalid self-bill evidence");
+    if (bill.gross_cents !== amounts.grossCents || ![FRANCHISEE_CONTRACT_VERSION, LEGACY_PAYOUT_CONTRACT_VERSION].includes(contractVersion) || !SHA256.test(String(bill.source_snapshot_sha256 ?? ""))) throw new Error("Invalid self-bill evidence");
     if (!bill.vendor || typeof bill.vendor !== "object") throw new Error("Self-bill vendor is required");
     const vendor = bill.vendor as Record<string, unknown>;
     const vendorKeys = ["legal_name", "tax_id", "email", "address_line_1", "address_line_2", "postal_code", "city", "province", "country_code"];

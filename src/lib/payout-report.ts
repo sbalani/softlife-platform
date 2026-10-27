@@ -49,14 +49,52 @@ export function roundCurrency(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-export function payoutTaxBreakdown(payoutIncludingIva: number): { base: number; iva: number; total: number } {
+export function payoutTaxBreakdown(revenueShareBase: number): { base: number; iva: number; total: number } {
+  const base = roundCurrency(revenueShareBase);
+  const iva = roundCurrency(base * PAYOUT_IVA_RATE_PERCENT / 100);
+  return { base, iva, total: roundCurrency(base + iva) };
+}
+
+export function calculatePayoutIva(revenueShareBase: number): number {
+  return payoutTaxBreakdown(revenueShareBase).iva;
+}
+
+export function legacyPayoutTaxBreakdown(payoutIncludingIva: number): { base: number; iva: number; total: number } {
   const total = roundCurrency(payoutIncludingIva);
   const base = roundCurrency(total / (1 + PAYOUT_IVA_RATE_PERCENT / 100));
   return { base, iva: roundCurrency(total - base), total };
 }
 
-export function calculatePayoutIva(payoutIncludingIva: number): number {
-  return payoutTaxBreakdown(payoutIncludingIva).iva;
+export function payoutRowTaxBreakdowns(revenueShareBases: number[]): Array<{ base: number; iva: number; total: number }> {
+  const baseCents = revenueShareBases.map((base) => Math.round(roundCurrency(base) * 100));
+  const targetIvaCents = Math.round(baseCents.reduce((sum, base) => sum + base, 0) * PAYOUT_IVA_RATE_PERCENT / 100);
+  const ivaCents = baseCents.map((base) => Math.floor(base * PAYOUT_IVA_RATE_PERCENT / 100));
+  const order = baseCents.map((base, index) => ({ index, remainder: base * PAYOUT_IVA_RATE_PERCENT % 100 }))
+    .sort((a, b) => b.remainder - a.remainder || a.index - b.index);
+  for (let remaining = targetIvaCents - ivaCents.reduce((sum, iva) => sum + iva, 0), index = 0; remaining > 0; remaining--, index++) {
+    ivaCents[order[index % order.length].index] += 1;
+  }
+  return baseCents.map((base, index) => ({
+    base: base / 100,
+    iva: ivaCents[index] / 100,
+    total: (base + ivaCents[index]) / 100,
+  }));
+}
+
+export function legacyPayoutRowTaxBreakdowns(payoutsIncludingIva: number[]): Array<{ base: number; iva: number; total: number }> {
+  const grossCents = payoutsIncludingIva.map((total) => Math.round(roundCurrency(total) * 100));
+  const targetBaseCents = Math.round(grossCents.reduce((sum, gross) => sum + gross, 0) * 100 / 121);
+  const baseCents = grossCents.map((gross) => Math.floor(gross * 100 / 121));
+  const order = grossCents.map((gross, index) => ({ index, remainder: gross * 100 % 121 }))
+    .sort((a, b) => b.remainder - a.remainder || a.index - b.index);
+  for (let remaining = targetBaseCents - baseCents.reduce((sum, base) => sum + base, 0), index = 0; remaining > 0; remaining--, index++) {
+    baseCents[order[index % order.length].index] += 1;
+  }
+  return grossCents.map((gross, index) => ({
+    base: baseCents[index] / 100,
+    iva: (gross - baseCents[index]) / 100,
+    total: gross / 100,
+  }));
 }
 
 function madridDay(timestamp: string): string | null {
@@ -181,6 +219,7 @@ export async function createPayoutPdf(input: {
   to: string;
   rows: PayoutRow[];
   paymentDetails?: PayoutPaymentDetails | null;
+  calculationVersion?: 1 | 2;
 }): Promise<Uint8Array> {
   const document = await PDFDocument.create();
   document.setTitle(`Payout statement - ${input.franchiseeName}`);
@@ -203,7 +242,10 @@ export async function createPayoutPdf(input: {
       y -= 20;
       page.drawText(`Period: ${input.from} to ${input.to} (Europe/Madrid)`, { x: 36, y, size: 10, font: regular });
       y -= 15;
-      page.drawText(`The partner share is the final gross amount including ${PAYOUT_IVA_RATE_PERCENT}% IVA; no IVA is added to the total payable.`, { x: 36, y, size: 8, font: regular });
+      const explanation = input.calculationVersion === 1
+        ? `The partner share is the final gross amount including ${PAYOUT_IVA_RATE_PERCENT}% IVA; no IVA is added to the total payable.`
+        : `The partner share is the taxable base; ${PAYOUT_IVA_RATE_PERCENT}% IVA is added to determine the total payable.`;
+      page.drawText(explanation, { x: 36, y, size: 8, font: regular });
       y -= 24;
       page.drawText("Payer / Ordenante", { x: 36, y, size: 10, font: bold, color: rgb(0.19, 0.12, 0.09) });
       y -= 14;
@@ -249,13 +291,16 @@ export async function createPayoutPdf(input: {
   };
 
   addPage(true);
+  const rowPayouts = input.calculationVersion === 1
+    ? legacyPayoutRowTaxBreakdowns(input.rows.map((row) => row.payout))
+    : payoutRowTaxBreakdowns(input.rows.map((row) => row.payout));
   if (input.rows.length === 0) {
     page!.drawText("No eligible completed sales were recorded for this period.", { x: 36, y: y! - 8, size: 11, font: regular });
     y! -= 35;
   } else {
-    for (const row of input.rows) {
+    for (const [index, row] of input.rows.entries()) {
       if (y! < 68) addPage();
-      const payout = payoutTaxBreakdown(row.payout);
+      const payout = rowPayouts[index];
       const values = [
         row.deviceImei ? `${row.machineName} (${row.deviceImei})` : row.machineName,
         row.period,
@@ -284,7 +329,7 @@ export async function createPayoutPdf(input: {
       payoutTotal: sum.payoutTotal + row.payout,
     };
   }, { orders: 0, gross: 0, vat: 0, net: 0, payoutTotal: 0 });
-  const totalPayout = payoutTaxBreakdown(totals.payoutTotal);
+  const totalPayout = input.calculationVersion === 1 ? legacyPayoutTaxBreakdown(totals.payoutTotal) : payoutTaxBreakdown(totals.payoutTotal);
   page!.drawText("TOTAL", { x: columns[1], y: y!, size: 9, font: bold });
   [String(totals.orders), totals.gross.toFixed(2), totals.vat.toFixed(2), totals.net.toFixed(2), totalPayout.base.toFixed(2), totalPayout.iva.toFixed(2), totalPayout.total.toFixed(2)]
     .forEach((value, index) => page!.drawText(value, { x: columns[index + 3], y: y!, size: 9, font: bold }));
